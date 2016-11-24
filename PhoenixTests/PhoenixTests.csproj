@@ -35,13 +35,16 @@
     <Reference Include="NSubstitute">
       <HintPath>..\..\..\..\Downloads\NSubstitute.2.0.0.0\lib\netstandard1.5\NSubstitute.dll</HintPath>
     </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>..\..\..\..\Downloads\Json90r1\Bin\Net20\Newtonsoft.Json.dll</HintPath>
+    </Reference>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Test.cs" />
     <Compile Include="MessageSerializationTests.cs" />
     <Compile Include="TimerTests.cs" />
-    <Compile Include="ReplyTests.cs" />
     <Compile Include="IntegrationTests.cs" />
+    <Compile Include="ReplySerializationTests.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
   <ItemGroup>

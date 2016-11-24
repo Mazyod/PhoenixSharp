@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using Phoenix;
+using Newtonsoft.Json.Linq;
 
 
 namespace PhoenixTests {
@@ -13,7 +14,8 @@ namespace PhoenixTests {
 			get {
 				var payload = new Dictionary<string, object>() {
 					{ "some key", 12 },
-					{ "another key", "value" },
+					{ "another key", new Dictionary<string, object>() { 
+							{ "nested", "value" }}},
 				};
 
 				return new Message() {
@@ -32,7 +34,7 @@ namespace PhoenixTests {
 			var serialized = sampleMessage.Serialize();
 			var expected = "{"
 				+ "\"topic\":\"phoenix-test\","
-				+ "\"payload\":{\"some key\":12,\"another key\":\"value\"},"
+				+ "\"payload\":{\"some key\":12,\"another key\":{\"nested\":\"value\"}},"
 				+ "\"event\":\"somevalue\","
 				+ "\"ref\":\"123\""
 				+ "}";
@@ -47,6 +49,7 @@ namespace PhoenixTests {
 			var deserialized = MessageSerialization.Deserialize(serialized);
 
 			Assert.AreEqual(deserialized, sampleMessage);
+			Assert.IsNotInstanceOf(typeof(JObject), deserialized.payload["another key"]);
 			CollectionAssert.AreEquivalent(deserialized.payload, sampleMessage.payload);
 		}
 

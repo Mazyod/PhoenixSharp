@@ -60,8 +60,9 @@ namespace PhoenixTests {
 				.Receive(Reply.Status.Ok, r => testReply = r);
 
 			System.Threading.Thread.Sleep(200);
-			Assert.IsNotNull(testReply);
-			CollectionAssert.AreEquivalent(testReply.Value.payload, testMessage.payload);
+			Assert.IsTrue(testReply.HasValue);
+			Assert.IsNotNull(testReply.Value.response);
+			CollectionAssert.AreEquivalent(testReply.Value.response, testMessage.payload);
 		}
 	}
 }

@@ -3,7 +3,8 @@ using System.Collections.Generic;
 
 
 namespace Phoenix {
-	public struct Reply {
+
+	public struct Reply: IEquatable<Reply> {
 
 		#region nested types
 
@@ -15,18 +16,30 @@ namespace Phoenix {
 
 		#endregion
 
-		#region static convenience
-
-		public static string EventName(string refCount) {
-			return string.Format("chan_reply_{0}", refCount);
-		}
-
-		#endregion
 
 		#region properties
 
 		public Status status;
-		public Dictionary<string, object> payload;
+		public Dictionary<string, object> response;
+
+		#endregion
+
+		#region IEquatable methods
+
+		public override int GetHashCode() {
+			return status.GetHashCode() 
+				+ (response == null ? 0 : response.GetHashCode());
+		}
+
+		public override bool Equals(object obj) {
+			return obj is Reply && Equals((Reply)obj);
+		}
+
+		public bool Equals(Reply that) {
+			return this.status == that.status
+				/* Collection comparison is tricky */
+				;
+		}
 
 		#endregion
 	}

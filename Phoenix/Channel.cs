@@ -82,7 +82,9 @@ namespace Phoenix {
 		public State state = State.Closed;
 		public string topic;
 
-		private Dictionary<string,Action<Message>> bindings = new Dictionary<string, Action<Message>>();
+		private Dictionary<string, Action<Message>> bindings = new Dictionary<string, Action<Message>>();
+		private Dictionary<string, Push> activePushes = new Dictionary<string, Phoenix.Push>();
+
 		private List<Push> pushBuffer = new List<Push>();
 		private TimeSpan timeout;
 		private bool joinedOnce = false;
@@ -109,20 +111,7 @@ namespace Phoenix {
 				payload = parameters
 			};
 
-			joinPush = new Push(this, joinMessage, timeout)
-				.Receive(Reply.Status.Ok, (p) => {
-					state = State.Joined;
-					rejoinTimer.Reset();
-					pushBuffer.ForEach(pushEvent => pushEvent.Send());
-					pushBuffer.Clear();
-				})
-				.Receive(Reply.Status.Timeout, (p) => {
-					if (state == State.Joining) {
-						// this.socket.log("channel", `timeout ${this.topic}`, this.joinPush.timeout)
-						state = State.Errored;
-						rejoinTimer.ScheduleTimeout();
-					}
-				});			
+			joinPush = new Push(this, joinMessage, timeout);
 		}
 
 		public void RejoinUntilConnected() {
@@ -161,6 +150,7 @@ namespace Phoenix {
 		}
 
 		public Push Push(Message message, TimeSpan? timeout = null) {
+			
 			if (!joinedOnce) {
 				throw new Exception(string.Format("tried to push '{0}' to '{1}' before joining. Use channel.join() before pushing events", message.@event, topic));
 			}
@@ -170,7 +160,6 @@ namespace Phoenix {
 			if (CanPush()) {
 				pushEvent.Send();
 			} else {
-				Console.WriteLine("Can't push?!");
 				pushEvent.StartTimeout();
 				pushBuffer.Add(pushEvent);
 			}
@@ -233,30 +222,57 @@ namespace Phoenix {
 
 		private void Rejoin(TimeSpan? timeout = null) {
 			if (state == State.Leaving) { 
-				return; 
+				return;
 			}
 			SendJoin(timeout ?? this.timeout);
+		}
+
+		internal void Register(Push push) {
+			activePushes[push.message.@ref] = push;
+		}
+
+		internal void Clear(Push push) {
+			activePushes.Remove(push.message.@ref);
 		}
 
 		internal void Trigger(Message msg) {
 
 			var inboundEvent = MessageInBoundEventExtensions.Parse(msg.@event);
-			if (msg.@ref != null && msg.@ref != joinPush.message.@ref && inboundEvent != Message.InBoundEvent.Reply) {
+			if (msg.@ref != null && msg.@ref != joinPush.message.@ref && inboundEvent.HasValue && inboundEvent.Value != Message.InBoundEvent.Reply) {
 				return;
 			}
 
 			switch (inboundEvent) {
 			case Message.InBoundEvent.Reply:
-				var replyEvent = Reply.EventName(msg.@ref);
-				if (bindings.ContainsKey(replyEvent)) {
-					bindings[replyEvent].Invoke(msg);
+				
+				var reply = ReplySerialization.Deserialize(msg.payload);
+
+				if (msg.@ref == joinPush.message.@ref) {
+					switch (reply.status) {
+						case Reply.Status.Ok:
+							state = State.Joined;
+							rejoinTimer.Reset();
+							pushBuffer.ForEach(pushEvent => pushEvent.Send());
+							pushBuffer.Clear();
+							break;
+
+						case Reply.Status.Timeout:
+							if (state == State.Joining) {
+								// this.socket.log("channel", `timeout ${this.topic}`, this.joinPush.timeout)
+								state = State.Errored;
+								rejoinTimer.ScheduleTimeout();
+							}
+							break;
+					}
+				}
+				if (activePushes.ContainsKey(msg.@ref)) {
+					activePushes[msg.@ref].TriggerReplyCallback(msg.payload);
 				}
 				break;
 
 			case Message.InBoundEvent.Close:
-
-				rejoinTimer.Reset();
 				// socket.log("channel", `close ${this.topic} ${this.joinPush.ref()}`)
+				rejoinTimer.Reset();
 				state = State.Closed;
 				socket.Remove(this);
 				break;

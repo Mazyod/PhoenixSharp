@@ -7,16 +7,16 @@ namespace Phoenix {
 
 		internal Message message;
 		private Channel channel;
+		private Dictionary<Reply.Status, Action<Reply>> replyHooks = new Dictionary<Reply.Status, Action<Reply>>();
 
 		private Reply? reply = null;
-		private Dictionary<Reply.Status, Action<Reply>> replyHooks = new Dictionary<Reply.Status, Action<Reply>>();
 		private Timer timeoutTimer = null;
 
 
 		public Push(Channel channel, Message message, TimeSpan timeout) {
 
 			message.topic = channel.topic;
-			message.@ref = null;
+			message.@ref = channel.socket.MakeRef();
 
 			this.channel = channel;
 			this.message = message;
@@ -35,11 +35,11 @@ namespace Phoenix {
 			channel.socket.Push(message);
 		}
 
-		public void Resend(TimeSpan timeout) {
+		internal void Resend(TimeSpan timeout) {
 
 			Abort();
 
-			message.@ref = null;
+			message.@ref = channel.socket.MakeRef();
 			reply = null;
 
 			InitializeTimeoutTimer(timeout);
@@ -58,7 +58,7 @@ namespace Phoenix {
 
 		public void Abort() {
 			timeoutTimer.Reset();
-			CancelRefEvent();
+			channel.Clear(this);
 		}
 
 		#region private
@@ -69,39 +69,26 @@ namespace Phoenix {
 			timeoutTimer = new Timer(() => TriggerReplyCallback(timeoutReply), delay);
 		}
 
-		private void TriggerReplyCallback(Dictionary<string, object> rawReply) {
+		internal void TriggerReplyCallback(Dictionary<string, object> rawReply) {
 			TriggerReplyCallback(ReplySerialization.Deserialize(rawReply));
 		}
 
 		internal void TriggerReplyCallback(Reply reply) {
-			Console.WriteLine(string.Format("reply: {0}, {1}", reply.status.AsString(), message.@event));
-			CancelRefEvent();
-			timeoutTimer.Reset();
+
+			Abort();
 
 			this.reply = reply;
 
-			var callback = replyHooks[reply.status];
-			callback?.Invoke(reply);
-		}
-
-		private void CancelRefEvent() {
-			if (message.@ref != null) {
-				channel.Off(Reply.EventName(message.@ref));
+			if (replyHooks.ContainsKey(reply.status)) {
+				replyHooks[reply.status].Invoke(reply);
 			}
 		}
 
 		internal void StartTimeout() { 
-
-			if (timeoutTimer.isActive) { 
-				return;
+			if (!timeoutTimer.isActive) { 
+				timeoutTimer.ScheduleTimeout();
+				channel.Register(this);
 			}
-
-			message.@ref = channel.socket.MakeRef();
-			channel.On(Reply.EventName(message.@ref), 
-				msg => TriggerReplyCallback(msg.payload)
-			);
-
-			timeoutTimer.ScheduleTimeout();
 		}
 
 		#endregion

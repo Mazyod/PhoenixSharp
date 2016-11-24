@@ -139,7 +139,6 @@ namespace Phoenix {
 
 			var builder = new UriBuilder(string.Format("{0}/websocket", url));
 			builder.Query = query;
-			Console.WriteLine("dis: " + builder.Uri);
 
 			return builder.Uri;
 		}

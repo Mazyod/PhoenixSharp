@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Linq;
 using System.Collections.Generic;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 
@@ -24,9 +26,30 @@ namespace Phoenix {
 		}
 
 		public static Message Deserialize(string data) {
-			return JObject
-				.Parse(data)
-				.ToObject<Message>();
+
+			var json = JObject.Parse(data);
+			var message = json.ToObject<Message>();
+			message.payload = DeserializeContainers(json["payload"]) as Dictionary<string, object>;
+
+			return message;
+		}
+
+		private static object DeserializeContainers(JToken token) {
+			
+			switch (token.Type) {
+			case JTokenType.Object:
+				return token
+					.Children<JProperty>()
+					.ToDictionary(
+						prop => prop.Name,
+						prop => DeserializeContainers(prop.Value));
+
+			case JTokenType.Array:
+				return token.Select(DeserializeContainers).ToList();
+
+			default:
+				return ((JValue)token).Value;
+			}
 		}
 	}
 }
