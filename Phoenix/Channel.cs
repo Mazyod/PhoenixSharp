@@ -154,6 +154,10 @@ namespace Phoenix {
 			return socket.state == Socket.State.Open && state == State.Joined;
 		}
 
+		public Push Push(string @event, TimeSpan? timeout) {
+			return Push(@event, timeout);
+		}
+
 		public Push Push(Message message, TimeSpan? timeout = null) {
 			
 			if (!joinedOnce) {
