@@ -5,11 +5,11 @@ using Newtonsoft.Json.Linq;
 
 namespace Phoenix {
 	
-	public class Push {
+	public sealed class Push {
 
 		internal Message message;
-		private Channel channel;
-		private Dictionary<Reply.Status, Action<Reply>> replyHooks = new Dictionary<Reply.Status, Action<Reply>>();
+		private readonly Channel channel;
+		private readonly Dictionary<Reply.Status, Action<Reply>> replyHooks = new Dictionary<Reply.Status, Action<Reply>>();
 
 		private Reply? reply = null;
 		private Timer timeoutTimer = null;

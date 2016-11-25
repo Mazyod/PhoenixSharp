@@ -63,7 +63,7 @@ namespace Phoenix {
 	//     channel.onError( () => console.log("there was an error!") )
 	//     channel.onClose( () => console.log("the channel has gone away gracefully") )
 	//
-	public class Channel {
+	public sealed class Channel {
 
 		#region nested types
 

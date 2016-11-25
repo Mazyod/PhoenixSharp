@@ -16,7 +16,7 @@ namespace Phoenix {
 	//    reconnectTimer.reset()
 	//    reconnectTimer.scheduleTimeout() // fires after 1000
 	//
-	internal class Timer {
+	internal sealed class Timer {
 
 		private int tries = 0;
 		private Func<int, TimeSpan> delayFunction;

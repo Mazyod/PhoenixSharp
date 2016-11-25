@@ -2,7 +2,6 @@ using System;
 using System.Linq;
 using System.Collections.Generic;
 using WebSocketSharp;
-using Newtonsoft.Json;
 
 
 namespace Phoenix {
@@ -40,7 +39,7 @@ namespace Phoenix {
 	// closed on the server, or 2). The client explicitly closed, by calling
 	// `channel.leave()`
 
-	public class Socket {
+	public sealed class Socket {
 
 		#region nested types
 
@@ -79,37 +78,21 @@ namespace Phoenix {
 		#region properties
 
 		private WebSocket websocket;
-		internal Options opts;
+		internal readonly Options opts;
 
 		private string urlCache;
 		private Dictionary<string, string> paramCache;
 
-		private Timer reconnectTimer;
-		private Timer heartbeatTimer;
+		private readonly Timer reconnectTimer;
+		private readonly Timer heartbeatTimer;
 
 		private HashSet<Channel> channels = new HashSet<Channel>();
 		private List<Action> sendBuffer = new List<Action>();
 		private uint refCount = 0;
 		private Dictionary<Events, Action> stateChangeCallbacks = new Dictionary<Events, Action>();
 
-		public State state {
-			get {
-				if (websocket == null) {
-					return State.Closed;
-				}
+		public State state { get; private set; }
 
-				switch (websocket.ReadyState) {
-				case WebSocketState.Connecting:
-					return State.Connecting;
-				case WebSocketState.Open:
-					return State.Open;
-				case WebSocketState.Closing:
-					return State.Closing;
-				default:
-					return State.Closed;
-				}
-			}
-		}
 
 		#endregion
 
@@ -253,6 +236,7 @@ namespace Phoenix {
 			websocket.OnClose += WebsocketOnClose;
 			websocket.OnMessage += WebsocketOnMessage;
 
+			state = State.Connecting;
 			websocket.Connect();
 		}
 
@@ -281,6 +265,7 @@ namespace Phoenix {
 			heartbeatTimer.Reset();
 			heartbeatTimer.ScheduleTimeout();
 
+			state = State.Open;
 			TriggerStateChangeCallback(Events.Open);
 		}
 
@@ -291,11 +276,14 @@ namespace Phoenix {
 			heartbeatTimer.Reset();
 			reconnectTimer.ScheduleTimeout();
 
+			state = State.Closed;
 			TriggerStateChangeCallback(Events.Close);
 		}
 
 		private void WebsocketOnError(object sender, ErrorEventArgs eventArgs) {
 			// Log("transport", error);
+
+			state = State.Closed;
 			TriggerChanError();
 			TriggerStateChangeCallback(Events.Error);
 		}
