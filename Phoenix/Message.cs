@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using Newtonsoft.Json.Linq;
 
 
 namespace Phoenix {
@@ -18,7 +19,7 @@ namespace Phoenix {
 		}
 
 		public string topic;
-		public Dictionary<string, object> payload;
+		public JObject payload;
 
 		public string @event;
 		public string @ref;

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using Newtonsoft.Json.Linq;
 
 
 namespace Phoenix {
@@ -20,7 +21,7 @@ namespace Phoenix {
 		#region properties
 
 		public Status status;
-		public Dictionary<string, object> response;
+		public JObject response;
 
 		#endregion
 

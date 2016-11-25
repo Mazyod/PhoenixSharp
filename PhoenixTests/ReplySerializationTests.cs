@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using Phoenix;
 using NUnit.Framework;
+using Newtonsoft.Json.Linq;
 
 
 namespace PhoenixTests {
@@ -11,20 +12,20 @@ namespace PhoenixTests {
 
 		private Reply sampleReply = new Reply() {
 			status = Reply.Status.Error,
-			response = new Dictionary<string, object>() {
+			response = JObject.FromObject(new Dictionary<string, object>() {
 				{ "test", "one" },
-			}
+			})
 		};
 
 		[Test()]
 		public void DeserializationTest() {
 
-			var serialized = new Dictionary<string, object>() {
+			var serialized = JObject.FromObject(new Dictionary<string, object>() {
 				{ "status", Reply.Status.Error.AsString() }, 
 				{"response", new Dictionary<string, object>() {
 						{ "test", "one" }}
 				},
-			};
+			});
 
 			var deserialized = ReplySerialization.Deserialize(serialized);
 

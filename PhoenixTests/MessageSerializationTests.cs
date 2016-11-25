@@ -22,7 +22,7 @@ namespace PhoenixTests {
 					topic = "phoenix-test",
 					@ref = "123",
 					@event = "somevalue",
-					payload = payload
+					payload = JObject.FromObject(payload)
 				};
 			}
 		}
@@ -49,8 +49,7 @@ namespace PhoenixTests {
 			var deserialized = MessageSerialization.Deserialize(serialized);
 
 			Assert.AreEqual(deserialized, sampleMessage);
-			Assert.IsNotInstanceOf(typeof(JObject), deserialized.payload["another key"]);
-			CollectionAssert.AreEquivalent(deserialized.payload, sampleMessage.payload);
+			Assert.IsInstanceOf(typeof(JObject), deserialized.payload["another key"]);
 		}
 
 		[Test()]

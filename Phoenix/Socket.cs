@@ -131,7 +131,7 @@ namespace Phoenix {
 
 		private Uri BuildEndpointURL(string url, Dictionary<string, string> parameters) {
 			// very primitive query string builder
-			var stringParams = parameters
+			var stringParams = (parameters ?? new Dictionary<string, string>())
 				.Select(pair => string.Format("{0}={1}", pair.Key, pair.Value))
 				.ToArray();
 

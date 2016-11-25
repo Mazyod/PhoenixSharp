@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using Newtonsoft.Json.Linq;
+
 
 namespace Phoenix {
 	
@@ -69,7 +71,7 @@ namespace Phoenix {
 			timeoutTimer = new Timer(() => TriggerReplyCallback(timeoutReply), delay);
 		}
 
-		internal void TriggerReplyCallback(Dictionary<string, object> rawReply) {
+		internal void TriggerReplyCallback(JObject rawReply) {
 			TriggerReplyCallback(ReplySerialization.Deserialize(rawReply));
 		}
 

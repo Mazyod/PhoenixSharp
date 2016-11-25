@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Newtonsoft.Json.Linq;
 
 
 namespace Phoenix {
@@ -108,7 +109,7 @@ namespace Phoenix {
 
 			var joinMessage = new Message() {
 				@event = Message.OutBoundEvent.Join.AsString(),
-				payload = parameters
+				payload = JObject.FromObject(parameters ?? new Dictionary<string, object>())
 			};
 
 			joinPush = new Push(this, joinMessage, timeout);

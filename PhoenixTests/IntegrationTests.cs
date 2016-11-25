@@ -4,6 +4,7 @@ using Phoenix;
 using NUnit.Framework;
 using NSubstitute;
 using System.Net;
+using Newtonsoft.Json.Linq;
 
 
 namespace PhoenixTests {
@@ -25,13 +26,9 @@ namespace PhoenixTests {
 				client.DownloadString(address);
 			}
 
-			var socket = new Socket();
-			var param = new Dictionary<string, string>() {
-				{ "bot", "616d5d09-ac10-4449-88af-7062f4cf1b86" },
-			};
-
 			// connecting is synchronous for now
-			socket.Connect(string.Format("ws://{0}/socket", host), param);
+			var socket = new Socket();
+			socket.Connect(string.Format("ws://{0}/socket", host), null);
 			Assert.IsTrue(socket.state == Socket.State.Open);
 
 			/// 
@@ -43,7 +40,11 @@ namespace PhoenixTests {
 			Message? afterJoinMessage = null;
 			Message? closeMessage = null;
 
-			var roomChannel = socket.MakeChannel("tester:phoenix-sharp");
+			var param = new Dictionary<string, object>() {
+				{ "auth", "doesn't matter" },
+			};
+
+			var roomChannel = socket.MakeChannel("tester:phoenix-sharp", param);
 			roomChannel.On(Message.InBoundEvent.Close, m => closeMessage = m);
 			roomChannel.On("after_join", m => afterJoinMessage = m);
 
@@ -55,16 +56,16 @@ namespace PhoenixTests {
 			Assert.IsNull(errorReply);
 			Assert.IsNotNull(okReply);
 			Assert.IsTrue(afterJoinMessage.HasValue);
-			Assert.AreEqual("Welcome!", afterJoinMessage.Value.payload["message"]);
+			Assert.AreEqual("Welcome!", afterJoinMessage.Value.payload["message"].Value<string>());
 
 			/// 
 			/// test echo push/reply
 			/// 
 			var testOkMessage = new Message() {
 				@event = "push_test",
-				payload = new Dictionary<string, object>() {
+				payload = JObject.FromObject(new Dictionary<string, object>() {
 					{ "echo", "test" },
-				}
+				})
 			};
 
 			Reply? testOkReply = null;
@@ -76,7 +77,7 @@ namespace PhoenixTests {
 			System.Threading.Thread.Sleep(100);
 			Assert.IsTrue(testOkReply.HasValue);
 			Assert.IsNotNull(testOkReply.Value.response);
-			CollectionAssert.AreEquivalent(testOkReply.Value.response, testOkMessage.payload);
+			Assert.AreEqual(testOkReply.Value.response, testOkMessage.payload);
 
 
 			/// 
