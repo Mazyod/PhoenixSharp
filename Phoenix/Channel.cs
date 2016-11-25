@@ -154,7 +154,7 @@ namespace Phoenix {
 			return socket.state == Socket.State.Open && state == State.Joined;
 		}
 
-		public Push Push(string @event, TimeSpan? timeout) {
+		public Push Push(string @event, TimeSpan? timeout = null) {
 			return Push(@event, timeout);
 		}
 
