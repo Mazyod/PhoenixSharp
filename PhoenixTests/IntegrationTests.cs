@@ -83,14 +83,10 @@ namespace PhoenixTests {
 			/// 
 			/// test error reply
 			/// 
-			var testErrorMessage = new Message() {
-				@event = "error_test"
-			};
-
 			Reply? testErrorReply = null;
 
 			roomChannel
-				.Push(testErrorMessage)
+				.Push("error_test")
 				.Receive(Reply.Status.Error, r => testErrorReply = r);
 
 			System.Threading.Thread.Sleep(100);

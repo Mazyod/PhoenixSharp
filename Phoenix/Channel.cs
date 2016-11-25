@@ -155,7 +155,7 @@ namespace Phoenix {
 		}
 
 		public Push Push(string @event, TimeSpan? timeout = null) {
-			return Push(@event, timeout);
+			return Push(new Message() { @event = @event }, timeout);
 		}
 
 		public Push Push(Message message, TimeSpan? timeout = null) {
