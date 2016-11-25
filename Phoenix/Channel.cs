@@ -137,6 +137,10 @@ namespace Phoenix {
 		}
 
 
+		public void On(Message.InBoundEvent @event, Action<Message> callback) {
+			On(@event.AsString(), callback);
+		}
+
 		public void On(string anyEvent, Action<Message> callback) {
 			bindings[anyEvent] = callback;
 		}
@@ -173,12 +177,6 @@ namespace Phoenix {
 		// instructs channel to terminate on server
 		//
 		// Triggers onClose() hooks
-		//
-		// To receive leave acknowledgements, use the a `receive`
-		// hook to bind to the server ack, ie:
-		//
-		//     channel.leave().receive("ok", () => alert("left!") )
-		//
 		public Push Leave(TimeSpan? timeout = null) {
 
 			// cleanups
@@ -286,13 +284,15 @@ namespace Phoenix {
 				break;
 
 			case null:
-				if (bindings.ContainsKey(msg.@event)) {
-					bindings[msg.@event].Invoke(msg);
-				}
+				// custom, app-specific event
 				break;
 
 			default:
 				throw new ArgumentOutOfRangeException();
+			}
+
+			if (bindings.ContainsKey(msg.@event)) {
+				bindings[msg.@event].Invoke(msg);
 			}
 		}
 	}
