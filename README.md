@@ -8,6 +8,37 @@ This project still needs to be prepared and uploaded to NuGet, which isn't done 
 
 Once you grab the source, you can look at `IntegrationTests.cs` for a full example:
 
+##### Implementing `IWebsocketFactory` and `IWebsocket`
+
+```cs
+public sealed class WebsocetSharpFactory: IWebsocketFactory {
+
+	public IWebsocket Build(WebsocketConfiguration config) {
+
+		var socket = new WebSocket(config.uri.AbsoluteUri);
+		socket.OnOpen += (_, __) => config.onOpenCallback();
+		socket.OnClose += (_, __) => config.onCloseCallback();
+		socket.OnError += (_, __) => config.onErrorCallback();
+		socket.OnMessage += (_, args) => config.onMessageCallback(args.Data);
+
+		return new WebsocketSharpAdapter(socket);
+	}
+}
+  
+public sealed class WebsocketSharpAdapter: IWebsocket {
+
+	private WebSocket ws;
+
+	public WebsocketSharpAdapter(WebSocket ws) {
+		this.ws = ws;
+	}
+
+	public void Connect() { ws.Connect(); }
+	public void Send(string message) { ws.Send(message); }
+	public void Close(ushort? code = null, string message = null) { ws.Close(); }
+}
+```
+
 ##### Creating a Socket
 
 ```cs
