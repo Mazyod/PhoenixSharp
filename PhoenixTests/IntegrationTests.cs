@@ -31,7 +31,7 @@ namespace PhoenixTests {
 		}
 	}
 
-	public sealed class WebsocetSharpFactory: IWebsocketFactory {
+	public sealed class WebsocketSharpFactory: IWebsocketFactory {
 
 		public IWebsocket Build(WebsocketConfiguration config) {
 
@@ -59,13 +59,14 @@ namespace PhoenixTests {
 			var host = "localhost:4000";
 			var address = string.Format("http://{0}/api/health-check", host);
 
+			// heroku health check
 			using (WebClient client = new WebClient()) {
 				client.Headers.Add("Content-Type", "application/json");
 				client.DownloadString(address);
 			}
 
 			// connecting is synchronous as implemented above
-			var socketFactory = new WebsocetSharpFactory();
+			var socketFactory = new WebsocketSharpFactory();
 			var socket = new Socket(socketFactory);
 			socket.Connect(string.Format("ws://{0}/socket", host), null);
 			Assert.IsTrue(socket.state == Socket.State.Open);
