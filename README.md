@@ -42,7 +42,7 @@ public sealed class WebsocketSharpAdapter: IWebsocket {
 ##### Creating a Socket
 
 ```cs
-var socketFactory = new WebsocetSharpFactory();
+var socketFactory = new WebsocketSharpFactory();
 var socket = new Socket(socketFactory);
 socket.Connect(string.Format("ws://{0}/socket", host), null);
 ```
