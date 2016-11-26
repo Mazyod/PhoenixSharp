@@ -35,7 +35,7 @@ In order to run the integration tests specifically, you need to make sure you ha
 I've published the [phoenix server I'm using to run the tests against here][phoenix-integration-tests-repo]. However, if for any reason you don't want to run the phoenix server locally, you can use the following host:
 
 ```
-phoenix-integration.herokuapp.com
+phoenix-integration-tester.herokuapp.com
 ```
 
 ## Dependencies
