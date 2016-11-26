@@ -2,6 +2,32 @@
 
 A C# Phoenix Channels client. Unity Compatible.
 
+## Getting Started
+
+This project still needs to be prepared and uploaded to NuGet, which isn't done yet. Instead, you can use the git submodule approach or simply download the sources and drop them in your project.
+
+Once you grab the source, you can look at `IntegrationTests.cs` for a full example:
+
+##### Creating a Socket
+
+```cs
+var socketFactory = new WebsocetSharpFactory();
+var socket = new Socket(socketFactory);
+socket.Connect(string.Format("ws://{0}/socket", host), null);
+```
+
+##### Joining a Channel
+
+```cs
+var roomChannel = socket.MakeChannel("tester:phoenix-sharp", param);
+roomChannel.On(Message.InBoundEvent.Close, m => closeMessage = m);
+roomChannel.On("after_join", m => afterJoinMessage = m);
+
+roomChannel.Join()
+  .Receive(Reply.Status.Ok, r => okReply = r)
+  .Receive(Reply.Status.Error, r => errorReply = r);
+```
+
 ## Dependencies
 
 ### Production Dependencies
@@ -17,12 +43,26 @@ A C# Phoenix Channels client. Unity Compatible.
 
 #### Details:
 
-When I started writing this library, I wanted to break the JSON and Websocket dependencies, allowing developers to plug in whatever libraries they prefer to use. Breaking the Websocket dependency was simple, but alas, the JSON dependency remained.
+I really wanted to break the JSON and Websocket dependencies, allowing developers to plug in whatever libraries they prefer to use. Breaking the Websocket dependency was simple, but alas, the JSON dependency remained.
 
-The issue with breaking the JSON dependency is need to properly represent intermidiate data passed in from the socket all the way to the library caller. For example:
+The issue with breaking the JSON dependency is the need to properly represent intermidiate data passed in from the socket all the way to the library caller. For example:
 
-- Using plain `Dictionary` objects meant that you had to manually convert those into your application types.
-- Using plain `string` meant that you had to deserialize everything on your side, which meant lots of error handling everywhere.
-- Using a generic JSON spec requires a lot of time and effort, which is a luxury I do not currently have.
+- Using plain `Dictionary` objects meant that the caller needs to manually convert those into the application types.
+- Using plain `string` meant that the caller has to deserialize everything on their side, which meant lots of error handling everywhere.
+- Using generics to inject JSON functionality required a lot of time and effort, which is a luxury I didn't have.
 
-**NOTE**: For Unity developers, I really recommend you grab Json.NET from the AssetStore. I've used it, and it's perfect for compatibility with IL2Cpp and mobile platforms.
+## Unity
+
+I'm personally shipping this library with my Unity game, so you can rest assured it will always support Unity. Here are some important notes I learned from integrating PhoenixSharp with Unity:
+
+- I am using BestHTTP websockets instead of Websocket-sharp. It's much better maintained and doesn't require synchronizing callbacks from the socket to the main thread. Websocket-sharp does need that.
+- I really recommend you grab Json.NET from the AssetStore, that's what I'm using. I've experienced weird issues in the past with the opensource Newtonsoft.Json on mobile platforms.
+
+## Contributions
+
+Whether you open new issues or send in some PRs .. It's all welcome here!
+
+## Author
+
+Maz (Mazyad Alabduljalil)
+
