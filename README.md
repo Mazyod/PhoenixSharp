@@ -28,6 +28,16 @@ roomChannel.Join()
   .Receive(Reply.Status.Error, r => errorReply = r);
 ```
 
+## Tests
+
+In order to run the integration tests specifically, you need to make sure you have a phoenix server running and point the `host` in the integration tests to that.
+
+I've published the [phoenix server I'm using to run the tests against here][phoenix-integration-tests-repo]. However, if for any reason you don't want to run the phoenix server locally, you can use the following host:
+
+```
+phoenix-integration.herokuapp.com
+```
+
 ## Dependencies
 
 ### Production Dependencies
@@ -66,3 +76,4 @@ Whether you open new issues or send in some PRs .. It's all welcome here!
 
 Maz (Mazyad Alabduljalil)
 
+[phoenix-integration-tests-repo]: https://github.com/Mazyod/phoenix-integration-tester
