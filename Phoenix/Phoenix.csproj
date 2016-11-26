@@ -33,9 +33,6 @@
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Core" />
-    <Reference Include="websocket-sharp">
-      <HintPath>..\Vendor\websocket-sharp.dll</HintPath>
-    </Reference>
     <Reference Include="Newtonsoft.Json">
       <HintPath>..\Vendor\Newtonsoft.Json.dll</HintPath>
     </Reference>
@@ -51,6 +48,7 @@
     <Compile Include="MessageSerialization.cs" />
     <Compile Include="Timer.cs" />
     <Compile Include="ReplySerialization.cs" />
+    <Compile Include="IWebsocket.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

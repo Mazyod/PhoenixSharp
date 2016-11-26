@@ -1,7 +1,6 @@
 using System;
 using System.Linq;
 using System.Collections.Generic;
-using WebSocketSharp;
 
 
 namespace Phoenix {
@@ -58,17 +57,19 @@ namespace Phoenix {
 		}
 
 		public class Options {
-			//   timeout - The default timeout to trigger push timeouts.
+			// optimizing object allocation
+			private static int[] expBackoff = { 1, 2, 5, 10 };
+
+			// timeout - The default timeout to trigger push timeouts.
 			public TimeSpan timeout = TimeSpan.FromSeconds(10);
-			//   heartbeatInterval - The interval to send a heartbeat message
+			// heartbeatInterval - The interval to send a heartbeat message
 			public TimeSpan heartbeatInterval = TimeSpan.FromSeconds(30);
-			//   reconnectAfter - The optional function that returns the reconnect interval.
-			public Func<int, TimeSpan> reconnectAfter = (tries) => { 
-				int[] expBackoff = { 1, 2, 5, 10 };
+			// reconnectAfter - The optional function that returns the reconnect interval.
+			public Func<int, TimeSpan> reconnectAfter = (tries) => {
 				return TimeSpan.FromSeconds(tries < expBackoff.Length ? expBackoff[tries] : 10);
 			};
-			//   logger - The optional function for specialized logging, ie:
-			//     `logger: (kind, msg, data) => { console.log(`${kind}: ${msg}`, data) }
+			// logger - The optional function for specialized logging, ie:
+			//   `logger: (kind, msg, data) => { console.log(`${kind}: ${msg}`, data) }
 			public Action<string, string, object> logger = (a, b, c) => {
 			};
 		}
@@ -77,8 +78,9 @@ namespace Phoenix {
 
 		#region properties
 
-		private WebSocket websocket;
+		private readonly IWebsocketFactory websocketFactory;
 		internal readonly Options opts;
+		private IWebsocket websocket;
 
 		private string urlCache;
 		private Dictionary<string, string> paramCache;
@@ -98,11 +100,11 @@ namespace Phoenix {
 
 		// Initializes the Socket
 		//
-		// endPoint - The string WebSocket endpoint, ie, "ws://example.com/ws",
-		//                                               "wss://example.com"
+		// factory - websocket object factory
 		// opts - Optional configuration
-		public Socket(Options options = null) {
+		public Socket(IWebsocketFactory factory, Options options = null) {
 
+			websocketFactory = factory;
 			opts = options ?? new Options();
 
 			reconnectTimer = new Timer(Reconnect, opts.reconnectAfter);
@@ -209,14 +211,9 @@ namespace Phoenix {
 				return;
 			}
 
-			websocket.OnClose -= WebsocketOnClose; // noop
-			websocket.OnError -= WebsocketOnError; // noop
+			state = State.Closed;
 
-			if (code.HasValue) {
-				websocket.Close(code.Value, reason ?? "");
-			} else {
-				websocket.Close();
-			}
+			websocket.Close(code, reason);
 			websocket = null;
 		}
 
@@ -230,11 +227,15 @@ namespace Phoenix {
 			urlCache = url;
 			paramCache = parameters;
 
-			websocket = new WebSocket(BuildEndpointURL(url, parameters).AbsoluteUri);
-			websocket.OnOpen += WebsocketOnOpen;
-			websocket.OnError += WebsocketOnError;
-			websocket.OnClose += WebsocketOnClose;
-			websocket.OnMessage += WebsocketOnMessage;
+			var config = new WebsocketConfiguration() {
+				uri = BuildEndpointURL(url, parameters),
+				onOpenCallback = WebsocketOnOpen,
+				onCloseCallback = WebsocketOnClose,
+				onErrorCallback = WebsocketOnError,
+				onMessageCallback = WebsocketOnMessage
+			};
+
+			websocket = websocketFactory.Build(config);
 
 			state = State.Connecting;
 			websocket.Connect();
@@ -257,7 +258,7 @@ namespace Phoenix {
 
 		#region websocket callbacks
 
-		private void WebsocketOnOpen(object sender, EventArgs eventArgs) {
+		private void WebsocketOnOpen() {
 			// Log("transport", string.Format("connected to {0}", endpointURL), null);
 			FlushSendBuffer();
 
@@ -269,8 +270,13 @@ namespace Phoenix {
 			TriggerStateChangeCallback(Events.Open);
 		}
 
-		private void WebsocketOnClose(object sender, CloseEventArgs eventArgs) {
-			Log("transport", "close", eventArgs);
+		private void WebsocketOnClose() {
+			Log("transport", "close", null);
+
+			if (state == State.Closed) {
+				return; // noop
+			}
+
 			TriggerChanError();
 
 			heartbeatTimer.Reset();
@@ -280,17 +286,21 @@ namespace Phoenix {
 			TriggerStateChangeCallback(Events.Close);
 		}
 
-		private void WebsocketOnError(object sender, ErrorEventArgs eventArgs) {
+		private void WebsocketOnError() {
 			// Log("transport", error);
+
+			if (state == State.Closed) {
+				return; // noop
+			}
 
 			state = State.Closed;
 			TriggerChanError();
 			TriggerStateChangeCallback(Events.Error);
 		}
 
-		private void WebsocketOnMessage(object sender, MessageEventArgs eventArgs) {
+		private void WebsocketOnMessage(string data) {
 
-			var msg = MessageSerialization.Deserialize(eventArgs.Data);
+			var msg = MessageSerialization.Deserialize(data);
 
 			// this.log("receive", `${payload.status || ""} ${topic} ${event} ${ref && "(" + ref + ")" || ""}`, payload)
 			var subscribedChannels = channels.Where(ch => ch.topic == msg.topic);

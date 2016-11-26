@@ -5,12 +5,50 @@ using NUnit.Framework;
 using NSubstitute;
 using System.Net;
 using Newtonsoft.Json.Linq;
+using WebSocketSharp;
 
 
 namespace PhoenixTests {
 
+	public sealed class WebsocketSharpAdapter: IWebsocket {
+
+		private WebSocket ws;
+
+		public WebsocketSharpAdapter(WebSocket ws) {
+			this.ws = ws;
+		}
+
+		public void Connect() {
+			ws.Connect();
+		}
+
+		public void Send(string message) {
+			ws.Send(message);
+		}
+
+		public void Close(ushort? code = null, string message = null) {
+			ws.Close();
+		}
+	}
+
+	public sealed class WebsocetSharpFactory: IWebsocketFactory {
+
+		public IWebsocket Build(WebsocketConfiguration config) {
+
+			var socket = new WebSocket(config.uri.AbsoluteUri);
+			socket.OnOpen += (_, __) => config.onOpenCallback();
+			socket.OnClose += (_, __) => config.onCloseCallback();
+			socket.OnError += (_, __) => config.onErrorCallback();
+			socket.OnMessage += (_, args) => config.onMessageCallback(args.Data);
+
+			return new WebsocketSharpAdapter(socket);
+		}
+	}
+
 	[TestFixture()]
 	public class IntegrationTests {
+
+		private const int networkDelay = 500;
 
 		[Test()]
 		public void IntegrationTest() {
@@ -26,8 +64,9 @@ namespace PhoenixTests {
 				client.DownloadString(address);
 			}
 
-			// connecting is synchronous for now
-			var socket = new Socket();
+			// connecting is synchronous as implemented above
+			var socketFactory = new WebsocetSharpFactory();
+			var socket = new Socket(socketFactory);
 			socket.Connect(string.Format("ws://{0}/socket", host), null);
 			Assert.IsTrue(socket.state == Socket.State.Open);
 
@@ -52,10 +91,10 @@ namespace PhoenixTests {
 				.Receive(Reply.Status.Ok, r => okReply = r)
 				.Receive(Reply.Status.Error, r => errorReply = r);
 			
-			System.Threading.Thread.Sleep(100);
+			Assert.That(() => okReply.HasValue, Is.True.After(networkDelay, 10));
 			Assert.IsNull(errorReply);
-			Assert.IsNotNull(okReply);
-			Assert.IsTrue(afterJoinMessage.HasValue);
+
+			Assert.That(() => afterJoinMessage.HasValue, Is.True.After(networkDelay, 10));
 			Assert.AreEqual("Welcome!", afterJoinMessage.Value.payload["message"].Value<string>());
 
 			/// 
@@ -74,8 +113,7 @@ namespace PhoenixTests {
 				.Push(testOkMessage)
 				.Receive(Reply.Status.Ok, r => testOkReply = r);
 
-			System.Threading.Thread.Sleep(100);
-			Assert.IsTrue(testOkReply.HasValue);
+			Assert.That(() => testOkReply.HasValue, Is.True.After(networkDelay, 10));
 			Assert.IsNotNull(testOkReply.Value.response);
 			Assert.AreEqual(testOkReply.Value.response, testOkMessage.payload);
 
@@ -89,8 +127,7 @@ namespace PhoenixTests {
 				.Push("error_test")
 				.Receive(Reply.Status.Error, r => testErrorReply = r);
 
-			System.Threading.Thread.Sleep(100);
-			Assert.IsTrue(testErrorReply.HasValue);
+			Assert.That(() => testErrorReply.HasValue, Is.True.After(networkDelay, 10));
 			Assert.AreEqual(testErrorReply.Value.status, Reply.Status.Error);
 
 			/// 
@@ -98,8 +135,8 @@ namespace PhoenixTests {
 			/// 
 			Assert.IsFalse(closeMessage.HasValue);
 			roomChannel.Leave();
-			System.Threading.Thread.Sleep(100);
-			Assert.IsTrue(closeMessage.HasValue);
+
+			Assert.That(() => closeMessage.HasValue, Is.True.After(networkDelay, 10));
 		}
 	}
 }
