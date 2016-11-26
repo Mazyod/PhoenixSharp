@@ -11,7 +11,7 @@ Once you grab the source, you can look at `IntegrationTests.cs` for a full examp
 ##### Implementing `IWebsocketFactory` and `IWebsocket`
 
 ```cs
-public sealed class WebsocetSharpFactory: IWebsocketFactory {
+public sealed class WebsocketSharpFactory: IWebsocketFactory {
 
 	public IWebsocket Build(WebsocketConfiguration config) {
 
