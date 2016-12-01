@@ -17,8 +17,8 @@ public sealed class WebsocketSharpFactory: IWebsocketFactory {
 
 		var socket = new WebSocket(config.uri.AbsoluteUri);
 		socket.OnOpen += (_, __) => config.onOpenCallback();
-		socket.OnClose += (_, __) => config.onCloseCallback();
-		socket.OnError += (_, __) => config.onErrorCallback();
+		socket.OnClose += (_, args) => config.onCloseCallback(args.Code, args.Reason);
+		socket.OnError += (_, args) => config.onErrorCallback(args.Reason);
 		socket.OnMessage += (_, args) => config.onMessageCallback(args.Data);
 
 		return new WebsocketSharpAdapter(socket);
@@ -44,6 +44,8 @@ public sealed class WebsocketSharpAdapter: IWebsocket {
 ```cs
 var socketFactory = new WebsocketSharpFactory();
 var socket = new Socket(socketFactory);
+socket.OnOpen += WebsocketOnOpen;
+
 socket.Connect(string.Format("ws://{0}/socket", host), null);
 ```
 
@@ -78,9 +80,8 @@ phoenix-integration-tester.herokuapp.com
 ### Development/Test Dependencies
 
 1. Newtonsoft.Json
-4. Websocket-sharp
-2. NUnit
-3. NSubstitute
+2. Websocket-sharp
+3. NUnit
 
 #### Details:
 
