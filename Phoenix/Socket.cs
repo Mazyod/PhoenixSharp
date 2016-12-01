@@ -144,8 +144,6 @@ namespace Phoenix {
 		}
 
 		private void Reconnect() {
-
-			Disconnect();
 			Connect(urlCache, paramCache);
 		}
 
@@ -291,6 +289,7 @@ namespace Phoenix {
 			reconnectTimer.ScheduleTimeout();
 
 			state = State.Closed;
+			websocket = null;
 
 			if (OnClose != null) {
 				OnClose(code, message);
@@ -310,6 +309,7 @@ namespace Phoenix {
 			reconnectTimer.ScheduleTimeout();
 
 			state = State.Closed;
+			websocket = null;
 
 			if (OnError != null) {
 				OnError(message);
