@@ -68,10 +68,8 @@ namespace Phoenix {
 			public Func<int, TimeSpan> reconnectAfter = (tries) => {
 				return TimeSpan.FromSeconds(tries < expBackoff.Length ? expBackoff[tries] : 10);
 			};
-			// logger - The optional function for specialized logging, ie:
-			//   `logger: (kind, msg, data) => { console.log(`${kind}: ${msg}`, data) }
-			public Action<string, string, object> logger = (a, b, c) => {
-			};
+			// logger - The optional function for specialized logging
+			public ILogger logger = null;
 		}
 
 		#endregion
@@ -200,8 +198,10 @@ namespace Phoenix {
 		}
 
 		// Logs the message. Override `this.logger` for specialized logging. noops by default
-		internal void Log(string kind, string msg, object data) {
-			opts.logger(kind, msg, data);
+		internal void Log(LogLevel level, string kind, string msg) {
+			if (opts.logger != null) {
+				opts.logger.Log(level, kind, msg);
+			}
 		}
 
 		#endregion
@@ -277,7 +277,7 @@ namespace Phoenix {
 		}
 
 		private void WebsocketOnClose(ushort code, string message) {
-			Log("transport", "close", null);
+			Log(LogLevel.Debug, "socket", "on close");
 
 			if (state == State.Closed) {
 				return; // noop
@@ -297,7 +297,7 @@ namespace Phoenix {
 		}
 
 		private void WebsocketOnError(string message) {
-			// Log("transport", error);
+			Log(LogLevel.Info, "socket", message ?? "unknown");
 
 			if (state == State.Closed) {
 				return; // noop
@@ -319,8 +319,8 @@ namespace Phoenix {
 		private void WebsocketOnMessage(string data) {
 
 			var msg = MessageSerialization.Deserialize(data);
+			Log(LogLevel.Trace, "socket", string.Format("received: {0}", msg.ToString()));
 
-			// this.log("receive", `${payload.status || ""} ${topic} ${event} ${ref && "(" + ref + ")" || ""}`, payload)
 			var subscribedChannels = channels.Where(ch => ch.topic == msg.topic);
 			foreach (var channel in subscribedChannels) {
 				channel.Trigger(msg);

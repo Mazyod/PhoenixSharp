@@ -193,7 +193,7 @@ namespace Phoenix {
 			state = State.Leaving;
 
 			Action onClose = () => {
-				// socket.Log(string.Format("channel", "leave {0}", topic));
+				socket.Log(LogLevel.Debug, "channel", string.Format("leave {0}", topic));
 				Trigger(new Message() { @event = Message.InBoundEvent.Close.AsString() });
 			};
 
@@ -251,29 +251,34 @@ namespace Phoenix {
 
 				if (msg.@ref == joinPush.message.@ref) {
 					switch (reply.status) {
-						case Reply.Status.Ok:
-							state = State.Joined;
-							rejoinTimer.Reset();
-							pushBuffer.ForEach(pushEvent => pushEvent.Send());
-							pushBuffer.Clear();
-							break;
+					case Reply.Status.Ok:
+						socket.Log(LogLevel.Debug, "channel", string.Format("joined {0}", topic));
 
-						case Reply.Status.Timeout:
-							if (state == State.Joining) {
-								// this.socket.log("channel", `timeout ${this.topic}`, this.joinPush.timeout)
-								state = State.Errored;
-								rejoinTimer.ScheduleTimeout();
-							}
-							break;
+						state = State.Joined;
+						rejoinTimer.Reset();
+						pushBuffer.ForEach(pushEvent => pushEvent.Send());
+						pushBuffer.Clear();
+						break;
+
+					case Reply.Status.Timeout:
+						if (state == State.Joining) {
+							socket.Log(LogLevel.Debug, "channel", string.Format("timeout {0}", topic));
+
+							state = State.Errored;
+							rejoinTimer.ScheduleTimeout();
+						}
+						break;
 					}
 				}
+
 				if (activePushes.ContainsKey(msg.@ref)) {
 					activePushes[msg.@ref].TriggerReplyCallback(msg.payload);
 				}
 				break;
 
 			case Message.InBoundEvent.Close:
-				// socket.log("channel", `close ${this.topic} ${this.joinPush.ref()}`)
+				socket.Log(LogLevel.Debug, "channel", string.Format("close {0}", topic));
+
 				rejoinTimer.Reset();
 				state = State.Closed;
 				socket.Remove(this);
@@ -281,7 +286,8 @@ namespace Phoenix {
 
 			case Message.InBoundEvent.Error:
 				if (state != State.Leaving && state != State.Closed) {
-					// this.socket.log("channel", `error ${this.topic}`, reason)
+					socket.Log(LogLevel.Warn, "channel", string.Format("{0}: channel errored abnormally", topic));
+
 					state = State.Errored;
 					rejoinTimer.ScheduleTimeout();
 				}
@@ -289,6 +295,7 @@ namespace Phoenix {
 
 			case null:
 				// custom, app-specific event
+				socket.Log(LogLevel.Debug, "channel", string.Format("{0}: received {1}", topic, msg.@event));
 				break;
 
 			default:

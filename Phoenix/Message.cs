@@ -25,6 +25,10 @@ namespace Phoenix {
 		public string @ref;
 
 
+		public override string ToString() {
+			return string.Format("[{0}] {1}: {2}", @ref, topic, @event);
+		}
+
 		#region IEquatable methods
 
 		public override int GetHashCode() {
