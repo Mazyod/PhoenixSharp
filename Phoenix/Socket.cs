@@ -304,8 +304,12 @@ namespace Phoenix {
 				return; // noop
 			}
 
-			state = State.Closed;
 			TriggerChanError();
+
+			heartbeatTimer.Reset();
+			reconnectTimer.ScheduleTimeout();
+
+			state = State.Closed;
 
 			if (OnError != null) {
 				OnError(message);
