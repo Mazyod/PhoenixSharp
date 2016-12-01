@@ -76,6 +76,22 @@ namespace Phoenix {
 
 		#endregion
 
+		#region events
+
+		public delegate void OnOpenDelegate();
+		public OnOpenDelegate OnOpen;
+
+		public delegate void OnMessageDelegate(string message);
+		public OnMessageDelegate OnMessage;
+
+		public delegate void OnClosedDelegate(ushort code, string message);
+		public OnClosedDelegate OnClose;
+
+		public delegate void OnErrorDelegate(string message);
+		public OnErrorDelegate OnError;
+
+		#endregion
+
 		#region properties
 
 		private readonly IWebsocketFactory websocketFactory;
@@ -91,7 +107,6 @@ namespace Phoenix {
 		private HashSet<Channel> channels = new HashSet<Channel>();
 		private List<Action> sendBuffer = new List<Action>();
 		private uint refCount = 0;
-		private Dictionary<Events, Action> stateChangeCallbacks = new Dictionary<Events, Action>();
 
 		public State state { get; private set; }
 
@@ -158,12 +173,6 @@ namespace Phoenix {
 			}
 		}
 
-		private void TriggerStateChangeCallback(Events @event) {
-			if (stateChangeCallbacks.ContainsKey(@event)) {
-				stateChangeCallbacks[@event].Invoke();
-			}
-		}
-
 		private void TriggerChanError() {
 			foreach (var channel in channels) {
 				channel.Trigger(new Message() { @event = Message.InBoundEvent.Error.AsString() });
@@ -211,6 +220,7 @@ namespace Phoenix {
 				return;
 			}
 
+			// disables callbacks
 			state = State.Closed;
 
 			websocket.Close(code, reason);
@@ -241,11 +251,6 @@ namespace Phoenix {
 			websocket.Connect();
 		}
 
-		// Registers callbacks for connection state change events
-		public void On(Events socketEvent, Action callback) {
-			stateChangeCallbacks[socketEvent] = callback;
-		}
-
 		public Channel MakeChannel(string topic, Dictionary<string, object> channelParameters = null) {
 
 			var channel = new Channel(topic, channelParameters, this);
@@ -267,10 +272,13 @@ namespace Phoenix {
 			heartbeatTimer.ScheduleTimeout();
 
 			state = State.Open;
-			TriggerStateChangeCallback(Events.Open);
+
+			if (OnOpen != null) {
+				OnOpen();
+			}
 		}
 
-		private void WebsocketOnClose() {
+		private void WebsocketOnClose(ushort code, string message) {
 			Log("transport", "close", null);
 
 			if (state == State.Closed) {
@@ -283,10 +291,13 @@ namespace Phoenix {
 			reconnectTimer.ScheduleTimeout();
 
 			state = State.Closed;
-			TriggerStateChangeCallback(Events.Close);
+
+			if (OnClose != null) {
+				OnClose(code, message);
+			}
 		}
 
-		private void WebsocketOnError() {
+		private void WebsocketOnError(string message) {
 			// Log("transport", error);
 
 			if (state == State.Closed) {
@@ -295,7 +306,10 @@ namespace Phoenix {
 
 			state = State.Closed;
 			TriggerChanError();
-			TriggerStateChangeCallback(Events.Error);
+
+			if (OnError != null) {
+				OnError(message);
+			}
 		}
 
 		private void WebsocketOnMessage(string data) {
@@ -308,8 +322,9 @@ namespace Phoenix {
 				channel.Trigger(msg);
 			}
 
-			// TODO: possible customize params
-			TriggerStateChangeCallback(Events.Message);
+			if (OnMessage != null) {
+				OnMessage(data);
+			}
 		}
 
 		#endregion

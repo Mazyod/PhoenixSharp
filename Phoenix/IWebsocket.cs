@@ -8,8 +8,8 @@ namespace Phoenix {
 		public Uri uri;
 
 		public Action onOpenCallback;
-		public Action onCloseCallback;
-		public Action onErrorCallback;
+		public Action<ushort, string> onCloseCallback;
+		public Action<string> onErrorCallback;
 		public Action<string> onMessageCallback;
 	}
 
