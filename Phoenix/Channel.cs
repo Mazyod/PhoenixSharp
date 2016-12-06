@@ -250,9 +250,10 @@ namespace Phoenix {
 				var reply = ReplySerialization.Deserialize(msg.payload);
 
 				if (msg.@ref == joinPush.message.@ref) {
+					
 					switch (reply.status) {
 					case Reply.Status.Ok:
-						socket.Log(LogLevel.Debug, "channel", string.Format("joined {0}", topic));
+						socket.Log(LogLevel.Debug, "channel", string.Format("join ok {0}", topic));
 
 						state = State.Joined;
 						rejoinTimer.Reset();
@@ -260,9 +261,16 @@ namespace Phoenix {
 						pushBuffer.Clear();
 						break;
 
+					case Reply.Status.Error:
+						socket.Log(LogLevel.Debug, "channel", string.Format("join error {0}", topic));
+
+						state = State.Closed;
+						rejoinTimer.Reset();
+						break;
+
 					case Reply.Status.Timeout:
 						if (state == State.Joining) {
-							socket.Log(LogLevel.Debug, "channel", string.Format("timeout {0}", topic));
+							socket.Log(LogLevel.Debug, "channel", string.Format("join timeout {0}", topic));
 
 							state = State.Errored;
 							rejoinTimer.ScheduleTimeout();

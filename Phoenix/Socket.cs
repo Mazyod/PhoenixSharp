@@ -321,10 +321,10 @@ namespace Phoenix {
 			var msg = MessageSerialization.Deserialize(data);
 			Log(LogLevel.Trace, "socket", string.Format("received: {0}", msg.ToString()));
 
-			var subscribedChannels = channels.Where(ch => ch.topic == msg.topic);
-			foreach (var channel in subscribedChannels) {
-				channel.Trigger(msg);
-			}
+			channels
+				.Where(ch => ch.topic == msg.topic)
+				.ToList() // create a copy to avoid mutating while iterating
+				.ForEach(channel => channel.Trigger(msg));
 
 			if (OnMessage != null) {
 				OnMessage(data);

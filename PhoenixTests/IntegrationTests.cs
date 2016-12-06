@@ -81,10 +81,26 @@ namespace PhoenixTests {
 			Assert.AreEqual(1, onOpenCount);
 
 			/// 
-			/// test channel joining and receiving a custom event
+			/// test channel error on join
 			/// 
 			Reply? okReply = null;
 			Reply? errorReply = null;
+
+			var errorChannel = socket.MakeChannel("tester:phoenix-sharp");
+
+			errorChannel.Join()
+				.Receive(Reply.Status.Ok, r => okReply = r)
+				.Receive(Reply.Status.Error, r => errorReply = r);
+
+			Assert.That(() => errorReply.HasValue, Is.True.After(networkDelay, 10));
+			Assert.IsNull(okReply);
+			Assert.AreEqual(Channel.State.Closed, errorChannel.state);
+
+			/// 
+			/// test channel joining and receiving a custom event
+			/// 
+			okReply = null;
+			errorReply = null;
 
 			Message? afterJoinMessage = null;
 			Message? closeMessage = null;
@@ -107,7 +123,7 @@ namespace PhoenixTests {
 			Assert.That(() => afterJoinMessage.HasValue, Is.True.After(networkDelay, 10));
 			Assert.AreEqual("Welcome!", afterJoinMessage.Value.payload["message"].Value<string>());
 
-			Assert.AreEqual(2, onMessageData.Count);
+			Assert.AreEqual(3, onMessageData.Count);
 
 			/// 
 			/// test echo push/reply
