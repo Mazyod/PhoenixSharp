@@ -1,6 +1,9 @@
-# PhoenixSharp
+
+![Imgur](http://i.imgur.com/B8ClrWe.png)
 
 A C# Phoenix Channels client. Unity Compatible.
+
+> Graphic is a shameless mixture between unity, phoenix logos. Please don't sue me. Thanks.
 
 ## Getting Started
 
