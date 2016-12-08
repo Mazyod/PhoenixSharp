@@ -7,10 +7,10 @@ namespace Phoenix {
 
 		public Uri uri;
 
-		public Action onOpenCallback;
-		public Action<ushort, string> onCloseCallback;
-		public Action<string> onErrorCallback;
-		public Action<string> onMessageCallback;
+		public Action<IWebsocket> onOpenCallback;
+		public Action<IWebsocket, ushort, string> onCloseCallback;
+		public Action<IWebsocket, string> onErrorCallback;
+		public Action<IWebsocket, string> onMessageCallback;
 	}
 
 	public interface IWebsocketFactory {

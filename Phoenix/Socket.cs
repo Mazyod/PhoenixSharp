@@ -257,34 +257,43 @@ namespace Phoenix {
 
 		#region websocket callbacks
 
-		private void WebsocketOnOpen() {
-			// Log("transport", string.Format("connected to {0}", endpointURL), null);
+		private void WebsocketOnOpen(IWebsocket ws) {
+
+			if (ws != websocket) {
+				return;
+			}
+
+			Log(LogLevel.Debug, "socket", "on open");
+			state = State.Open;
 			FlushSendBuffer();
 
 			reconnectTimer.Reset();
 			heartbeatTimer.Reset();
 			heartbeatTimer.ScheduleTimeout();
 
-			state = State.Open;
-
 			if (OnOpen != null) {
 				OnOpen();
 			}
 		}
 
-		private void WebsocketOnClose(ushort code, string message) {
+		private void WebsocketOnClose(IWebsocket ws, ushort code, string message) {
+
+			if (ws != websocket) {
+				return;
+			}
+
 			Log(LogLevel.Debug, "socket", "on close");
 
 			if (state == State.Closed) {
 				return; // noop
 			}
 
+			state = State.Closed;
 			TriggerChanError();
 
 			heartbeatTimer.Reset();
 			reconnectTimer.ScheduleTimeout();
 
-			state = State.Closed;
 			websocket = null;
 
 			if (OnClose != null) {
@@ -292,19 +301,20 @@ namespace Phoenix {
 			}
 		}
 
-		private void WebsocketOnError(string message) {
-			Log(LogLevel.Info, "socket", message ?? "unknown");
+		private void WebsocketOnError(IWebsocket ws, string message) {
 
-			if (state == State.Closed) {
-				return; // noop
+			if (ws != websocket || state == State.Closed) {
+				return;
 			}
 
+			Log(LogLevel.Info, "socket", message ?? "unknown");
+
+			state = State.Closed;
 			TriggerChanError();
 
 			heartbeatTimer.Reset();
 			reconnectTimer.ScheduleTimeout();
 
-			state = State.Closed;
 			websocket = null;
 
 			if (OnError != null) {
@@ -312,7 +322,11 @@ namespace Phoenix {
 			}
 		}
 
-		private void WebsocketOnMessage(string data) {
+		private void WebsocketOnMessage(IWebsocket ws, string data) {
+
+			if (ws != websocket) {
+				return;
+			}
 
 			var msg = MessageSerialization.Deserialize(data);
 			Log(LogLevel.Trace, "socket", string.Format("received: {0}", msg.ToString()));

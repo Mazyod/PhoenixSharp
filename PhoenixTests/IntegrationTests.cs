@@ -11,11 +11,23 @@ namespace PhoenixTests {
 
 	public sealed class WebsocketSharpAdapter: IWebsocket {
 
-		private WebSocket ws;
+		private readonly WebSocket ws;
+		private readonly WebsocketConfiguration config;
 
-		public WebsocketSharpAdapter(WebSocket ws) {
+
+		public WebsocketSharpAdapter(WebSocket ws, WebsocketConfiguration config) {
+			
 			this.ws = ws;
+			this.config = config;
+
+			ws.OnOpen += OnWebsocketOpen;
+			ws.OnClose += OnWebsocketClose;
+			ws.OnError += OnWebsocketError;
+			ws.OnMessage += OnWebsocketMessage;
 		}
+
+
+		#region IWebsocket methods
 
 		public void Connect() {
 			ws.Connect();
@@ -28,6 +40,29 @@ namespace PhoenixTests {
 		public void Close(ushort? code = null, string message = null) {
 			ws.Close();
 		}
+
+		#endregion
+
+
+		#region websocketsharp callbacks
+
+		public void OnWebsocketOpen(object sender, EventArgs args) {
+			config.onOpenCallback(this);
+		}
+
+		public void OnWebsocketClose(object sender, CloseEventArgs args) {
+			config.onCloseCallback(this, args.Code, args.Reason);
+		}
+
+		public void OnWebsocketError(object sender, ErrorEventArgs args) {
+			config.onErrorCallback(this, args.Message);
+		}
+
+		public void OnWebsocketMessage(object sender, MessageEventArgs args) {
+			config.onMessageCallback(this, args.Data);
+		}
+
+		#endregion
 	}
 
 	public sealed class WebsocketSharpFactory: IWebsocketFactory {
@@ -35,19 +70,15 @@ namespace PhoenixTests {
 		public IWebsocket Build(WebsocketConfiguration config) {
 
 			var socket = new WebSocket(config.uri.AbsoluteUri);
-			socket.OnOpen += (_, __) => config.onOpenCallback();
-			socket.OnClose += (_, args) => config.onCloseCallback(args.Code, args.Reason);
-			socket.OnError += (_, args) => config.onErrorCallback(args.Message);
-			socket.OnMessage += (_, args) => config.onMessageCallback(args.Data);
-
-			return new WebsocketSharpAdapter(socket);
+			return new WebsocketSharpAdapter(socket, config);
 		}
 	}
+
 
 	[TestFixture()]
 	public class IntegrationTests {
 
-		private const int networkDelay = 500;
+		private const int networkDelay = 500 /* ms */;
 
 		[Test()]
 		public void IntegrationTest() {
