@@ -70,7 +70,6 @@ namespace Phoenix {
 			Closed,
 			Errored,
 			Joining,
-			Leaving,
 			Joined
 		}
 
@@ -113,6 +112,9 @@ namespace Phoenix {
 
 			joinPush = new Push(this, joinMessage, timeout);
 		}
+
+
+		#region public methods
 
 		public void RejoinUntilConnected() {
 
@@ -190,7 +192,7 @@ namespace Phoenix {
 			pushBuffer.ForEach(p => p.Abort());
 			pushBuffer.Clear();
 
-			state = State.Leaving;
+			state = State.Closed;
 
 			Action onClose = () => {
 				socket.Log(LogLevel.Debug, "channel", string.Format("leave {0}", topic));
@@ -215,7 +217,10 @@ namespace Phoenix {
 			return leavePush;
 		}
 
-		// private
+		#endregion
+
+
+		#region private methods
 
 		private void SendJoin(TimeSpan timeout) {
 			state = State.Joining;
@@ -223,9 +228,6 @@ namespace Phoenix {
 		}
 
 		private void Rejoin(TimeSpan? timeout = null) {
-			if (state == State.Leaving) { 
-				return;
-			}
 			SendJoin(timeout ?? this.timeout);
 		}
 
@@ -293,7 +295,7 @@ namespace Phoenix {
 				break;
 
 			case Message.InBoundEvent.Error:
-				if (state != State.Leaving && state != State.Closed) {
+				if (state != State.Closed) {
 					socket.Log(LogLevel.Warn, "channel", string.Format("{0}: channel errored abnormally", topic));
 
 					state = State.Errored;
@@ -314,5 +316,7 @@ namespace Phoenix {
 				bindings[msg.@event].Invoke(msg);
 			}
 		}
+
+		#endregion
 	}
 }
