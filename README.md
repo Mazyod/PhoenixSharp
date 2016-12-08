@@ -3,7 +3,11 @@
 
 A C# Phoenix Channels client. Unity Compatible.
 
-> Graphic is a shameless mixture between unity, phoenix logos. Please don't sue me. Thanks.
+> Graphic is a shameless mix between unity, phoenix logos. Please don't sue me. Thanks.
+
+## Roadmap
+
+This project will remain as a prerelease until Unity ships their .Net profile upgrade, which should be soon. This will allow this library to utilize the latest and greatest .Net 4.6 features, enhancing the experience further, and allowing us to reach v1.0!
 
 ## Getting Started
 
