@@ -56,7 +56,7 @@ namespace Phoenix {
 			Open,
 		}
 
-		public class Options {
+		public sealed class Options {
 			// optimizing object allocation
 			private static int[] expBackoff = { 1, 2, 5, 10 };
 
@@ -103,7 +103,7 @@ namespace Phoenix {
 		private readonly Timer heartbeatTimer;
 
 		private HashSet<Channel> channels = new HashSet<Channel>();
-		private List<Action> sendBuffer = new List<Action>();
+		private List<string> sendBuffer = new List<string>();
 		private uint refCount = 0;
 
 		public State state { get; private set; }
@@ -162,11 +162,8 @@ namespace Phoenix {
 		}
 
 		private void FlushSendBuffer() {
-
-			if (state == State.Open) {
-				sendBuffer.ForEach(callback => callback());
-				sendBuffer.Clear();
-			}
+			sendBuffer.ForEach(websocket.Send);
+			sendBuffer.Clear();
 		}
 
 		private void TriggerChanError() {
@@ -180,15 +177,14 @@ namespace Phoenix {
 		}
 
 		internal void Push(Message msg) {
-
+			
 			var json = msg.Serialize();
-			Action callback = () => websocket.Send(json);
-			// Log("push", data.ToString(), data);
+			Log(LogLevel.Debug,"push", json);
 
 			if (state == State.Open) {
-				callback();
+				websocket.Send(json);
 			} else {
-				sendBuffer.Add(callback);
+				sendBuffer.Add(json);
 			}
 		}
 
