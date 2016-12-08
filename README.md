@@ -89,7 +89,8 @@ public sealed class WebsocketSharpFactory: IWebsocketFactory {
 ```cs
 var socketFactory = new WebsocketSharpFactory();
 var socket = new Socket(socketFactory);
-socket.OnOpen += WebsocketOnOpen;
+socket.OnOpen += onOpenCallback;
+socket.OnMessage += onMessageCallback;
 
 socket.Connect(string.Format("ws://{0}/socket", host), null);
 ```
