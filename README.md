@@ -5,6 +5,12 @@ A C# Phoenix Channels client. Unity Compatible.
 
 > Graphic is a shameless mix between unity, phoenix logos. Please don't sue me. Thanks.
 
++ [**Roadmap**](#roadmap): Transparency on what's next!
++ [**Getting Started**](#getting-started): A quicky guide on how to use this library.
++ [**Tests**](#tests): How to run the tests to make sure we're golden.
++ [**Dependencies**](#dependencies): A rant about dependencies.
++ [**Unity**](#unity): Important remarks for Unity developers.
+
 ## Roadmap
 
 This project will remain as a prerelease until Unity ships their .Net profile upgrade, which should be soon. This will allow this library to utilize the latest and greatest .Net 4.6 features, enhancing the experience further, and allowing us to reach v1.0!
