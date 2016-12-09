@@ -9,10 +9,11 @@ A C# Phoenix Channels client. Unity Compatible.
 
 This project will remain as a prerelease until Unity ships their .Net profile upgrade, which should be soon. This will allow this library to utilize the latest and greatest .Net 4.6 features, enhancing the experience further, and allowing us to reach v1.0!
 
+Once we reach v1.0, we can then focus on integrating CI, and uploading the package to NuGet.
+
 ## Getting Started
 
-This project still needs to be prepared and uploaded to NuGet, which isn't done yet. Instead, you can use the git submodule approach or simply download the sources and drop them in your project.
-
+For now, you can use git submodules or simply download the sources and drop them in your project.
 Once you grab the source, you can look at `IntegrationTests.cs` for a full example:
 
 ##### Implementing `IWebsocketFactory` and `IWebsocket`
@@ -38,38 +39,19 @@ public sealed class WebsocketSharpAdapter: IWebsocket {
 
 	#region IWebsocket methods
 
-	public void Connect() {
-		ws.Connect();
-	}
-
-	public void Send(string message) {
-		ws.Send(message);
-	}
-
-	public void Close(ushort? code = null, string message = null) {
-		ws.Close();
-	}
+	public void Connect() { ws.Connect(); }
+	public void Send(string message) { ws.Send(message); }
+	public void Close(ushort? code = null, string message = null) { ws.Close(); }
 
 	#endregion
 
 
 	#region websocketsharp callbacks
 
-	public void OnWebsocketOpen(object sender, EventArgs args) {
-		config.onOpenCallback(this);
-	}
-
-	public void OnWebsocketClose(object sender, CloseEventArgs args) {
-		config.onCloseCallback(this, args.Code, args.Reason);
-	}
-
-	public void OnWebsocketError(object sender, ErrorEventArgs args) {
-		config.onErrorCallback(this, args.Message);
-	}
-
-	public void OnWebsocketMessage(object sender, MessageEventArgs args) {
-		config.onMessageCallback(this, args.Data);
-	}
+	public void OnWebsocketOpen(object sender, EventArgs args) { config.onOpenCallback(this); }
+	public void OnWebsocketClose(object sender, CloseEventArgs args) { config.onCloseCallback(this, args.Code, args.Reason); }
+	public void OnWebsocketError(object sender, ErrorEventArgs args) { config.onErrorCallback(this, args.Message); }
+	public void OnWebsocketMessage(object sender, MessageEventArgs args) { config.onMessageCallback(this, args.Data); }
 
 	#endregion
 }
@@ -98,11 +80,11 @@ socket.Connect(string.Format("ws://{0}/socket", host), null);
 ##### Joining a Channel
 
 ```cs
-var roomChannel = socket.MakeChannel("tester:phoenix-sharp", param);
+var roomChannel = socket.MakeChannel("tester:phoenix-sharp");
 roomChannel.On(Message.InBoundEvent.Close, m => closeMessage = m);
 roomChannel.On("after_join", m => afterJoinMessage = m);
 
-roomChannel.Join()
+roomChannel.Join(params)
   .Receive(Reply.Status.Ok, r => okReply = r)
   .Receive(Reply.Status.Error, r => errorReply = r);
 ```
