@@ -1,57 +1,45 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Timers;
 
 
 namespace Phoenix {
 
-	// Creates a timer that accepts a `timerCalc` function to perform
-	// calculated timeout retries, such as exponential backoff.
-	//
-	// ## Examples
-	//
-	//    let reconnectTimer = new Timer(() => this.connect(), function(tries){
-	//      return [1000, 5000, 10000][tries - 1] || 10000
-	//    })
-	//    reconnectTimer.scheduleTimeout() // fires after 1000
-	//    reconnectTimer.scheduleTimeout() // fires after 5000
-	//    reconnectTimer.reset()
-	//    reconnectTimer.scheduleTimeout() // fires after 1000
-	//
-	internal sealed class Timer {
+	public interface IDelayedExecutor {
 
-		private int tries = 0;
-		private Func<int, TimeSpan> delayFunction;
-		private System.Timers.Timer timer;
+		uint Execute(Action action, TimeSpan delay);
+		void Cancel(uint id);
+	}
 
-		public bool isActive {
-			get { return timer.Enabled; }
-		}
+	public sealed class TimerBasedExecutor: IDelayedExecutor {
+		// Please ensure that you always start from 1, and leave 0 for uninitialized id
+		private uint id = 1;
+		private Dictionary<uint, Timer> timers = new Dictionary<uint, Timer>();
 
-		public Timer(Action action, TimeSpan fixedDelay)
-			: this(action, (_) => fixedDelay) {
-		}
 
-		public Timer(Action callback, Func<int, TimeSpan> delayFunction) {
+		public uint Execute(Action action, TimeSpan delay) {
 
-			this.delayFunction = delayFunction;
-
-			timer = new System.Timers.Timer();
+			var id = this.id++;
+			var timer = new Timer();
+			timer.Interval = delay.TotalMilliseconds;
 			timer.AutoReset = false;
 			timer.Elapsed += (sender, e) => {
-				tries += 1;
-				callback();
+				action();
+				timers.Remove(id);
 			};
-		}
 
-		public void Reset() {
-			tries = 0;
-			timer.Stop();
-		}
-
-		public void ScheduleTimeout() {
-			
-			timer.Stop();
-			timer.Interval = delayFunction(tries).TotalMilliseconds;
 			timer.Start();
+
+			timers[id] = timer;
+			return id;
+		}
+
+		public void Cancel(uint id) {
+
+			if (timers.ContainsKey(id)) {
+				timers[id].Stop();
+				timers.Remove(id);
+			}
 		}
 	}
 }

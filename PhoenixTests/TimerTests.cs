@@ -12,8 +12,8 @@ namespace PhoenixTests {
 		public void TimerInvokationTest() {
 
 			var works = false;
-			var timer = new Timer(() => works = true, TimeSpan.FromMilliseconds(1));
-			timer.ScheduleTimeout();
+			var executor = new TimerBasedExecutor();
+			executor.Execute(() => works = true, TimeSpan.FromMilliseconds(1));
 
 			Assert.IsFalse(works);
 			Assert.That(() => works, Is.True.After(10, 1));
@@ -23,11 +23,11 @@ namespace PhoenixTests {
 		public void TimerResetTest() {
 
 			var works = false;
-			var timer = new Timer(() => works = true, TimeSpan.FromMilliseconds(1));
-			timer.ScheduleTimeout();
+			var executor = new TimerBasedExecutor();
+			var timerId = executor.Execute(() => works = true, TimeSpan.FromMilliseconds(1));
 
 			Assert.IsFalse(works);
-			timer.Reset();
+			executor.Cancel(timerId);
 			System.Threading.Thread.Sleep(10);
 			Assert.IsFalse(works);
 		}

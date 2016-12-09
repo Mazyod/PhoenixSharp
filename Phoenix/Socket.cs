@@ -24,22 +24,18 @@ namespace Phoenix {
 		}
 
 		public sealed class Options {
-			// optimizing object allocation
-			private static int[] expBackoff = { 1, 2, 5, 10 };
-
-			// timeout - The default timeout to trigger push timeouts.
+			// The default timeout to trigger push timeouts.
 			public TimeSpan timeout = TimeSpan.FromSeconds(10);
-			// heartbeatInterval - The interval to send a heartbeat message
+			// The interval to send a heartbeat message.
 			public TimeSpan heartbeatInterval = TimeSpan.FromSeconds(30);
-			// reconnectAfter - The optional function that returns the reconnect interval.
-			public Func<int, TimeSpan> reconnectAfter = (tries) => {
-				return TimeSpan.FromSeconds(tries < expBackoff.Length ? expBackoff[tries] : 10);
-			};
-			// logger - The optional function for specialized logging
+			// The optional function for specialized logging
 			public ILogger logger = null;
+			// The object responsible for performing delayed executions
+			public IDelayedExecutor delayedExecutor = new TimerBasedExecutor();
 		}
 
 		#endregion
+
 
 		#region events
 
@@ -57,38 +53,27 @@ namespace Phoenix {
 
 		#endregion
 
+
 		#region properties
 
 		private readonly IWebsocketFactory websocketFactory;
 		internal readonly Options opts;
 		private IWebsocket websocket;
 
-		private string urlCache;
-		private Dictionary<string, string> paramCache;
+		private uint? heartbeatTimer = null;
 
-		private readonly Timer reconnectTimer;
-		private readonly Timer heartbeatTimer;
-
-		private HashSet<Channel> channels = new HashSet<Channel>();
+		private Dictionary<string, Channel> channels = new Dictionary<string, Channel>();
 		private List<string> sendBuffer = new List<string>();
-		private uint refCount = 0;
 
 		public State state { get; private set; }
 
-
 		#endregion
 
-		// Initializes the Socket
-		//
-		// factory - websocket object factory
-		// opts - Optional configuration
+
 		public Socket(IWebsocketFactory factory, Options options = null) {
 
 			websocketFactory = factory;
 			opts = options ?? new Options();
-
-			reconnectTimer = new Timer(Reconnect, opts.reconnectAfter);
-			heartbeatTimer = new Timer(SendHeartbeat, opts.heartbeatInterval);
 		}
 
 
@@ -108,10 +93,6 @@ namespace Phoenix {
 			return builder.Uri;
 		}
 
-		private void Reconnect() {
-			Connect(urlCache, paramCache);
-		}
-
 		private void SendHeartbeat() {
 
 			if (state != State.Open) {
@@ -121,11 +102,10 @@ namespace Phoenix {
 			Push(new Message() {
 				topic = "phoenix",
 				@event = "heartbeat",
-				payload = null,
-				@ref = MakeRef()
+				payload = null
 			});
 
-			heartbeatTimer.ScheduleTimeout();
+			heartbeatTimer = opts.delayedExecutor.Execute(SendHeartbeat, opts.heartbeatInterval);
 		}
 
 		private void FlushSendBuffer() {
@@ -133,19 +113,27 @@ namespace Phoenix {
 			sendBuffer.Clear();
 		}
 
-		private void TriggerChanError() {
-			foreach (var channel in channels) {
-				channel.Trigger(new Message() { @event = Message.InBoundEvent.Error.AsString() });
+		private void TriggerChannelError() {
+			foreach (var channel in channels.Values) {
+				channel.TriggerError();
+			}
+		}
+
+		private void CancelHeartbeat() {
+			if (heartbeatTimer.HasValue) {
+				opts.delayedExecutor.Cancel(heartbeatTimer.Value);
+				heartbeatTimer = null;
 			}
 		}
 
 		internal void Remove(Channel channel) {
-			channels.Remove(channel);
+			channels.Remove(channel.topic);
 		}
 
 		internal void Push(Message msg) {
-			
+
 			var json = msg.Serialize();
+
 			Log(LogLevel.Debug,"push", json);
 
 			if (state == State.Open) {
@@ -153,11 +141,6 @@ namespace Phoenix {
 			} else {
 				sendBuffer.Add(json);
 			}
-		}
-
-		// Return the next message ref, accounting for overflows
-		internal string MakeRef() {
-			return (++refCount).ToString();
 		}
 
 		// Logs the message. Override `this.logger` for specialized logging. noops by default
@@ -174,8 +157,8 @@ namespace Phoenix {
 
 		public void Disconnect(ushort? code = null, string reason = null) {
 
-			reconnectTimer.Reset();
-			heartbeatTimer.Reset();
+			CancelHeartbeat();
+			TriggerChannelError();
 
 			if (websocket == null) {
 				return;
@@ -195,9 +178,6 @@ namespace Phoenix {
 				Disconnect();
 			}
 
-			urlCache = url;
-			paramCache = parameters;
-
 			var config = new WebsocketConfiguration() {
 				uri = BuildEndpointURL(url, parameters),
 				onOpenCallback = WebsocketOnOpen,
@@ -212,15 +192,16 @@ namespace Phoenix {
 			websocket.Connect();
 		}
 
-		public Channel MakeChannel(string topic, Dictionary<string, object> channelParameters = null) {
-
-			var channel = new Channel(topic, channelParameters, this);
-			channels.Add(channel);
+		public Channel MakeChannel(string topic) {
+			// Phoenix 1.2+ returns a new channel and closes the old one if we join a topic twice
+			var channel = new Channel(topic, this);
+			channels[topic] = channel;
 
 			return channel;
 		}
 
 		#endregion
+
 
 		#region websocket callbacks
 
@@ -231,12 +212,10 @@ namespace Phoenix {
 			}
 
 			Log(LogLevel.Debug, "socket", "on open");
+
 			state = State.Open;
 			FlushSendBuffer();
-
-			reconnectTimer.Reset();
-			heartbeatTimer.Reset();
-			heartbeatTimer.ScheduleTimeout();
+			SendHeartbeat();
 
 			if (OnOpen != null) {
 				OnOpen();
@@ -245,21 +224,15 @@ namespace Phoenix {
 
 		private void WebsocketOnClose(IWebsocket ws, ushort code, string message) {
 
-			if (ws != websocket) {
+			if (ws != websocket || state == State.Closed) {
 				return;
 			}
 
 			Log(LogLevel.Debug, "socket", "on close");
 
-			if (state == State.Closed) {
-				return; // noop
-			}
-
 			state = State.Closed;
-			TriggerChanError();
-
-			heartbeatTimer.Reset();
-			reconnectTimer.ScheduleTimeout();
+			TriggerChannelError();
+			CancelHeartbeat();
 
 			websocket = null;
 
@@ -277,10 +250,8 @@ namespace Phoenix {
 			Log(LogLevel.Info, "socket", message ?? "unknown");
 
 			state = State.Closed;
-			TriggerChanError();
-
-			heartbeatTimer.Reset();
-			reconnectTimer.ScheduleTimeout();
+			TriggerChannelError();
+			CancelHeartbeat();
 
 			websocket = null;
 
@@ -298,10 +269,9 @@ namespace Phoenix {
 			var msg = MessageSerialization.Deserialize(data);
 			Log(LogLevel.Trace, "socket", string.Format("received: {0}", msg.ToString()));
 
-			channels
-				.Where(ch => ch.topic == msg.topic)
-				.ToList() // create a copy to avoid mutating while iterating
-				.ForEach(channel => channel.Trigger(msg));
+			if (channels.ContainsKey(msg.topic)) {
+				channels[msg.topic].Trigger(msg);
+			}
 
 			if (OnMessage != null) {
 				OnMessage(data);

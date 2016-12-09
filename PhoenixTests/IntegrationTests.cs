@@ -140,11 +140,11 @@ namespace PhoenixTests {
 				{ "auth", "doesn't matter" },
 			};
 
-			var roomChannel = socket.MakeChannel("tester:phoenix-sharp", param);
+			var roomChannel = socket.MakeChannel("tester:phoenix-sharp");
 			roomChannel.On(Message.InBoundEvent.Close, m => closeMessage = m);
 			roomChannel.On("after_join", m => afterJoinMessage = m);
 
-			roomChannel.Join()
+			roomChannel.Join(param)
 				.Receive(Reply.Status.Ok, r => okReply = r)
 				.Receive(Reply.Status.Error, r => errorReply = r);
 			
@@ -154,27 +154,25 @@ namespace PhoenixTests {
 			Assert.That(() => afterJoinMessage.HasValue, Is.True.After(networkDelay, 10));
 			Assert.AreEqual("Welcome!", afterJoinMessage.Value.payload["message"].Value<string>());
 
-			Assert.AreEqual(3, onMessageData.Count);
+			// 1. heartbeat, 2. error, 3. join, 4. after_join
+			Assert.AreEqual(4, onMessageData.Count, "Unexpected message count: " + string.Join("; ", onMessageData));
 
 			/// 
 			/// test echo push/reply
 			/// 
-			var testOkMessage = new Message() {
-				@event = "push_test",
-				payload = JObject.FromObject(new Dictionary<string, object>() {
-					{ "echo", "test" },
-				})
+			var payload = new Dictionary<string, object>() {
+					{ "echo", "test" }
 			};
 
 			Reply? testOkReply = null;
 
 			roomChannel
-				.Push(testOkMessage)
+				.Push("push_test", payload)
 				.Receive(Reply.Status.Ok, r => testOkReply = r);
 
 			Assert.That(() => testOkReply.HasValue, Is.True.After(networkDelay, 10));
 			Assert.IsNotNull(testOkReply.Value.response);
-			Assert.AreEqual(testOkReply.Value.response, testOkMessage.payload);
+			CollectionAssert.AreEquivalent(testOkReply.Value.response.ToObject<Dictionary<string, object>>(), payload);
 
 
 			/// 
@@ -188,6 +186,18 @@ namespace PhoenixTests {
 
 			Assert.That(() => testErrorReply.HasValue, Is.True.After(networkDelay, 10));
 			Assert.AreEqual(testErrorReply.Value.status, Reply.Status.Error);
+
+			/// 
+			/// test timeout reply
+			/// 
+			Reply? testTimeoutReply = null;
+
+			roomChannel
+				.Push("no_reply", null, TimeSpan.FromMilliseconds(50))
+				.Receive(Reply.Status.Timeout, r => testTimeoutReply = r);
+
+			Assert.That(() => testTimeoutReply.HasValue, Is.False.After(20));
+			Assert.That(() => testTimeoutReply.HasValue, Is.True.After(40));
 
 			/// 
 			/// test channel leave

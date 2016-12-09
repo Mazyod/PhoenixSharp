@@ -7,46 +7,23 @@ namespace Phoenix {
 	
 	public sealed class Push {
 
-		internal Message message;
-		private readonly Channel channel;
+		#region properties
+
+		public readonly string @ref;
+		internal uint timerId;
+
 		private readonly Dictionary<Reply.Status, Action<Reply>> replyHooks = new Dictionary<Reply.Status, Action<Reply>>();
-
 		private Reply? reply = null;
-		private Timer timeoutTimer = null;
+
+		#endregion
 
 
-		public Push(Channel channel, Message message, TimeSpan timeout) {
-
-			message.topic = channel.topic;
-			message.@ref = channel.socket.MakeRef();
-
-			this.channel = channel;
-			this.message = message;
-
-			InitializeTimeoutTimer(timeout);
+		public Push(string @ref) {
+			this.@ref = @ref;
 		}
 
-		internal void Send() {
-			
-			if (reply.HasValue && reply.Value.status == Reply.Status.Timeout) {
-				return; 
-			}
 
-			StartTimeout();
-
-			channel.socket.Push(message);
-		}
-
-		internal void Resend(TimeSpan timeout) {
-
-			Abort();
-
-			message.@ref = channel.socket.MakeRef();
-			reply = null;
-
-			InitializeTimeoutTimer(timeout);
-			Send();
-		}
+		#region public methods
 
 		public Push Receive(Reply.Status status, Action<Reply> callback) {
 			
@@ -58,38 +35,25 @@ namespace Phoenix {
 			return this;
 		}
 
-		public void Abort() {
-			timeoutTimer.Reset();
-			channel.Clear(this);
-		}
+		#endregion
 
-		#region private
 
-		private void InitializeTimeoutTimer(TimeSpan delay) {
+		#region private & internal methods
 
-			var timeoutReply = new Reply() { status = Reply.Status.Timeout };
-			timeoutTimer = new Timer(() => TriggerReplyCallback(timeoutReply), delay);
-		}
-
-		internal void TriggerReplyCallback(JObject rawReply) {
-			TriggerReplyCallback(ReplySerialization.Deserialize(rawReply));
+		internal void TriggerTimeout() {
+			TriggerReplyCallback(new Reply() { status = Reply.Status.Timeout });
 		}
 
 		internal void TriggerReplyCallback(Reply reply) {
 
-			Abort();
+			if (this.reply.HasValue) {
+				return;
+			}
 
 			this.reply = reply;
 
 			if (replyHooks.ContainsKey(reply.status)) {
 				replyHooks[reply.status].Invoke(reply);
-			}
-		}
-
-		internal void StartTimeout() { 
-			if (!timeoutTimer.isActive) { 
-				timeoutTimer.ScheduleTimeout();
-				channel.Register(this);
 			}
 		}
 
