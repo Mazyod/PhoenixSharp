@@ -4,7 +4,7 @@ using Newtonsoft.Json.Linq;
 
 
 namespace Phoenix {
-	
+
 	public sealed class Channel {
 
 		#region nested types
@@ -75,12 +75,13 @@ namespace Phoenix {
 
 		public Push Push(string @event, Dictionary<string, object> payload = null, TimeSpan? timeout = null) {
 
-			var msg = new Message() { @event = @event };
+			var obj = JObject.FromObject(payload ?? new Dictionary<string, object>());
+			return PushJson(@event, obj, timeout);
+		}
 
-			if (payload != null) {
-				msg.payload = JObject.FromObject(payload);
-			}
+		public Push PushJson(string @event, JObject obj, TimeSpan? timeout = null) {
 
+			var msg = new Message() { @event = @event, payload = obj };
 			return Push(msg, timeout ?? socket.opts.timeout);
 		}
 
