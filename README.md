@@ -7,6 +7,7 @@ A C# Phoenix Channels client. Unity Compatible.
 
 + [**Roadmap**](#roadmap): Transparency on what's next!
 + [**Getting Started**](#getting-started): A quicky guide on how to use this library.
++ [**PhoenixJS**](#phoenixjs): How this library differs from PhoenixJs.
 + [**Tests**](#tests): How to run the tests to make sure we're golden.
 + [**Dependencies**](#dependencies): A rant about dependencies.
 + [**Unity**](#unity): Important remarks for Unity developers.
@@ -95,6 +96,18 @@ roomChannel.Join(params)
   .Receive(Reply.Status.Error, r => errorReply = r);
 ```
 
+## PhoenixJS
+
+After porting the PhoenixJs library almost line-by-line to C#, it didn't prove to be a good fit for this statically typed language. JavaScript is chaotic, you can spin off timers quite liberally, and you can simply retry stuff till it works. Not in C#.
+
+In C#, we would like very predictable and controlled behaviour. We want to control which threads the library uses, and how it delivers its callbacks. We also want to control the reconnect/rety logic on our end, in order to properly determine the application state.
+
+With that being said, here are the main deviations this library has from the PhoenixJS library:
+
++ No builtin reconnect/retry logic
++ Pluggable "Delayed Executor", useful for Unity developers
++ 
+
 ## Tests
 
 In order to run the integration tests specifically, you need to make sure you have a phoenix server running and point the `host` in the integration tests to that.
@@ -129,10 +142,18 @@ The issue with breaking the JSON dependency is the need to properly represent in
 
 ## Unity
 
+#### Main Thread Callbacks
+
+Unity ships with an old .Net profile for now, so our main thread synchronization tools are extremely limited. Hence, for now, you should use the `Socket.Options.delayedExecutor` property to plug in a `MonoBehaviour` that can execute code after a certain delay, using Coroutines or something similar. This will ensure the library will always run on the main thread.
+
+If you are **not** concerned with multithreading issues, the library ships with a default `Timer` based executor, which executes after a delay using `System.Timers.Timer`.
+
+#### Useful Libraries
+
 I'm personally shipping this library with my Unity game, so you can rest assured it will always support Unity. Here are some important notes I learned from integrating PhoenixSharp with Unity:
 
-- I am using BestHTTP websockets instead of Websocket-sharp. It's much better maintained and doesn't require synchronizing callbacks from the socket to the main thread. Websocket-sharp does need that.
-- I really recommend you grab Json.NET from the AssetStore, that's what I'm using. I've experienced weird issues in the past with the opensource Newtonsoft.Json on mobile platforms.
+- **BestHTTP websockets** instead of Websocket-sharp. It's much better maintained and doesn't require synchronizing callbacks from the socket to the main thread. Websocket-sharp does need that.
+- **Json.NET** instead of Newtonsoft.Json, that's what I'm using. I've experienced weird issues in the past with the opensource Newtonsoft.Json on mobile platforms.
 
 ## Contributions
 
