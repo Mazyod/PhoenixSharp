@@ -4,39 +4,6 @@ using System.Collections.Generic;
 
 
 namespace Phoenix {
-	// ## Socket Connection
-	//
-	// A single connection is established to the server and
-	// channels are multiplexed over the connection.
-	// Connect to the server using the `Socket` class:
-	//
-	//     let socket = new Socket("/ws", {params: {userToken: "123"}})
-	//     socket.connect()
-	//
-	// The `Socket` constructor takes the mount point of the socket,
-	// the authentication params, as well as options that can be found in
-	// the Socket docs, such as configuring the `LongPoll` transport, and
-	// heartbeat.
-
-	// ## Socket Hooks
-	//
-	// Lifecycle events of the multiplexed connection can be hooked into via
-	// `socket.onError()` and `socket.onClose()` events, ie:
-	//
-	//     socket.onError( () => console.log("there was an error with the connection!") )
-	//     socket.onClose( () => console.log("the connection dropped") )
-
-	// ### onError hooks
-	//
-	// `onError` hooks are invoked if the socket connection drops, or the channel
-	// crashes on the server. In either case, a channel rejoin is attempted
-	// automatically in an exponential backoff manner.
-	//
-	// ### onClose hooks
-	//
-	// `onClose` hooks are invoked only in two cases. 1) the channel explicitly
-	// closed on the server, or 2). The client explicitly closed, by calling
-	// `channel.leave()`
 
 	public sealed class Socket {
 
