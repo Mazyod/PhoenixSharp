@@ -56,9 +56,9 @@ namespace Phoenix {
 
 		#region properties
 
+		public IWebsocket websocket { get; private set; }
 		private readonly IWebsocketFactory websocketFactory;
 		internal readonly Options opts;
-		private IWebsocket websocket;
 
 		private uint? heartbeatTimer = null;
 
@@ -85,7 +85,7 @@ namespace Phoenix {
 				.Select(pair => string.Format("{0}={1}", pair.Key, pair.Value))
 				.ToArray();
 
-			var query = String.Join("&", stringParams);
+			var query = string.Join("&", stringParams);
 
 			var builder = new UriBuilder(string.Format("{0}/websocket", url));
 			builder.Query = query;
