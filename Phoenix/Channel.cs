@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
 
@@ -70,7 +71,7 @@ namespace Phoenix {
 		}
 
 		public void Off(string anyEvent) {
-			bindings[anyEvent] = null;
+			bindings.Remove(anyEvent);
 		}
 
 		public Push Push(string @event, Dictionary<string, object> payload = null, TimeSpan? timeout = null) {
@@ -117,15 +118,15 @@ namespace Phoenix {
 		public Push Leave(TimeSpan? timeout = null) {
 
 			// cleanups
-			foreach (var push in activePushes.Values) {
-				CleanUp(push.@ref);
-			}
+			activePushes.Values
+				.ToList() // copy to avoid mutation while iterating
+				.ForEach(push => CleanUp(push.@ref));
 
 			state = State.Closed;
 
 			Action onClose = () => {
 				socket.Log(LogLevel.Debug, "channel", string.Format("leave {0}", topic));
-				Trigger(new Message() { @event = Message.InBoundEvent.Close.AsString() });
+				Trigger(new Message { @event = Message.InBoundEvent.Close.AsString() });
 			};
 
 			var leavePush = Push(Message.OutBoundEvent.Leave.AsString(), null, timeout)
