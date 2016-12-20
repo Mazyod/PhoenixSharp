@@ -234,11 +234,11 @@ namespace Phoenix {
 			TriggerChannelError();
 			CancelHeartbeat();
 
-			websocket = null;
-
 			if (OnClose != null) {
 				OnClose(code, message);
 			}
+
+			websocket = null;
 		}
 
 		private void WebsocketOnError(IWebsocket ws, string message) {
@@ -253,11 +253,11 @@ namespace Phoenix {
 			TriggerChannelError();
 			CancelHeartbeat();
 
-			websocket = null;
-
 			if (OnError != null) {
 				OnError(message);
 			}
+			
+			websocket = null;
 		}
 
 		private void WebsocketOnMessage(IWebsocket ws, string data) {
