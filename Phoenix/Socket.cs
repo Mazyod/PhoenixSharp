@@ -228,7 +228,7 @@ namespace Phoenix {
 				return;
 			}
 
-			Log(LogLevel.Debug, "socket", "on close");
+			Log(LogLevel.Debug, "socket", string.Format("on close: ({0}) - {1}", code, message ?? "NONE"));
 
 			state = State.Closed;
 			TriggerChannelError();
