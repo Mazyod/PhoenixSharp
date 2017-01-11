@@ -13,7 +13,8 @@ namespace Phoenix {
 		public enum State {
 			Closed,
 			Joining,
-			Joined
+			Joined,
+			Errored, // errored channels are rejoined automatically
 		}
 
 		#endregion
@@ -29,12 +30,18 @@ namespace Phoenix {
 		public readonly string topic;
 
 		private Dictionary<string, Action<Message>> bindings = new Dictionary<string, Action<Message>>();
-		private Dictionary<string, Push> activePushes = new Dictionary<string, Phoenix.Push>();
+		private Dictionary<string, Push> activePushes = new Dictionary<string, Push>();
+		private List<Message> sendBuffer = new List<Message>();
 
-		private Push joinPush;
+		private string joinRef;
+		private uint? reconnectTimer;
 
 		public bool canPush {
 			get { return socket.state == Socket.State.Open && state == State.Joined; }
+		}
+
+		private Push joinPush {
+			get { return activePushes[joinRef]; }
 		}
 
 		#endregion
@@ -51,19 +58,40 @@ namespace Phoenix {
 
 		public Push Join(Dictionary<string, object> parameters = null, TimeSpan? timeout = null) {
 
-			if (joinPush != null) {
+			if (joinRef != null) {
 				throw new Exception("tried to join multiple times. 'join' can only be called a single time per channel instance");
 			}
 
 			state = State.Joining;
-			joinPush = Push(Message.OutBoundEvent.Join.AsString(), parameters, timeout);
 
-			return joinPush;
+			var payload = parameters == null ? null : JObject.FromObject(parameters);
+			var message = MakeMessage(Message.OutBoundEvent.phx_join, null, payload);
+			var push = Push(message, timeout);
+
+			joinRef = push.message.@ref;
+
+			return push;
+		}
+
+		public void Rejoin() {
+
+			if (joinRef == null) {
+				throw new Exception(string.Format("tried to rejoin before joining once: {0}", topic));
+			}
+
+			if (state != State.Errored) {
+				return;
+			}
+
+			state = State.Joining;
+
+			joinPush.reply = null;
+			Push(joinPush, null);
 		}
 
 
 		public void On(Message.InBoundEvent @event, Action<Message> callback) {
-			On(@event.AsString(), callback);
+			On(@event.ToString(), callback);
 		}
 
 		public void On(string anyEvent, Action<Message> callback) {
@@ -81,59 +109,60 @@ namespace Phoenix {
 		}
 
 		public Push PushJson(string @event, JObject obj, TimeSpan? timeout = null) {
-
-			var msg = new Message() { @event = @event, payload = obj };
-			return Push(msg, timeout ?? socket.opts.timeout);
+			return Push(MakeMessage(@event, null, obj), timeout);
 		}
 
-		private Push Push(Message message, TimeSpan timeout) {
+		private Push Push(Message message, TimeSpan? timeout) {
 
-			if (joinPush == null && message.@event != Message.OutBoundEvent.Join.AsString()) {
+			if (joinRef == null && message.@event != Message.OutBoundEvent.phx_join.ToString()) {
 				throw new Exception(string.Format("tried to push '{0}' to '{1}' before joining", message.@event, topic));
 			}
 
-			message.topic = topic;
-			message.@ref = MakeRef();
-
-			var pushEvent = new Push(message.@ref);
-			activePushes[message.@ref] = pushEvent;
-
-			pushEvent.timerId = socket.opts.delayedExecutor.Execute(
-				() => { 
-					pushEvent.TriggerTimeout();
-					CleanUp(pushEvent.@ref);
-				}, timeout);
-
-			socket.Push(message);
-
-			return pushEvent;
+			return Push(new Push(message), timeout);
 		}
 
-		// Leaves the channel
-		//
-		// Unsubscribes from server events, and
-		// instructs channel to terminate on server
-		//
-		// Triggers onClose() hooks
-		public Push Leave(TimeSpan? timeout = null) {
+		private Push Push(Push push, TimeSpan? timeout) {
+
+			activePushes[push.message.@ref] = push;
+
+			push.timerId = socket.opts.delayedExecutor.Execute(
+				() => { 
+					push.TriggerTimeout();
+					CleanUp(push.message.@ref);
+				}, timeout ?? socket.opts.timeout);
+
+			if (!socket.Push(push.message)) {
+				sendBuffer.Add(push.message);
+			}
+
+			return push;
+		}
+
+		/// To register a callback, use channel.On(Message.InboundEvent.phx_close)
+		public void Leave(TimeSpan? timeout = null) {
 
 			// cleanups
 			activePushes.Values
 				.ToList() // copy to avoid mutation while iterating
-				.ForEach(push => CleanUp(push.@ref));
-
-			state = State.Closed;
+				.ForEach(push => CleanUp(push.message.@ref));
 
 			Action onClose = () => {
 				socket.Log(LogLevel.Debug, "channel", string.Format("leave {0}", topic));
-				Trigger(new Message { @event = Message.InBoundEvent.Close.AsString() });
+				Trigger(MakeMessage(Message.InBoundEvent.phx_close, joinRef));
 			};
 
-			var leavePush = Push(Message.OutBoundEvent.Leave.AsString(), null, timeout)
-				.Receive(Reply.Status.Ok, _ => onClose())
-				.Receive(Reply.Status.Timeout, _ => onClose());
-
-			return leavePush;
+			if (state == State.Closed || state == State.Errored) {
+				state = State.Closed;
+				onClose();
+			}
+			else {
+				// eagerly set state to closed to avoid reconnecting/triggering errors
+				state = State.Closed;
+				
+				Push(MakeMessage(Message.OutBoundEvent.phx_leave), timeout)
+					.Receive(Reply.Status.Ok, _ => onClose())
+					.Receive(Reply.Status.Timeout, _ => onClose());
+			}
 		}
 
 		#endregion
@@ -146,6 +175,20 @@ namespace Phoenix {
 			return (++refCount).ToString();
 		}
 
+		private Message MakeMessage(Enum @event, string @ref = null, JObject payload = null) {
+			return MakeMessage(@event.ToString(), @ref, payload);
+		}
+
+		private Message MakeMessage(string @event, string @ref = null, JObject payload = null) {
+			return new Message(topic, @event, @ref ?? MakeRef(), payload);
+		}
+
+		private void FlushSendBuffer() {
+			sendBuffer = sendBuffer
+				.Where(m => !socket.Push(m))
+				.ToList();
+		}
+
 		private void CleanUp(string @ref) {
 
 			if (activePushes.ContainsKey(@ref)) {
@@ -153,7 +196,13 @@ namespace Phoenix {
 				socket.opts.delayedExecutor.Cancel(timerId);
 			}
 
-			activePushes.Remove(@ref);
+			if (@ref != joinRef) {
+				activePushes.Remove(@ref);
+			}
+		}
+
+		internal void SocketTerminated(string reason) {
+			Trigger(MakeMessage(Message.InBoundEvent.phx_error, joinRef), reason);
 		}
 
 		private void OnJoinReply(Reply reply) {
@@ -162,17 +211,17 @@ namespace Phoenix {
 			case Reply.Status.Ok:
 				socket.Log(LogLevel.Debug, "channel", string.Format("join ok {0}", topic));
 				state = State.Joined;
+				reconnectTimer = null;
+				FlushSendBuffer();
 				break;
 
 			case Reply.Status.Error:
-				socket.Log(LogLevel.Debug, "channel", string.Format("join error {0}", topic));
-				state = Channel.State.Closed;
+				TriggerError("join error");
 				break;
 
 			case Reply.Status.Timeout:
 				if (state == State.Joining) {
-					socket.Log(LogLevel.Debug, "channel", string.Format("join timeout {0}", topic));
-					state = State.Closed;
+					TriggerError("join timeout");
 				}
 				break;
 			}
@@ -181,7 +230,9 @@ namespace Phoenix {
 		private void OnReply(Message msg) {
 
 			var reply = ReplySerialization.Deserialize(msg.payload);
-			if (msg.@ref == joinPush.@ref) {
+			var isJoinReply = msg.@ref == joinRef;
+
+			if (isJoinReply) {
 				OnJoinReply(reply);
 			}
 
@@ -191,41 +242,52 @@ namespace Phoenix {
 			}
 		}
 
-		internal void TriggerClose() {
+		private void TriggerClose() {
 			socket.Log(LogLevel.Debug, "channel", string.Format("close {0}", topic));
 
 			state = State.Closed;
 			socket.Remove(this);
 		}
 
-		internal void TriggerError() {
+		private void TriggerError(string reason) {
 
 			if (state == State.Closed) {
 				return;
 			}
 
-			socket.Log(LogLevel.Info, "channel", string.Format("{0}: channel errored abnormally", topic));
-			state = State.Closed;
+			socket.Log(LogLevel.Info, "channel", string.Format("{0}: {1}", topic, reason));
+			state = State.Errored;
+
+			var interval = socket.opts.channelRejoinInterval;
+			if (reconnectTimer == null && interval.HasValue) {
+				reconnectTimer = socket.opts.delayedExecutor.Execute(Rejoin, interval.Value);
+			}
 		}
 
-		internal void Trigger(Message msg) {
+		internal void Trigger(Message msg, string info = null) {
 
 			var inboundEvent = MessageInBoundEventExtensions.Parse(msg.@event);
-			if (msg.@ref != null && msg.@ref != joinPush.@ref && inboundEvent.HasValue && inboundEvent.Value != Message.InBoundEvent.Reply) {
+
+			bool isOldJoinEvent = 
+				msg.@ref != null 
+				&& msg.@ref != joinRef 
+				&& inboundEvent != Message.InBoundEvent.phx_reply;
+
+			if (isOldJoinEvent) {
 				return;
 			}
 
 			switch (inboundEvent) {
-			case Message.InBoundEvent.Reply:
+			case Message.InBoundEvent.phx_reply:
 				OnReply(msg);
 				break;
 
-			case Message.InBoundEvent.Close:
+			case Message.InBoundEvent.phx_close:
 				TriggerClose();
 				break;
 
-			case Message.InBoundEvent.Error:
-				TriggerError();
+			case Message.InBoundEvent.phx_error:
+				TriggerError(info ?? "channel errored abnormally");
 				break;
 
 			case null:

@@ -12,18 +12,13 @@ namespace PhoenixTests {
 
 		private Message sampleMessage {
 			get {
-				var payload = new Dictionary<string, object>() {
+				var payload = new Dictionary<string, object> {
 					{ "some key", 12 },
-					{ "another key", new Dictionary<string, object>() { 
+					{ "another key", new Dictionary<string, object> { 
 							{ "nested", "value" }}},
 				};
 
-				return new Message() {
-					topic = "phoenix-test",
-					@ref = "123",
-					@event = "somevalue",
-					payload = JObject.FromObject(payload)
-				};
+				return new Message("phoenix-test", Message.OutBoundEvent.phx_join.ToString(), "123", JObject.FromObject(payload));
 			}
 		}
 
@@ -34,9 +29,9 @@ namespace PhoenixTests {
 			var serialized = sampleMessage.Serialize();
 			var expected = "{"
 				+ "\"topic\":\"phoenix-test\","
-				+ "\"payload\":{\"some key\":12,\"another key\":{\"nested\":\"value\"}},"
-				+ "\"event\":\"somevalue\","
-				+ "\"ref\":\"123\""
+				+ "\"event\":\"phx_join\","
+				+ "\"ref\":\"123\","
+				+ "\"payload\":{\"some key\":12,\"another key\":{\"nested\":\"value\"}}"
 				+ "}";
 
 			Assert.AreEqual(serialized, expected);
@@ -55,18 +50,8 @@ namespace PhoenixTests {
 		[Test()]
 		public void SerializingNullPayloadTest() {
 
-			var message = sampleMessage;
-			message.payload = null;
-
-			var serialized = message.Serialize();
-			var expected = "{"
-				+ "\"topic\":\"phoenix-test\","
-				+ "\"payload\":{}," // consistent with phoenix.js
-				+ "\"event\":\"somevalue\","
-				+ "\"ref\":\"123\""
-				+ "}";
-
-			Assert.AreEqual(serialized, expected);
+			var message = new Message(null, null, null, null);
+			Assert.IsNotNull(message.payload); // consistent with phoenix.js
 		}
 	}
 }

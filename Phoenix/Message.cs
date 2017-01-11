@@ -5,25 +5,32 @@ using Newtonsoft.Json.Linq;
 
 namespace Phoenix {
 	
-	public struct Message : IEquatable<Message> {
+	public class Message : IEquatable<Message> {
 
 		public enum InBoundEvent {
-			Reply,
-			Close,
-			Error,
+			phx_reply,
+			phx_close,
+			phx_error,
 		}
 
 		public enum OutBoundEvent {
-			Join,
-			Leave,
+			phx_join,
+			phx_leave,
 		}
 
-		public string topic;
-		public JObject payload;
+		public readonly string topic;
+		public readonly string @event;
+		public readonly string @ref;
+		public readonly JObject payload;
 
-		public string @event;
-		public string @ref;
 
+		public Message(string topic, string @event, string @ref, JObject payload) {
+
+			this.topic = topic;
+			this.@event = @event;
+			this.@ref = @ref;
+			this.payload = payload ?? new JObject();
+		}
 
 		public override string ToString() {
 			return string.Format("[{0}] {1}: {2}", @ref, topic, @event);
@@ -55,26 +62,13 @@ namespace Phoenix {
 
 		public static Message.InBoundEvent? Parse(string rawChannelEvent) {
 
-			var controlEvents = new Dictionary<string, Message.InBoundEvent> {
-				{ "phx_close", Message.InBoundEvent.Close },
-				{ "phx_error", Message.InBoundEvent.Error },
-				{ "phx_reply", Message.InBoundEvent.Reply },
-			};
-
-			if (controlEvents.ContainsKey(rawChannelEvent)) { 
-				return controlEvents[rawChannelEvent];
+			foreach (Message.InBoundEvent inboundEvent in Enum.GetValues(typeof(Message.InBoundEvent))) {
+				if (inboundEvent.ToString() == rawChannelEvent) {
+					return inboundEvent;
+				}
 			}
 
 			return null;
-		}
-
-		public static string AsString(this Message.InBoundEvent channelEvent) {
-
-			return new Dictionary<Message.InBoundEvent, string> {
-				{ Message.InBoundEvent.Close, "phx_close" },
-				{ Message.InBoundEvent.Error, "phx_error" },
-				{ Message.InBoundEvent.Reply, "phx_reply" },
-			}[channelEvent];
 		}
 	}
 
@@ -82,18 +76,13 @@ namespace Phoenix {
 
 		public static Message.OutBoundEvent Parse(string rawChannelEvent) {
 
-			return new Dictionary<string, Message.OutBoundEvent> {
-				{ "phx_join", Message.OutBoundEvent.Join },
-				{ "phx_leave", Message.OutBoundEvent.Leave },
-			}[rawChannelEvent];
-		}
+			foreach (Message.OutBoundEvent outboundEvent in Enum.GetValues(typeof(Message.OutBoundEvent))) {
+				if (outboundEvent.ToString() == rawChannelEvent) {
+					return outboundEvent;
+				}
+			}
 
-		public static string AsString(this Message.OutBoundEvent channelEvent) {
-
-			return new Dictionary<Message.OutBoundEvent, string> {
-				{ Message.OutBoundEvent.Join, "phx_join" },
-				{ Message.OutBoundEvent.Leave, "phx_leave" },
-			}[channelEvent];
+			throw new ArgumentOutOfRangeException(rawChannelEvent);
 		}
 	}
 }

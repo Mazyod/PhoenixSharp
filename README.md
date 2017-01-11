@@ -18,6 +18,11 @@ This project will remain as a prerelease until Unity ships their .Net profile up
 
 Once we reach v1.0, we can then focus on integrating CI, and uploading the package to NuGet.
 
+Also, here is a basic TODO:
+
+- [ ] Presence
+- [ ] Socket automatic recovery
+
 ## Getting Started
 
 For now, you can use git submodules or simply download the sources and drop them in your project.
@@ -100,13 +105,12 @@ roomChannel.Join(params)
 
 After porting the PhoenixJs library almost line-by-line to C#, it didn't prove to be a good fit for this statically typed language. JavaScript is chaotic, you can spin off timers quite liberally, and you can simply retry stuff till it works. Not in C#.
 
-In C#, we would like very predictable and controlled behaviour. We want to control which threads the library uses, and how it delivers its callbacks. We also want to control the reconnect/rety logic on our end, in order to properly determine the application state.
+In C#, we would like very predictable and controlled behavior. We want to control which threads the library uses, and how it delivers its callbacks. We also want to control the reconnect/rety logic on our end, in order to properly determine the application state.
 
 With that being said, here are the main deviations this library has from the PhoenixJS library:
 
-+ No builtin reconnect/retry logic
++ Ability to control channel rejoin
 + Pluggable "Delayed Executor", useful for Unity developers
-+ 
 
 ## Tests
 

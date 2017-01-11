@@ -9,17 +9,18 @@ namespace Phoenix {
 
 		#region properties
 
-		public readonly string @ref;
+		public readonly Message message;
+
 		internal uint timerId;
+		internal Reply? reply = null;
 
 		private readonly Dictionary<Reply.Status, Action<Reply>> replyHooks = new Dictionary<Reply.Status, Action<Reply>>();
-		private Reply? reply = null;
 
 		#endregion
 
 
-		public Push(string @ref) {
-			this.@ref = @ref;
+		public Push(Message message) {
+			this.message = message;
 		}
 
 
@@ -41,7 +42,7 @@ namespace Phoenix {
 		#region private & internal methods
 
 		internal void TriggerTimeout() {
-			TriggerReplyCallback(new Reply() { status = Reply.Status.Timeout });
+			TriggerReplyCallback(new Reply { status = Reply.Status.Timeout });
 		}
 
 		internal void TriggerReplyCallback(Reply reply) {

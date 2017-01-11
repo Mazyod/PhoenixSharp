@@ -26,6 +26,8 @@ namespace Phoenix {
 		public sealed class Options {
 			// The default timeout to trigger push timeouts.
 			public TimeSpan timeout = TimeSpan.FromSeconds(10);
+			// The interval for rejoining an errored channel. Null means none
+			public TimeSpan? channelRejoinInterval = TimeSpan.FromSeconds(1);
 			// The interval to send a heartbeat message.
 			public TimeSpan heartbeatInterval = TimeSpan.FromSeconds(30);
 			// The optional function for specialized logging
@@ -61,9 +63,7 @@ namespace Phoenix {
 		internal readonly Options opts;
 
 		private uint? heartbeatTimer = null;
-
 		private Dictionary<string, Channel> channels = new Dictionary<string, Channel>();
-		private List<string> sendBuffer = new List<string>();
 
 		public State state { get; private set; }
 
@@ -99,23 +99,19 @@ namespace Phoenix {
 				return;
 			}
 
-			Push(new Message() {
-				topic = "phoenix",
-				@event = "heartbeat",
-				payload = null
-			});
-
+			Push(new Message("phoenix", "heartbeat", null, null));
 			heartbeatTimer = opts.delayedExecutor.Execute(SendHeartbeat, opts.heartbeatInterval);
 		}
 
-		private void FlushSendBuffer() {
-			sendBuffer.ForEach(websocket.Send);
-			sendBuffer.Clear();
+		private void RejoinChannels() {
+			foreach (var channel in channels.Values) {
+				channel.Rejoin();
+			}
 		}
 
-		private void TriggerChannelError() {
+		private void TriggerChannelError(string reason) {
 			foreach (var channel in channels.Values) {
-				channel.TriggerError();
+				channel.SocketTerminated(reason);
 			}
 		}
 
@@ -130,17 +126,17 @@ namespace Phoenix {
 			channels.Remove(channel.topic);
 		}
 
-		internal void Push(Message msg) {
+		internal bool Push(Message msg) {
 
 			var json = msg.Serialize();
-
-			Log(LogLevel.Debug,"push", json);
+			Log(LogLevel.Trace, "push", json);
 
 			if (state == State.Open) {
 				websocket.Send(json);
-			} else {
-				sendBuffer.Add(json);
+				return true;
 			}
+
+			return false;
 		}
 
 		// Logs the message. Override `this.logger` for specialized logging. noops by default
@@ -158,7 +154,7 @@ namespace Phoenix {
 		public void Disconnect(ushort? code = null, string reason = null) {
 
 			CancelHeartbeat();
-			TriggerChannelError();
+			TriggerChannelError("socket disconnect");
 
 			if (websocket == null) {
 				return;
@@ -214,7 +210,7 @@ namespace Phoenix {
 			Log(LogLevel.Debug, "socket", "on open");
 
 			state = State.Open;
-			FlushSendBuffer();
+			RejoinChannels();
 			SendHeartbeat();
 
 			if (OnOpen != null) {
@@ -231,7 +227,7 @@ namespace Phoenix {
 			Log(LogLevel.Debug, "socket", string.Format("on close: ({0}) - {1}", code, message ?? "NONE"));
 
 			state = State.Closed;
-			TriggerChannelError();
+			TriggerChannelError("socket close");
 			CancelHeartbeat();
 
 			if (OnClose != null) {
@@ -250,7 +246,7 @@ namespace Phoenix {
 			Log(LogLevel.Info, "socket", message ?? "unknown");
 
 			state = State.Closed;
-			TriggerChannelError();
+			TriggerChannelError("socket error");
 			CancelHeartbeat();
 
 			if (OnError != null) {
