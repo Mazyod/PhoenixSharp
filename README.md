@@ -93,7 +93,7 @@ socket.Connect(string.Format("ws://{0}/socket", host), null);
 
 ```cs
 var roomChannel = socket.MakeChannel("tester:phoenix-sharp");
-roomChannel.On(Message.InBoundEvent.Close, m => closeMessage = m);
+roomChannel.On(Message.InBoundEvent.phx_close, m => closeMessage = m);
 roomChannel.On("after_join", m => afterJoinMessage = m);
 
 roomChannel.Join(params)
