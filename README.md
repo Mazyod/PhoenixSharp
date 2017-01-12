@@ -16,7 +16,7 @@ A C# Phoenix Channels client. Unity Compatible.
 
 This project will remain as a prerelease until Unity ships their .Net profile upgrade, which should be soon. This will allow this library to utilize the latest and greatest .Net 4.6 features, enhancing the experience further, and allowing us to reach v1.0!
 
-Once we reach v1.0, we can then focus on integrating CI, and uploading the package to NuGet.
+For now, I am also experimenting with the best API implementation, so breaking changes might be introduced. Once we reach v1.0, API should be stabile, and we can then focus on integrating CI, and uploading the package to NuGet.
 
 Also, here is a basic TODO:
 
