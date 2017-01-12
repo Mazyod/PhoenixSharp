@@ -28,8 +28,8 @@ namespace Phoenix {
 			public TimeSpan timeout = TimeSpan.FromSeconds(10);
 			// The interval for rejoining an errored channel. Null means none
 			public TimeSpan? channelRejoinInterval = TimeSpan.FromSeconds(1);
-			// The interval to send a heartbeat message.
-			public TimeSpan heartbeatInterval = TimeSpan.FromSeconds(30);
+			// The interval to send a heartbeat message. Null means disable
+			public TimeSpan? heartbeatInterval = TimeSpan.FromSeconds(30);
 			// The optional function for specialized logging
 			public ILogger logger = null;
 			// The object responsible for performing delayed executions
@@ -95,12 +95,12 @@ namespace Phoenix {
 
 		private void SendHeartbeat() {
 
-			if (state != State.Open) {
+			if (state != State.Open || opts.heartbeatInterval == null) {
 				return;
 			}
 
 			Push(new Message("phoenix", "heartbeat", null, null));
-			heartbeatTimer = opts.delayedExecutor.Execute(SendHeartbeat, opts.heartbeatInterval);
+			heartbeatTimer = opts.delayedExecutor.Execute(SendHeartbeat, opts.heartbeatInterval.Value);
 		}
 
 		private void RejoinChannels() {
@@ -153,12 +153,12 @@ namespace Phoenix {
 
 		public void Disconnect(ushort? code = null, string reason = null) {
 
-			CancelHeartbeat();
-			TriggerChannelError("socket disconnect");
-
 			if (websocket == null) {
 				return;
 			}
+
+			CancelHeartbeat();
+			TriggerChannelError("socket disconnect");
 
 			// disables callbacks
 			state = State.Closed;
