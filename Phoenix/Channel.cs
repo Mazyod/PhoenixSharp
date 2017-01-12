@@ -98,6 +98,10 @@ namespace Phoenix {
 			bindings[anyEvent] = callback;
 		}
 
+		public void Off(Enum eventEnum) {
+			Off(eventEnum.ToString());
+		}
+
 		public void Off(string anyEvent) {
 			bindings.Remove(anyEvent);
 		}
