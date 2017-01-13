@@ -110,9 +110,9 @@ namespace Phoenix {
 		}
 
 		private void TriggerChannelError(string reason) {
-			foreach (var channel in channels.Values) {
-				channel.SocketTerminated(reason);
-			}
+			channels.Values
+				.ToList() // copy to allow mutation of channels
+				.ForEach(ch => ch.SocketTerminated(reason));
 		}
 
 		private void CancelHeartbeat() {
