@@ -123,7 +123,9 @@ namespace Phoenix {
 		}
 
 		internal void Remove(Channel channel) {
-			channels.Remove(channel.topic);
+			if (channels.ContainsKey(channel.topic) && channels[channel.topic] == channel) {
+				channels.Remove(channel.topic);
+			}
 		}
 
 		internal bool Push(Message msg) {
@@ -190,6 +192,12 @@ namespace Phoenix {
 
 		public Channel MakeChannel(string topic) {
 			// Phoenix 1.2+ returns a new channel and closes the old one if we join a topic twice
+			// to accommodate for that, we immediately leave and remove existing the channel
+			if (channels.ContainsKey(topic)) {
+				channels[topic].SocketTerminated("channel replaced");
+				channels[topic].Leave();
+			}
+
 			var channel = new Channel(topic, this);
 			channels[topic] = channel;
 

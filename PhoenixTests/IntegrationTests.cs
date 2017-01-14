@@ -234,12 +234,33 @@ namespace PhoenixTests {
 			Assert.That(() => roomChannel.canPush, Is.True.After(networkDelay, 10));
 
 			/// 
+			/// test channel replace
+			/// 
+			joinOkReply = null;
+			joinErrorReply = null;
+			errorMessage = null;
+			Assert.IsNull(closeMessage);
+			Message newCloseMessage = null;
+			
+			var newRoomChannel = socket.MakeChannel("tester:phoenix-sharp");
+			newRoomChannel.On(Message.InBoundEvent.phx_close, m => newCloseMessage = m);
+
+			newRoomChannel.Join(param)
+				.Receive(Reply.Status.Ok, r => joinOkReply = r)
+				.Receive(Reply.Status.Error, r => joinErrorReply = r);
+
+			Assert.That(() => joinOkReply.HasValue, Is.True.After(networkDelay, 10));
+			Assert.IsNull(joinErrorReply);
+			Assert.IsNotNull(errorMessage);
+			Assert.IsNotNull(closeMessage);
+
+			/// 
 			/// test channel leave
 			/// 
-			Assert.IsNull(closeMessage);
-			roomChannel.Leave();
+			Assert.IsNull(newCloseMessage);
+			newRoomChannel.Leave();
 
-			Assert.That(() => closeMessage != null, Is.True.After(networkDelay, 10));
+			Assert.That(() => newCloseMessage != null, Is.True.After(networkDelay, 10));
 		}
 	}
 }
