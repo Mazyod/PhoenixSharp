@@ -83,6 +83,13 @@ namespace Phoenix {
 				return;
 			}
 
+			if (socket.state != Socket.State.Open) {
+				if (socket.opts.channelRejoinInterval.HasValue) {
+					reconnectTimer = socket.opts.delayedExecutor.Execute(Rejoin, socket.opts.channelRejoinInterval.Value);
+				}
+				return;
+			}
+
 			state = State.Joining;
 
 			joinPush.reply = null;
