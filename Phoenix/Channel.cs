@@ -151,29 +151,23 @@ namespace Phoenix {
 
 		/// To register a callback, use channel.On(Message.InboundEvent.phx_close)
 		public void Leave(TimeSpan? timeout = null) {
+			socket.Log(LogLevel.Debug, "channel", string.Format("leave {0}", topic));
 
 			// cleanups
 			activePushes.Values
 				.ToList() // copy to avoid mutation while iterating
 				.ForEach(push => CleanUp(push.message.@ref));
 
-			Action onClose = () => {
-				socket.Log(LogLevel.Debug, "channel", string.Format("leave {0}", topic));
-				Trigger(MakeMessage(Message.InBoundEvent.phx_close, joinRef));
-			};
 
-			if (state == State.Closed || state == State.Errored) {
-				state = State.Closed;
-				onClose();
+			// eagerly set state to closed to avoid reconnecting/triggering errors
+			var oldState = state;
+			state = State.Closed;
+
+			if (oldState != State.Closed && oldState != State.Errored) {
+				Push(MakeMessage(Message.OutBoundEvent.phx_leave), timeout);
 			}
-			else {
-				// eagerly set state to closed to avoid reconnecting/triggering errors
-				state = State.Closed;
-				
-				Push(MakeMessage(Message.OutBoundEvent.phx_leave), timeout)
-					.Receive(Reply.Status.Ok, _ => onClose())
-					.Receive(Reply.Status.Timeout, _ => onClose());
-			}
+
+			Trigger(MakeMessage(Message.InBoundEvent.phx_close, joinRef));
 		}
 
 		#endregion

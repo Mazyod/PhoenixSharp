@@ -256,11 +256,19 @@ namespace PhoenixTests {
 
 			/// 
 			/// test channel leave
+			/// also, it should discard any additional messages
 			/// 
 			Assert.IsNull(newCloseMessage);
+			Message pushMessage = null;
+
+			newRoomChannel.On("push_test", m => pushMessage = m);
+			newRoomChannel.Push("push_test", payload);
+
+			Assert.IsNull(pushMessage);
 			newRoomChannel.Leave();
 
 			Assert.That(() => newCloseMessage != null, Is.True.After(networkDelay, 10));
+			Assert.IsNull(pushMessage); // ignored
 		}
 	}
 }
