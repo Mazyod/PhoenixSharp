@@ -1,7 +1,7 @@
 
 ![Imgur](http://i.imgur.com/B8ClrWe.png)
 
-A C# Phoenix Channels client. Unity Compatible.
+A C# Phoenix Channels client. Unity Compatible. Proudly powering [Dama King](http://level3.io).
 
 > Graphic is a shameless mix between unity, phoenix logos. Please don't sue me. Thanks.
 
