@@ -14,7 +14,7 @@ A C# Phoenix Channels client. Unity Compatible. Proudly powering [Dama King](htt
 
 ## Roadmap
 
-This project will remain as a prerelease until Unity ships their .Net profile upgrade, which should be soon. This will allow this library to utilize the latest and greatest .Net 4.6 features, enhancing the experience further, and allowing us to reach v1.0!
+This project will remain as a prerelease until Unity ships their .Net profile upgrade, which ~should be soon~ **will debut in Unity 2017.1!!**. This will allow this library to utilize the latest and greatest .Net 4.6 features, enhancing the experience further, and allowing us to reach v1.0!
 
 For now, I am also experimenting with the best API implementation, so breaking changes might be introduced. Once we reach v1.0, API should be stabile, and we can then focus on integrating CI, and uploading the package to NuGet.
 
