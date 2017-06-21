@@ -47,7 +47,6 @@ namespace Phoenix {
 	//
 	public class Presence {
 		public static JObject syncState(JObject currentState, JObject newState, Action<string, JToken, JToken> onJoin = null, Action<string, JToken, JToken> onLeave = null){
-//			JObject state = (JObject)currentState.DeepClone();
 			JObject state = (JObject)JObject.Parse(currentState.ToString());
 			JObject joins = new JObject();
 			JObject leaves = new JObject();
@@ -85,7 +84,7 @@ namespace Phoenix {
 						);
 					}
 					if(leftMetas.Count != 0){
-						leaves[key] = currentPresence.DeepClone();
+						leaves[key] = (JObject)JObject.Parse(currentPresence.ToString());
 						leaves[key]["metas"] = new JArray (
 							leftMetas.Select (p => new JObject {
 								{ "phx_ref", p["phx_ref"]},
@@ -106,16 +105,7 @@ namespace Phoenix {
 		public static JObject syncDiff(JObject currentState, JObject diffState, Action<string, JToken, JToken> onJoin = null, Action<string, JToken, JToken> onLeave = null){
 			JObject joins = (JObject)diffState ["joins"];
 			JObject leaves = (JObject)diffState ["leaves"];
-			JObject state = (JObject)currentState.DeepClone();
-
-//			this.map(joins, (key, newPresence) => {
-//				let currentPresence = state[key]
-//				state[key] = newPresence
-//				if(currentPresence){
-//					state[key].metas.unshift(...currentPresence.metas)
-//				}
-//				onJoin(key, currentPresence, newPresence)
-//			})
+			JObject state = (JObject)JObject.Parse(currentState.ToString());
 
 			IList<string> joinskeys = joins.Properties().Select(p => p.Name).ToList();	
 			foreach (string key in joinskeys) {
@@ -123,9 +113,7 @@ namespace Phoenix {
 				var currentPresence = state [key];
 				state [key] = newPresence;
 				if (currentPresence != null) {
-//					Debug.Log (state [key]["metas"]); // WTF
 					((JArray)state [key]["metas"]).Merge(currentPresence["metas"]);
-//					Debug.Log (state [key]["metas"]);
 				}
 				if (onJoin != null) { 
 					onJoin (key, currentPresence, newPresence);
@@ -138,7 +126,6 @@ namespace Phoenix {
 				var currentPresence = state [key];
 				if(currentPresence != null){
 					List<JToken> refsToRemove = getPhxRef ((JArray) leftPresence ["metas"]);
-//					Debug.Log (currentPresence ["metas"]);
 					List<JToken> currentPresenceMeta = currentPresence ["metas"]
 						.Where (currectMeta => refsToRemove.Exists (newRef => newRef == currectMeta ["phx_ref"]))
 						.ToList();
