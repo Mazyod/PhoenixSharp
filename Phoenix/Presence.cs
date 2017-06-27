@@ -112,9 +112,9 @@ namespace Phoenix {
 				var newPresence = joins[key];
 				var currentPresence = state [key];
 				state [key] = newPresence;
-				if (currentPresence != null) {
-					((JArray)state [key]["metas"]).Merge(currentPresence["metas"]);
-				}
+				// if (currentPresence != null) {
+				//	((JArray)state [key]["metas"]).Merge(currentPresence["metas"]);
+				// }
 				if (onJoin != null) { 
 					onJoin (key, currentPresence, newPresence);
 				}
