@@ -8,79 +8,79 @@ using WebSocketSharp;
 
 namespace PhoenixTests
 {
-    public sealed class WebsocketSharpAdapter : IWebsocket
-    {
+	public sealed class WebsocketSharpAdapter : IWebsocket
+	{
 
-        private readonly WebSocket ws;
-        private readonly WebsocketConfiguration config;
-
-
-        public WebsocketSharpAdapter(WebSocket ws, WebsocketConfiguration config)
-        {
-
-            this.ws = ws;
-            this.config = config;
-
-            ws.OnOpen += OnWebsocketOpen;
-            ws.OnClose += OnWebsocketClose;
-            ws.OnError += OnWebsocketError;
-            ws.OnMessage += OnWebsocketMessage;
-        }
+		private readonly WebSocket ws;
+		private readonly WebsocketConfiguration config;
 
 
-        #region IWebsocket methods
+		public WebsocketSharpAdapter(WebSocket ws, WebsocketConfiguration config)
+		{
 
-        public void Connect()
-        {
-            ws.Connect();
-        }
+			this.ws = ws;
+			this.config = config;
 
-        public void Send(string message)
-        {
-            ws.Send(message);
-        }
-
-        public void Close(ushort? code = null, string message = null)
-        {
-            ws.Close();
-        }
-
-        #endregion
+			ws.OnOpen += OnWebsocketOpen;
+			ws.OnClose += OnWebsocketClose;
+			ws.OnError += OnWebsocketError;
+			ws.OnMessage += OnWebsocketMessage;
+		}
 
 
-        #region websocketsharp callbacks
+		#region IWebsocket methods
 
-        public void OnWebsocketOpen(object sender, EventArgs args)
-        {
-            config.onOpenCallback(this);
-        }
+		public void Connect()
+		{
+			ws.Connect();
+		}
 
-        public void OnWebsocketClose(object sender, CloseEventArgs args)
-        {
-            config.onCloseCallback(this, args.Code, args.Reason);
-        }
+		public void Send(string message)
+		{
+			ws.Send(message);
+		}
 
-        public void OnWebsocketError(object sender, ErrorEventArgs args)
-        {
-            config.onErrorCallback(this, args.Message);
-        }
+		public void Close(ushort? code = null, string message = null)
+		{
+			ws.Close();
+		}
 
-        public void OnWebsocketMessage(object sender, MessageEventArgs args)
-        {
-            config.onMessageCallback(this, args.Data);
-        }
+		#endregion
 
-        #endregion
-    }
 
-    public sealed class WebsocketSharpFactory : IWebsocketFactory
-    {
+		#region websocketsharp callbacks
 
-        public IWebsocket Build(WebsocketConfiguration config)
-        {
+		public void OnWebsocketOpen(object sender, EventArgs args)
+		{
+			config.onOpenCallback(this);
+		}
 
-            var socket = new WebSocket(config.uri.AbsoluteUri);
-            return new WebsocketSharpAdapter(socket, config);
-        }
-    }
+		public void OnWebsocketClose(object sender, CloseEventArgs args)
+		{
+			config.onCloseCallback(this, args.Code, args.Reason);
+		}
+
+		public void OnWebsocketError(object sender, ErrorEventArgs args)
+		{
+			config.onErrorCallback(this, args.Message);
+		}
+
+		public void OnWebsocketMessage(object sender, MessageEventArgs args)
+		{
+			config.onMessageCallback(this, args.Data);
+		}
+
+		#endregion
+	}
+
+	public sealed class WebsocketSharpFactory : IWebsocketFactory
+	{
+
+		public IWebsocket Build(WebsocketConfiguration config)
+		{
+
+			var socket = new WebSocket(config.uri.AbsoluteUri);
+			return new WebsocketSharpAdapter(socket, config);
+		}
+	}
 }
