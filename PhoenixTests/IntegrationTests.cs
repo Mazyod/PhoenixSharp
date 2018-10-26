@@ -9,70 +9,7 @@ using WebSocketSharp;
 
 namespace PhoenixTests {
 
-	public sealed class WebsocketSharpAdapter: IWebsocket {
-
-		private readonly WebSocket ws;
-		private readonly WebsocketConfiguration config;
-
-
-		public WebsocketSharpAdapter(WebSocket ws, WebsocketConfiguration config) {
-			
-			this.ws = ws;
-			this.config = config;
-
-			ws.OnOpen += OnWebsocketOpen;
-			ws.OnClose += OnWebsocketClose;
-			ws.OnError += OnWebsocketError;
-			ws.OnMessage += OnWebsocketMessage;
-		}
-
-
-		#region IWebsocket methods
-
-		public void Connect() {
-			ws.Connect();
-		}
-
-		public void Send(string message) {
-			ws.Send(message);
-		}
-
-		public void Close(ushort? code = null, string message = null) {
-			ws.Close();
-		}
-
-		#endregion
-
-
-		#region websocketsharp callbacks
-
-		public void OnWebsocketOpen(object sender, EventArgs args) {
-			config.onOpenCallback(this);
-		}
-
-		public void OnWebsocketClose(object sender, CloseEventArgs args) {
-			config.onCloseCallback(this, args.Code, args.Reason);
-		}
-
-		public void OnWebsocketError(object sender, ErrorEventArgs args) {
-			config.onErrorCallback(this, args.Message);
-		}
-
-		public void OnWebsocketMessage(object sender, MessageEventArgs args) {
-			config.onMessageCallback(this, args.Data);
-		}
-
-		#endregion
-	}
-
-	public sealed class WebsocketSharpFactory: IWebsocketFactory {
-
-		public IWebsocket Build(WebsocketConfiguration config) {
-
-			var socket = new WebSocket(config.uri.AbsoluteUri);
-			return new WebsocketSharpAdapter(socket, config);
-		}
-	}
+	
 
 	public sealed class BasicLogger : ILogger {
 		
@@ -90,14 +27,14 @@ namespace PhoenixTests {
 	public class IntegrationTests {
 
 		private const int networkDelay = 500 /* ms */;
-
+		private const string host = "phoenix-integration-tester.herokuapp.com";
+		
 		[Test()]
-		public void IntegrationTest() {
+		public void GeneralIntegrationTest() {
 
 			/// 
 			/// setup
 			/// 
-			var host = "localhost:4000";
 			var address = string.Format("http://{0}/api/health-check", host);
 
 			// heroku health check
@@ -114,10 +51,12 @@ namespace PhoenixTests {
 
 			// connecting is synchronous as implemented above
 			var socketFactory = new WebsocketSharpFactory();
-			var socket = new Socket(socketFactory, new Socket.Options {
+			var socket = new Socket(socketFactory, new Socket.Options
+			{
 				channelRejoinInterval = TimeSpan.FromMilliseconds(200),
 				logger = new BasicLogger()
 			});
+
 			socket.OnOpen += onOpenCallback;
 			socket.OnMessage += onMessageCallback;
 
@@ -269,6 +208,68 @@ namespace PhoenixTests {
 
 			Assert.That(() => newCloseMessage != null, Is.True.After(networkDelay, 10));
 			Assert.IsNull(pushMessage); // ignored
+		}
+
+		[Test()]
+		public void MultipleJoinIntegrationTest()
+		{
+			var onOpenCount = 0;
+			Socket.OnOpenDelegate onOpenCallback = () => onOpenCount++;
+			Socket.OnClosedDelegate onClosedCallback = (code, message) => onOpenCount--;
+
+			List<String> onMessageData = new List<string>();
+			Socket.OnMessageDelegate onMessageCallback = m => onMessageData.Add(m);
+
+			var socketFactory = new DotNetWebSocketFactory();
+			var socket = new Socket(socketFactory, new Socket.Options
+			{
+				channelRejoinInterval = TimeSpan.FromMilliseconds(200),
+				logger = new BasicLogger()
+			});
+
+			socket.OnOpen += onOpenCallback;
+			socket.OnClose += onClosedCallback;
+			socket.OnMessage += onMessageCallback;
+
+			socket.Connect(string.Format("ws://{0}/socket", host), null);
+			Assert.IsTrue(socket.state == Socket.State.Open);
+			Assert.AreEqual(1, onOpenCount);
+
+			Reply? joinOkReply = null;
+			Reply? joinErrorReply = null;
+			Message afterJoinMessage = null;
+			Message closeMessage = null;
+			Message errorMessage = null;
+
+			//Try to join for the first time
+			var param = new Dictionary<string, object> {
+				{ "auth", "doesn't matter" },
+			};
+
+			var roomChannel = socket.MakeChannel("tester:phoenix-sharp");
+			roomChannel.On(Message.InBoundEvent.phx_close, m => closeMessage = m);
+			roomChannel.On(Message.InBoundEvent.phx_error, m => errorMessage = m);
+			roomChannel.On("after_join", m => afterJoinMessage = m);
+
+			roomChannel.Join(param)
+				.Receive(Reply.Status.Ok, r => joinOkReply = r)
+				.Receive(Reply.Status.Error, r => joinErrorReply = r);
+
+			Assert.That(() => joinOkReply.HasValue, Is.True.After(networkDelay, 10));
+			Assert.IsNull(joinErrorReply);
+
+			Assert.That(() => afterJoinMessage != null, Is.True.After(networkDelay, 10));
+			Assert.AreEqual("Welcome!", afterJoinMessage.payload["message"].Value<string>());
+
+			Assert.AreEqual(Channel.State.Joined, roomChannel.state);
+
+			socket.Disconnect(null, null);
+
+			Assert.AreEqual(Socket.State.Closed, socket.state);
+
+			socket.Connect(string.Format("ws://{0}/socket", host), null);
+			Assert.IsTrue(socket.state == Socket.State.Open);
+			Assert.AreEqual(1, onOpenCount);
 		}
 	}
 }
