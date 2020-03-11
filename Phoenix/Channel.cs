@@ -66,9 +66,8 @@ namespace Phoenix {
 
 			var payload = parameters == null ? null : JObject.FromObject(parameters);
 			var message = MakeMessage(Message.OutBoundEvent.phx_join, null, payload);
+			joinRef = message.@ref;
 			var push = Push(message, timeout);
-
-			joinRef = push.message.@ref;
 
 			return push;
 		}

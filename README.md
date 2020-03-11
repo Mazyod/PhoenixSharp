@@ -159,6 +159,8 @@ I'm personally shipping this library with my Unity game, so you can rest assured
 - **BestHTTP websockets** instead of Websocket-sharp. It's much better maintained and doesn't require synchronizing callbacks from the socket to the main thread. Websocket-sharp does need that.
 - **Json.NET** instead of Newtonsoft.Json, that's what I'm using. I've experienced weird issues in the past with the opensource Newtonsoft.Json on mobile platforms.
 
+**NOTE:** Many people are using BestHTTP, so I figured it would be useful to add that integration separately in the repo, for people to use. See the directory, `Vendor/BestHTTP`.
+
 ## Contributions
 
 Whether you open new issues or send in some PRs .. It's all welcome here!
