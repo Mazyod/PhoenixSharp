@@ -33,4 +33,6 @@ TestResult.xml
 .idea/
 *.sln.iml
 
-
+# Visual Studio 
+.vs/
+packages/

@@ -161,11 +161,12 @@ namespace Phoenix {
 
 			CancelHeartbeat();
 			TriggerChannelError("socket disconnect");
+			
+			websocket.Close(code, reason);
 
 			// disables callbacks
 			state = State.Closed;
 
-			websocket.Close(code, reason);
 			websocket = null;
 		}
 
