@@ -97,8 +97,8 @@ roomChannel.On(Message.InBoundEvent.phx_close, m => closeMessage = m);
 roomChannel.On("after_join", m => afterJoinMessage = m);
 
 roomChannel.Join(params)
-  .Receive(Reply.Status.Ok, r => okReply = r)
-  .Receive(Reply.Status.Error, r => errorReply = r);
+  .Receive(Message.Status.Ok, r => okReply = r)
+  .Receive(Message.Status.Error, r => errorReply = r);
 ```
 
 ## PhoenixJS

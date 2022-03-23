@@ -3,18 +3,21 @@
 
 namespace Phoenix {
 
-	public static class MessageSerialization {
-
-		public static string Serialize(this Message message) {
-
+	public sealed class JSONMessageSerializer : IMessageSerializer {
+		public string Serialize(Message message) {
 			return JObject
 				.FromObject(message)
-				.ToString(Newtonsoft.Json.Formatting.None);
+				.ToString(
+					Newtonsoft.Json.Formatting.None,
+					new Newtonsoft.Json.Converters.StringEnumConverter()
+				);
 		}
 
-		public static Message Deserialize(string data) {
+		public Message Deserialize(string message) {
+			System.Console.WriteLine("===> Receive: {0}", message.Trim('\u0000'));
+
 			return JObject
-				.Parse(data)
+				.Parse(message)
 				.ToObject<Message>();
 		}
 	}

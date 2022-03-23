@@ -3,6 +3,13 @@
 
 namespace Phoenix {
 
+	public enum WebsocketState {
+		Connecting,
+		Open,
+		Closing,
+		Closed
+	}
+
 	public struct WebsocketConfiguration {
 
 		public Uri uri;
@@ -18,6 +25,8 @@ namespace Phoenix {
 	}
 
 	public interface IWebsocket {
+
+		WebsocketState state { get; }
 
 		void Connect();
 		void Send(string data);

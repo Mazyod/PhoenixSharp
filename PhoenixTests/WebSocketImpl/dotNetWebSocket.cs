@@ -7,10 +7,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace PhoenixTests
-{
-	public sealed class DotNetWebSocketAdapter : IWebsocket
-	{
+namespace PhoenixTests {
+	public sealed class DotNetWebSocketAdapter : IWebsocket {
 
 		private readonly ClientWebSocket ws;
 		private readonly WebsocketConfiguration config;
@@ -19,8 +17,7 @@ namespace PhoenixTests
 		private Task<WebSocketReceiveResult> receiveTask;
 		private bool async;
 
-		public DotNetWebSocketAdapter(ClientWebSocket ws, WebsocketConfiguration config, bool async = false)
-		{
+		public DotNetWebSocketAdapter(ClientWebSocket ws, WebsocketConfiguration config, bool async = false) {
 			this.ws = ws;
 			this.config = config;
 			this.async = async;
@@ -28,100 +25,89 @@ namespace PhoenixTests
 
 		#region IWebsocket methods
 
-		public void Connect()
-		{
-			try
-			{
+		public WebsocketState state {
+			get {
+				switch (ws.State) {
+					case WebSocketState.Connecting:
+						return WebsocketState.Connecting;
+					case WebSocketState.Open:
+						return WebsocketState.Open;
+					case WebSocketState.CloseSent:
+						return WebsocketState.Closing;
+					default:
+						return WebsocketState.Closed;
+				}
+			}
+		}
+
+		public void Connect() {
+			try {
 				var task = this.ws.ConnectAsync(config.uri, CancellationToken.None);
 				task.Wait();
 				receiveTask = Receive();
 
 				this.config.onOpenCallback(this);
-			}
-			catch (Exception ex)
-			{
+			} catch (Exception ex) {
 				this.config.onErrorCallback(this, ex.Message);
 			}
 		}
 
-		public void Send(string message)
-		{
+		public void Send(string message) {
 			if (!SendMessage(message))
 				return;
 
-			if (!async)
-			{
-				try
-				{
+			if (!async) {
+				try {
 					this.receiveTask.Wait();
-				}
-				catch (Exception e)
-				{
+				} catch (Exception e) {
 					this.config.onErrorCallback(this, e.Message);
 					return;
 				}
 			}
 		}
 
-		private async Task<WebSocketReceiveResult> Receive()
-		{
+		private async Task<WebSocketReceiveResult> Receive() {
 			byte[] buffer = new byte[receiveChunkSize];
 			var result = await this.ws.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-			if (result.MessageType == WebSocketMessageType.Close)
-			{
+			if (result.MessageType == WebSocketMessageType.Close) {
 				await this.ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None);
-			}
-			else
-			{
+			} else {
 				this.config.onMessageCallback(this, System.Text.Encoding.Default.GetString(buffer));
 				this.receiveTask = Receive();
 			}
 			return result;
 		}
 
-		private bool SendMessage(string message)
-		{
+		private bool SendMessage(string message) {
 
 			//byte[] buffer = encoder.GetBytes("{\"op\":\"blocks_sub\"}"); //"{\"op\":\"unconfirmed_sub\"}");
 			byte[] buffer = encoder.GetBytes(message);
 
-			if (this.ws.State == WebSocketState.Open)
-			{
+			if (this.ws.State == WebSocketState.Open) {
 				this.ws.SendAsync(new ArraySegment<byte>(buffer), WebSocketMessageType.Text, true, CancellationToken.None);
 				return true;
-			}
-			else
-			{
+			} else {
 				this.config.onErrorCallback(this, "Could not send message because websocket is closed.");
 				return false;
 			}
 		}
 
-		public void Close(ushort? code = null, string message = null)
-		{
+		public void Close(ushort? code = null, string message = null) {
 			WebSocketCloseStatus status;
 			Task closeTask;
 
 			this.config.onCloseCallback(this, code ?? 0, message);
 
-			if (code.HasValue && Enum.TryParse<WebSocketCloseStatus>(code.ToString(), out status))
-			{
+			if (code.HasValue && Enum.TryParse<WebSocketCloseStatus>(code.ToString(), out status)) {
 				closeTask = this.ws.CloseAsync(status, message, CancellationToken.None);
-			}
-			else
-			{
+			} else {
 				closeTask = this.ws.CloseAsync(WebSocketCloseStatus.Empty, message, CancellationToken.None);
 			}
-			try
-			{
+			try {
 				closeTask.Wait();
-			}
-			catch (Exception ex)
-			{
+			} catch (Exception ex) {
 				this.config.onErrorCallback(this, ex.Message);
-			}
-			finally
-			{
+			} finally {
 				this.ws.Dispose();
 			}
 
@@ -130,10 +116,8 @@ namespace PhoenixTests
 		#endregion
 	}
 
-	public sealed class DotNetWebSocketFactory : IWebsocketFactory
-	{
-		public IWebsocket Build(WebsocketConfiguration config)
-		{
+	public sealed class DotNetWebSocketFactory : IWebsocketFactory {
+		public IWebsocket Build(WebsocketConfiguration config) {
 			var socket = new ClientWebSocket();
 			return new DotNetWebSocketAdapter(socket, config);
 		}

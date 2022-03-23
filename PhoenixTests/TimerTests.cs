@@ -24,10 +24,10 @@ namespace PhoenixTests {
 
 			var works = false;
 			var executor = new TimerBasedExecutor();
-			var timerId = executor.Execute(() => works = true, TimeSpan.FromMilliseconds(1));
+			var execution = executor.Execute(() => works = true, TimeSpan.FromMilliseconds(1));
 
 			Assert.IsFalse(works);
-			executor.Cancel(timerId);
+			execution.Cancel();
 			System.Threading.Thread.Sleep(10);
 			Assert.IsFalse(works);
 		}

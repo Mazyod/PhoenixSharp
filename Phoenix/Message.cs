@@ -4,8 +4,58 @@ using Newtonsoft.Json.Linq;
 
 
 namespace Phoenix {
-	
+	public interface IMessageSerializer {
+		string Serialize(Message message);
+		Message Deserialize(string message);
+	}
+
 	public class Message : IEquatable<Message> {
+		#region nested types
+
+		/** 
+		 * A reply appears within a message, returning a status and response.
+		 */
+		public sealed class Reply {
+
+			public enum Status {
+				ok,
+				error,
+				timeout,
+			}
+
+			// PhoenixJS maps incoming phx_reply to chan_reply_{ref} when broadcasting the event
+			public static readonly string replyEventPrefix = "chan_reply_";
+
+			public readonly string status;
+			public readonly Dictionary<string, object> response;
+
+			[System.Runtime.Serialization.IgnoreDataMember]
+			public Status replyStatus {
+				get {
+					if (status == null) {
+						// shouldn't happen
+						return Status.error;
+					}
+
+					switch (status) {
+						case "ok":
+							return Status.ok;
+						case "error":
+							return Status.error;
+						case "timeout":
+							return Status.timeout;
+						default:
+							throw new ArgumentException("Unknown status: " + status);
+					}
+				}
+
+			}
+
+			public Reply(string status, Dictionary<string, object> response) {
+				this.status = status;
+				this.response = response;
+			}
+		}
 
 		public enum InBoundEvent {
 			phx_reply,
@@ -18,22 +68,49 @@ namespace Phoenix {
 			phx_leave,
 		}
 
+		#endregion
+
 		public readonly string topic;
-		public readonly string @event;
+		// unfortunate mutation of the original message
+		public string @event;
 		public readonly string @ref;
-		public readonly JObject payload;
+		public readonly Dictionary<string, object> payload;
 
+		[System.Runtime.Serialization.IgnoreDataMember]
+		public readonly string joinRef;
+		[System.Runtime.Serialization.IgnoreDataMember]
+		private Reply _cachedReply;
 
-		public Message(string topic, string @event, string @ref, JObject payload) {
-
+		public Message(
+				string topic = null,
+				string @event = null,
+				Dictionary<string, object> payload = null,
+				string @ref = null,
+				string joinRef = null
+		) {
 			this.topic = topic;
 			this.@event = @event;
+			this.payload = payload;
 			this.@ref = @ref;
-			this.payload = payload ?? new JObject();
+			this.joinRef = joinRef;
+		}
+
+		public Reply ParseReply() {
+			if (_cachedReply != null) {
+				return _cachedReply;
+			}
+			if (!@event.StartsWith(Reply.replyEventPrefix)
+					&& @event != InBoundEvent.phx_reply.ToString()) {
+				return null;
+			}
+
+			// TODO: use serializer to avoid coupling with JObject
+			_cachedReply = JObject.FromObject(payload).ToObject<Reply>();
+			return _cachedReply;
 		}
 
 		public override string ToString() {
-			return string.Format("[{0}] {1}: {2}", @ref, topic, @event);
+			return string.Format("Message: {0} - {1}: {2}", @ref, topic, @event);
 		}
 
 		#region IEquatable methods
@@ -48,10 +125,10 @@ namespace Phoenix {
 
 		public bool Equals(Message that) {
 			return this.topic == that.topic
-				&& this.@event == that.@event
-				&& this.@ref == that.@ref
-				/* dictionary equality is hard */
-				;
+					&& this.@event == that.@event
+					&& this.@ref == that.@ref
+					/* dictionary equality is hard */
+					;
 		}
 
 		#endregion

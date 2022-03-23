@@ -9,25 +9,49 @@ namespace Phoenix {
 
 		#region nested types
 
-		public enum Events {
+		public enum Event {
 			Open,
 			Close,
 			Error,
 			Message
 		}
 
-		public enum State {
-			Closed,
-			Closing,
-			Connecting,
-			Open,
+		private struct Subscription {
+			public readonly Action callback;
+
+			public Subscription(Action callback) {
+				this.callback = callback;
+			}
 		}
 
 		public sealed class Options {
+			// Message serializer to allow different serialization methods
+			public IMessageSerializer messageSerializer = new JSONMessageSerializer();
 			// The default timeout to trigger push timeouts.
 			public TimeSpan timeout = TimeSpan.FromSeconds(10);
 			// The interval for rejoining an errored channel. Null means none
-			public TimeSpan? channelRejoinInterval = TimeSpan.FromSeconds(1);
+			public Func<int, TimeSpan> rejoinAfter = (tries) => {
+				List<uint> rawIntervals = new() { 1_000, 2_000, 5_000 };
+				List<TimeSpan> intervals = rawIntervals.Select(i => TimeSpan.FromMilliseconds(i)).ToList();
+
+				if (tries > intervals.Count) {
+					return TimeSpan.FromSeconds(10);
+				} else {
+					return intervals[tries - 1];
+				}
+			};
+			// The interval for reconnecting in the event of a connection error.
+			public Func<int, TimeSpan> reconnectAfter = (tries) => {
+				// TODO: cache these objects to avoid allocations
+				List<uint> rawIntervals = new() { 10, 50, 100, 150, 200, 250, 500, 1000, 2000 };
+				List<TimeSpan> intervals = rawIntervals.Select(x => TimeSpan.FromMilliseconds(x)).ToList();
+
+				if (tries > intervals.Count) {
+					return TimeSpan.FromSeconds(5);
+				} else {
+					return intervals[tries - 1];
+				}
+			};
 			// The interval to send a heartbeat message. Null means disable
 			public TimeSpan? heartbeatInterval = TimeSpan.FromSeconds(30);
 			// The optional function for specialized logging
@@ -44,7 +68,7 @@ namespace Phoenix {
 		public delegate void OnOpenDelegate();
 		public OnOpenDelegate OnOpen;
 
-		public delegate void OnMessageDelegate(string message);
+		public delegate void OnMessageDelegate(Message message);
 		public OnMessageDelegate OnMessage;
 
 		public delegate void OnClosedDelegate(ushort code, string message);
@@ -58,231 +82,357 @@ namespace Phoenix {
 
 		#region properties
 
-		public IWebsocket websocket { get; private set; }
+		/**
+		 *	In PhoenixJS, listening to socket events is done by passing a callback and
+		 *	holding the returned reference string in order to unsubscribe later.
+		 *
+		 *	In C#, delegates are much more convenient and fit the paradigm better. Hence,
+		 *	we simple use delegate +=, -= to subscribe and unsubscribe.
+		 */
+		// private readonly Dictionary<Event, List<Subscription>> stateChangeCallbacks = new();
+
+		private readonly List<Channel> channels = new();
+		private readonly List<Action> sendBuffer = new();
+		private uint @ref = 0;
+		private uint establishedConnections = 0;
+
+		// TODO: support defaultEncode/defaultDecoder
+
+		private bool closeWasClean = false;
+
+		// TODO: binaryType?
+
+		// private uint connectClock = 1;
+		private readonly string endPoint;
+		private readonly Dictionary<string, string> @params;
+		private readonly Scheduler reconnectTimer;
+
+		public IWebsocket conn { get; private set; }
+		// convenience
+		public WebsocketState? state {
+			get { return conn.state; }
+		}
 		private readonly IWebsocketFactory websocketFactory;
 		internal readonly Options opts;
 
-		private uint? heartbeatTimer = null;
-		private Dictionary<string, Channel> channels = new Dictionary<string, Channel>();
-
-		public State state { get; private set; }
+		private DelayedExecution? heartbeatTimer = null;
+		private string pendingHeartbeatRef = null;
 
 		#endregion
 
 
-		public Socket(IWebsocketFactory factory, Options options = null) {
+		public Socket(string endPoint, Dictionary<string, string> @params, IWebsocketFactory websocketFactory, Options opts = null) {
+			this.endPoint = endPoint;
+			this.@params = @params;
+			this.websocketFactory = websocketFactory;
+			this.opts = opts ?? new Options();
 
-			websocketFactory = factory;
-			opts = options ?? new Options();
+			reconnectTimer = new(
+					() => Teardown(() => Connect()),
+					opts.reconnectAfter,
+					opts.delayedExecutor
+			);
 		}
 
+		// NOTE: ReplaceTransport functionality not support in this library
 
-		#region private & internal methods
+		// NOTE: Protocol inference not support in C# client
 
-		private Uri BuildEndpointURL(string url, Dictionary<string, string> parameters) {
+		private Uri EndPointURL() {
 			// very primitive query string builder
-			var stringParams = (parameters ?? new Dictionary<string, string>())
-				.Select(pair => string.Format("{0}={1}", pair.Key, pair.Value))
-				.ToArray();
+			var stringParams = (@params ?? new Dictionary<string, string>())
+					.Select(pair => string.Format("{0}={1}", pair.Key, pair.Value))
+					.ToArray();
 
-			var query = string.Join("&", stringParams);
-
-			var builder = new UriBuilder(string.Format("{0}/websocket", url));
-			builder.Query = query;
+			var builder = new UriBuilder($"{@endPoint}/websocket");
+			builder.Query = string.Join("&", stringParams);
 
 			return builder.Uri;
 		}
 
-		private void SendHeartbeat() {
+		public void Disconnect(Action callback = null, ushort? code = null, string reason = null) {
+			// connectClock++;
+			closeWasClean = true;
+			reconnectTimer.Reset();
+			Teardown(callback, code, reason);
+		}
 
-			if (state != State.Open || opts.heartbeatInterval == null) {
+		public void Connect() {
+			// connectClock++;
+			if (conn != null) {
 				return;
 			}
 
-			Push(new Message("phoenix", "heartbeat", null, null));
-			heartbeatTimer = opts.delayedExecutor.Execute(SendHeartbeat, opts.heartbeatInterval.Value);
-		}
-
-		private void RejoinChannels() {
-			foreach (var channel in channels.Values) {
-				channel.Rejoin();
-			}
-		}
-
-		private void TriggerChannelError(string reason) {
-			channels.Values
-				.ToList() // copy to allow mutation of channels
-				.ForEach(ch => ch.SocketTerminated(reason));
-		}
-
-		private void CancelHeartbeat() {
-			if (heartbeatTimer.HasValue) {
-				opts.delayedExecutor.Cancel(heartbeatTimer.Value);
-				heartbeatTimer = null;
-			}
-		}
-
-		internal void Remove(Channel channel) {
-			if (channels.ContainsKey(channel.topic) && channels[channel.topic] == channel) {
-				channels.Remove(channel.topic);
-			}
-		}
-
-		internal bool Push(Message msg) {
-
-			var json = msg.Serialize();
-			Log(LogLevel.Trace, "push", json);
-
-			if (state == State.Open) {
-				websocket.Send(json);
-				return true;
-			}
-
-			return false;
-		}
-
-		// Logs the message. Override `this.logger` for specialized logging. noops by default
-		internal void Log(LogLevel level, string kind, string msg) {
-			if (opts.logger != null) {
-				opts.logger.Log(level, kind, msg);
-			}
-		}
-
-		#endregion
-
-
-		#region public methods
-
-		public void Disconnect(ushort? code = null, string reason = null) {
-
-			if (websocket == null) {
-				return;
-			}
-
-			CancelHeartbeat();
-			TriggerChannelError("socket disconnect");
-			
-			websocket.Close(code, reason);
-
-			// disables callbacks
-			state = State.Closed;
-
-			websocket = null;
-		}
-
-		// params - The params to send when connecting, for example `{user_id: userToken}`
-		public void Connect(string url, Dictionary<string, string> parameters = null) {
-
-			if (websocket != null) {
-				Disconnect();
-			}
+			closeWasClean = false;
 
 			var config = new WebsocketConfiguration() {
-				uri = BuildEndpointURL(url, parameters),
-				onOpenCallback = WebsocketOnOpen,
-				onCloseCallback = WebsocketOnClose,
-				onErrorCallback = WebsocketOnError,
-				onMessageCallback = WebsocketOnMessage
+				uri = EndPointURL(),
+				onOpenCallback = OnConnOpen,
+				onCloseCallback = OnConnClose,
+				onErrorCallback = OnConnError,
+				onMessageCallback = OnConnMessage
 			};
 
-			websocket = websocketFactory.Build(config);
+			conn = websocketFactory.Build(config);
 
-			state = State.Connecting;
-			websocket.Connect();
+			conn.Connect();
 		}
 
-		public Channel MakeChannel(string topic) {
-			// Phoenix 1.2+ returns a new channel and closes the old one if we join a topic twice
-			// to accommodate for that, we immediately leave and remove existing the channel
-			if (channels.ContainsKey(topic)) {
-				channels[topic].SocketTerminated("channel replaced");
-				channels[topic].Leave();
-			}
-
-			var channel = new Channel(topic, this);
-			channels[topic] = channel;
-
-			return channel;
+		internal void Log(LogLevel level, string source, string message) {
+			opts.logger.Log(level, source, message);
 		}
 
-		#endregion
+		internal bool HasLogger() {
+			return opts.logger != null;
+		}
 
+		// PhoenixJS: we use C# delegates instead of callbacks
+		//
+		// public Subscription OnOpen(Action callback)
+		// public Subscription OnClose(Action callback)
+		// public Subscription OnError(Action callback)
+		// public Subscription OnMessage(Action callback)
 
-		#region websocket callbacks
-
-		private void WebsocketOnOpen(IWebsocket ws) {
-
-			if (ws != websocket) {
-				return;
+		private void OnConnOpen(IWebsocket websocket) {
+			if (HasLogger()) {
+				Log(LogLevel.Debug, "transport", $"Connected to {EndPointURL()}");
 			}
 
-			Log(LogLevel.Debug, "socket", "on open");
-
-			state = State.Open;
-			RejoinChannels();
-			SendHeartbeat();
+			closeWasClean = false;
+			establishedConnections++;
+			FlushSendBuffer();
+			reconnectTimer.Reset();
+			ResetHeartbeat();
 
 			if (OnOpen != null) {
 				OnOpen();
 			}
 		}
 
-		private void WebsocketOnClose(IWebsocket ws, ushort code, string message) {
+		private void HeartbeatTimeout() {
+			if (pendingHeartbeatRef != null) {
+				pendingHeartbeatRef = null;
+				if (HasLogger()) {
+					Log(LogLevel.Debug, "transport", "heartbeat timeout. Attempting to re-establish connection");
+				}
+				AbnormalClose("heartbeat timeout");
+			}
+		}
 
-			if (ws != websocket || state == State.Closed) {
+		private void ResetHeartbeat() {
+			// we don't check skipHeartbeat on conn since we always use websocket transport
+			// however, we do check if heartbeatInterval is set
+			if (opts.heartbeatInterval == null) {
 				return;
 			}
 
-			Log(LogLevel.Debug, "socket", string.Format("on close: ({0}) - {1}", code, message ?? "NONE"));
+			pendingHeartbeatRef = null;
+			heartbeatTimer?.Cancel();
 
-			state = State.Closed;
-			TriggerChannelError("socket close");
-			CancelHeartbeat();
+			opts.delayedExecutor.Execute(SendHeartbeat, opts.heartbeatInterval.Value);
+		}
+
+		private void Teardown(Action callback = null, ushort? code = null, string reason = null) {
+			if (conn == null) {
+				if (callback != null) {
+					callback();
+				}
+				return;
+			}
+
+			// See: comment on the method itself
+			// WaitForBufferDone(() => {
+
+			// if (conn != null) {
+			if (code.HasValue) {
+				conn.Close(code.Value, reason);
+			} else {
+				conn.Close();
+			}
+			// }
+
+			WaitForSocketClosed(() => {
+				if (conn != null) {
+					// TODO: not sure if this is important at all?
+					// this.conn.onclose = function (){ } // noop
+					conn = null;
+				}
+				if (callback != null) {
+					callback();
+				}
+			});
+
+			// });
+		}
+
+		// PhoenixJS: not sure how to check for bufferedAmount in C#
+		//
+		// private void WaitForBufferDone(Action callback, uint tries = 1) {
+		// 	if (tries == 5 || conn == null || conn.bufferedAmount == 0) {
+		// 		callback();
+		// 		return;
+		// 	}
+
+		// 	opts.delayedExecutor.Execute(
+		// 			() => WaitForBufferDone(callback, tries + 1),
+		// 			TimeSpan.FromMilliseconds(150 * tries)
+		// 	);
+		// }
+
+		private void WaitForSocketClosed(Action callback, uint tries = 1) {
+			if (tries == 5 || conn == null || conn.state == WebsocketState.Closed) {
+				callback();
+				return;
+			}
+
+			opts.delayedExecutor.Execute(
+					() => WaitForSocketClosed(callback, tries + 1),
+					TimeSpan.FromMilliseconds(150 * tries)
+			);
+		}
+
+		private void OnConnClose(IWebsocket websocket, ushort code, string reason) {
+			if (HasLogger()) {
+				Log(LogLevel.Debug, "transport", $"Close {code} {reason}");
+			}
+
+			TriggerChanError();
+			heartbeatTimer?.Cancel();
+
+			if (!closeWasClean && code != 1_000) {
+				reconnectTimer.ScheduleTimeout();
+			}
 
 			if (OnClose != null) {
-				OnClose(code, message);
+				OnClose(code, reason);
 			}
-
-			websocket = null;
 		}
 
-		private void WebsocketOnError(IWebsocket ws, string message) {
-
-			if (ws != websocket || state == State.Closed) {
-				return;
+		private void OnConnError(IWebsocket websocket, string error) {
+			if (HasLogger()) {
+				Log(LogLevel.Debug, "transport", $"Error {error}");
 			}
 
-			Log(LogLevel.Info, "socket", message ?? "unknown");
-
-			state = State.Closed;
-			TriggerChannelError("socket error");
-			CancelHeartbeat();
-
-			if (OnError != null) {
-				OnError(message);
-			}
+			// TODO: pass callback parameters
+			// callback(error, transportBefore, establishedBefore)
 			
-			websocket = null;
+			if (OnError != null) {
+				OnError(error);
+			}
+
+			TriggerChanError();
 		}
 
-		private void WebsocketOnMessage(IWebsocket ws, string data) {
+		private void TriggerChanError() {
+			channels.ForEach(channel => {
+				if (!(channel.IsErrored() || channel.IsLeaving() || channel.IsClosed())) {
+					channel.Trigger(new Message(@event: Message.InBoundEvent.phx_error.ToString()));
+				}
+			});
+		}
 
-			if (ws != websocket) {
+		internal bool IsConnected() {
+			return conn.state == WebsocketState.Open;
+		}
+
+		// PhoenixJS: see the note above regarding stateChangeCallbacks
+		// internal void Remove(Channel channel)
+		// private void Off(List<string> refs)
+
+		public Channel Channel(string topic, Dictionary<string, object> chanParams = null) {
+			var chan = new Channel(topic, chanParams, this);
+			channels.Add(chan);
+			return chan;
+		}
+
+		internal void Push(Message message) {
+			if (HasLogger()) {
+				// let {topic, event, payload, ref, join_ref} = data
+				Log(LogLevel.Debug, "push", $"Pushing {message}");
+			}
+
+			Action encodeThenSend = () => conn.Send(opts.messageSerializer.Serialize(message));
+			if (IsConnected()) {
+				encodeThenSend();
+			} else {
+				sendBuffer.Add(encodeThenSend);
+			}
+		}
+
+		internal string MakeRef() {
+			// overflows are fine in C#, they just wrap
+			return (++@ref).ToString();
+		}
+
+		private void SendHeartbeat() {
+			if (!opts.heartbeatInterval.HasValue
+					|| (pendingHeartbeatRef != null && !IsConnected())) {
 				return;
 			}
 
-			var msg = MessageSerialization.Deserialize(data);
-			Log(LogLevel.Trace, "socket", string.Format("received: {0}", msg.ToString()));
+			pendingHeartbeatRef = MakeRef();
+			Push(new Message(
+					topic: "phoenix",
+					@event: "heartbeat",
+					@ref: pendingHeartbeatRef
+			));
 
-			if (channels.ContainsKey(msg.topic)) {
-				channels[msg.topic].Trigger(msg);
+			heartbeatTimer = opts.delayedExecutor.Execute(
+					() => HeartbeatTimeout(),
+					opts.heartbeatInterval.Value
+			);
+		}
+
+		private void AbnormalClose(string reason) {
+			closeWasClean = false;
+			if (IsConnected()) {
+				conn.Close(1_000, reason);
 			}
+		}
+
+		private void FlushSendBuffer() {
+			if (IsConnected() && sendBuffer.Count > 0) {
+				sendBuffer.ForEach(callback => callback());
+				sendBuffer.Clear();
+			}
+		}
+
+		private void OnConnMessage(IWebsocket websocket, string rawMessage) {
+			var message = opts.messageSerializer.Deserialize(rawMessage);
+
+			if (message.@ref != null && message.@ref == pendingHeartbeatRef && opts.heartbeatInterval.HasValue) {
+				heartbeatTimer?.Cancel();
+				pendingHeartbeatRef = null;
+				opts.delayedExecutor.Execute(() => SendHeartbeat(), opts.heartbeatInterval.Value);
+			}
+
+			if (HasLogger()) {
+				// TODO: `${payload.status || ""} ${topic} ${event} ${ref && "(" + ref + ")" || ""}`, payload
+				Log(LogLevel.Debug, "receive", $"Received {message}");
+			}
+
+			channels.ForEach(channel => {
+				// violates tell don't ask, but that's how Phoenix JS is implemented
+				if (channel.IsMember(message)) {
+					channel.Trigger(message);
+				}
+			});
 
 			if (OnMessage != null) {
-				OnMessage(data);
+				OnMessage(message);
 			}
 		}
 
-		#endregion
+		internal void LeaveOpenTopic(string topic) {
+			var dupChannel = channels
+					.Find(channel => channel.topic == topic);
+
+			if (dupChannel != null) {
+				if (HasLogger()) {
+					Log(LogLevel.Debug, "transport", $"Leaving duplicate channel topic {topic}");
+					dupChannel.Leave();
+				}
+			}
+		}
 	}
 }
