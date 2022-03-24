@@ -36,6 +36,18 @@
                 "${workspaceFolder}/Phoenix/Phoenix.csproj"
             ],
             "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "all tests",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "test",
+                "${workspaceFolder}/PhoenixTests/PhoenixTests.csproj"
+            ],
+            "problemMatcher": [
+                "$msCompile"
+            ]
         }
     ]
 }
