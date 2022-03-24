@@ -97,8 +97,12 @@ namespace Phoenix {
 					socket.Log(LogLevel.Debug, "channel", $"close {topic}");
 				}
 				state = State.Closed;
+				// PhoenixJS: See note in socket regarding this
+				// basically, we unregister delegates directly in c# instead of offing an array
+				// this.off(channel.stateChangeRefs)
 				socket.OnError -= SocketOnError;
 				socket.OnOpen -= SocketOnOpen;
+				socket.Remove(this);
 			});
 
 			OnError(message => {

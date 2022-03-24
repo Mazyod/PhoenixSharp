@@ -326,8 +326,12 @@ namespace Phoenix {
 			return state == WebsocketState.Open;
 		}
 
+		internal void Remove(Channel channel) {
 		// PhoenixJS: see the note above regarding stateChangeCallbacks
-		// internal void Remove(Channel channel)
+			// this.off(channel.stateChangeRefs)
+			channels.Remove(channel);
+		}
+
 		// private void Off(List<string> refs)
 
 		public Channel Channel(string topic, Dictionary<string, object> chanParams = null) {
