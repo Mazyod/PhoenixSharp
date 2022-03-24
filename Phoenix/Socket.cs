@@ -94,7 +94,6 @@ namespace Phoenix {
 		private readonly List<Channel> channels = new();
 		private readonly List<Action> sendBuffer = new();
 		private uint @ref = 0;
-		private uint establishedConnections = 0;
 
 		// TODO: support defaultEncode/defaultDecoder
 
@@ -110,7 +109,7 @@ namespace Phoenix {
 		public IWebsocket conn { get; private set; }
 		// convenience
 		public WebsocketState? state {
-			get { return conn.state; }
+			get { return conn?.state; }
 		}
 		private readonly IWebsocketFactory websocketFactory;
 		internal readonly Options opts;
@@ -144,8 +143,9 @@ namespace Phoenix {
 					.Select(pair => string.Format("{0}={1}", pair.Key, pair.Value))
 					.ToArray();
 
-			var builder = new UriBuilder($"{@endPoint}/websocket");
-			builder.Query = string.Join("&", stringParams);
+			var builder = new UriBuilder($"{@endPoint}/websocket") {
+				Query = string.Join("&", stringParams)
+			};
 
 			return builder.Uri;
 		}
@@ -199,14 +199,12 @@ namespace Phoenix {
 			}
 
 			closeWasClean = false;
-			establishedConnections++;
+			// establishedConnections++;
 			FlushSendBuffer();
 			reconnectTimer.Reset();
 			ResetHeartbeat();
 
-			if (OnOpen != null) {
-				OnOpen();
-			}
+			OnOpen?.Invoke();
 		}
 
 		private void HeartbeatTimeout() {
@@ -234,9 +232,7 @@ namespace Phoenix {
 
 		private void Teardown(Action callback = null, ushort? code = null, string reason = null) {
 			if (conn == null) {
-				if (callback != null) {
-					callback();
-				}
+				callback?.Invoke();
 				return;
 			}
 
@@ -255,11 +251,10 @@ namespace Phoenix {
 				if (conn != null) {
 					// TODO: not sure if this is important at all?
 					// this.conn.onclose = function (){ } // noop
+
 					conn = null;
 				}
-				if (callback != null) {
-					callback();
-				}
+				callback?.Invoke();
 			});
 
 			// });
@@ -303,9 +298,7 @@ namespace Phoenix {
 				reconnectTimer.ScheduleTimeout();
 			}
 
-			if (OnClose != null) {
-				OnClose(code, reason);
-			}
+			OnClose?.Invoke(code, reason);
 		}
 
 		private void OnConnError(IWebsocket websocket, string error) {
@@ -316,9 +309,7 @@ namespace Phoenix {
 			// TODO: pass callback parameters
 			// callback(error, transportBefore, establishedBefore)
 			
-			if (OnError != null) {
-				OnError(error);
-			}
+			OnError?.Invoke(error);
 
 			TriggerChanError();
 		}
@@ -332,7 +323,7 @@ namespace Phoenix {
 		}
 
 		internal bool IsConnected() {
-			return conn.state == WebsocketState.Open;
+			return state == WebsocketState.Open;
 		}
 
 		// PhoenixJS: see the note above regarding stateChangeCallbacks
@@ -351,7 +342,7 @@ namespace Phoenix {
 				Log(LogLevel.Debug, "push", $"Pushing {message}");
 			}
 
-			Action encodeThenSend = () => conn.Send(opts.messageSerializer.Serialize(message));
+			void encodeThenSend() => conn.Send(opts.messageSerializer.Serialize(message));
 			if (IsConnected()) {
 				encodeThenSend();
 			} else {
@@ -418,9 +409,7 @@ namespace Phoenix {
 				}
 			});
 
-			if (OnMessage != null) {
-				OnMessage(message);
-			}
+			OnMessage?.Invoke(message);
 		}
 
 		internal void LeaveOpenTopic(string topic) {

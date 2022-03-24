@@ -20,7 +20,7 @@ namespace Phoenix {
 		private Message receivedResp = null;
 		private DelayedExecution? delayedExecution = null;
 		private readonly Dictionary<Message.Reply.Status, List<Action<Message>>> recHooks = new();
-		private bool sent = false;
+		//private bool sent = false;
 
 		internal uint timerId;
 
@@ -47,7 +47,7 @@ namespace Phoenix {
 			}
 
 			StartTimeout();
-			sent = true;
+			// sent = true;
 			channel.socket.Push(new Message(
 					topic: channel.topic,
 					@event: @event,
@@ -73,7 +73,7 @@ namespace Phoenix {
 			@ref = null;
 			refEvent = null;
 			receivedResp = null;
-			sent = false;
+			// sent = false;
 		}
 
 		private void MatchReceive(Message message) {
@@ -106,7 +106,7 @@ namespace Phoenix {
 			CancelTimeout();
 
 			@ref = channel.socket.MakeRef();
-			refEvent = channel.ReplyEventName(@ref);
+			refEvent = Channel.ReplyEventName(@ref);
 
 			channel.On(refEvent, payload => {
 				CancelRefEvent();

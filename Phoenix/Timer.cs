@@ -6,8 +6,8 @@ using System.Timers;
 namespace Phoenix {
 	public struct DelayedExecution {
 
-		private uint id;
-		private IDelayedExecutor executor;
+		private readonly uint id;
+		private readonly IDelayedExecutor executor;
 
 		public DelayedExecution(uint id, IDelayedExecutor executor) {
 			this.id = id;
@@ -37,7 +37,7 @@ namespace Phoenix {
 
 		private readonly Action callback;
 		private readonly Func<int, TimeSpan> timerCalc;
-		private IDelayedExecutor delayedExecutor;
+		private readonly IDelayedExecutor delayedExecutor;
 		private DelayedExecution? execution = null;
 		private int tries = 0;
 
@@ -67,15 +67,16 @@ namespace Phoenix {
 	public sealed class TimerBasedExecutor : IDelayedExecutor {
 		// Please ensure that you always start from 1, and leave 0 for uninitialized id
 		private uint id = 1;
-		private Dictionary<uint, Timer> timers = new Dictionary<uint, Timer>();
+		private readonly Dictionary<uint, Timer> timers = new();
 
 
 		public DelayedExecution Execute(Action action, TimeSpan delay) {
 
 			var id = this.id++;
-			var timer = new Timer();
-			timer.Interval = delay.TotalMilliseconds;
-			timer.AutoReset = false;
+			var timer = new Timer {
+				Interval = delay.TotalMilliseconds,
+				AutoReset = false
+			};
 			timer.Elapsed += (sender, e) => {
 				action();
 				timers.Remove(id);

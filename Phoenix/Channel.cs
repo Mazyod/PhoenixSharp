@@ -31,14 +31,13 @@ namespace Phoenix {
 
 		public State state = State.Closed;
 		public readonly string topic;
-		private readonly ParamsType @params;
 		public readonly Socket socket;
 
-		private Dictionary<string, List<Subscription>> bindings = new();
+		private readonly Dictionary<string, List<Subscription>> bindings = new();
 		private TimeSpan timeout;
 		private bool joinedOnce = false;
 		private readonly Push joinPush;
-		private List<Push> pushBuffer = new();
+		private readonly List<Push> pushBuffer = new();
 
 		/** 
 		 *	See the stateChangeRefs comment in Socket.cs
@@ -55,11 +54,10 @@ namespace Phoenix {
 		#endregion
 
 
+		// TODO: possibly support lazy instantiation of payload (same as Phoenix js)
 		public Channel(string topic, ParamsType @params, Socket socket) {
 
 			this.topic = topic;
-			// TODO: possibly support lazy instantiation of payload (same as Phoenix js)
-			this.@params = @params;
 			this.socket = socket;
 
 			timeout = socket.opts.timeout;
@@ -201,7 +199,7 @@ namespace Phoenix {
 			return socket.IsConnected() && IsJoined();
 		}
 
-		public Push Push(string @event, Dictionary<string, object> payload = null, TimeSpan? timeout = null) {
+		public Push Push(string @event, ParamsType payload = null, TimeSpan? timeout = null) {
 			if (!joinedOnce) {
 				throw new Exception($"tried to push '{@event}' to '{topic}' before joining. Use channel.join() before pushing events");
 			}
@@ -223,7 +221,7 @@ namespace Phoenix {
 
 			state = State.Leaving;
 
-			Action onClose = () => {
+			void onClose() {
 				if (socket.HasLogger()) {
 					socket.Log(LogLevel.Debug, "channel", $"leave {topic}");
 				}
@@ -232,7 +230,7 @@ namespace Phoenix {
 				Trigger(new Message(
 					@event: Message.InBoundEvent.phx_close.ToString()
 				));
-			};
+			}
 
 			var leavePush = new Push(this, Message.OutBoundEvent.phx_leave.ToString(), null, timeout ?? this.timeout);
 			leavePush
@@ -247,7 +245,7 @@ namespace Phoenix {
 		}
 
 		// overrideable message hook
-		public virtual Dictionary<string, object> OnMessage(Message message) {
+		public virtual ParamsType OnMessage(Message message) {
 			return message.payload;
 		}
 
@@ -301,7 +299,7 @@ namespace Phoenix {
 			});
 		}
 
-		internal string ReplyEventName(string @ref) {
+		internal static string ReplyEventName(string @ref) {
 			return $"{Message.Reply.replyEventPrefix}{@ref}";
 		}
 
