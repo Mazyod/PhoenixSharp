@@ -327,7 +327,7 @@ namespace Phoenix {
 		}
 
 		internal void Remove(Channel channel) {
-		// PhoenixJS: see the note above regarding stateChangeCallbacks
+			// PhoenixJS: see the note above regarding stateChangeCallbacks
 			// this.off(channel.stateChangeRefs)
 			channels.Remove(channel);
 		}
@@ -417,8 +417,8 @@ namespace Phoenix {
 		}
 
 		internal void LeaveOpenTopic(string topic) {
-			var dupChannel = channels
-					.Find(channel => channel.topic == topic);
+			var dupChannel = channels.Find(channel =>
+				channel.topic == topic && (channel.IsJoined() || channel.IsJoining()));
 
 			if (dupChannel != null) {
 				if (HasLogger()) {
