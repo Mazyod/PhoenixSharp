@@ -28,16 +28,12 @@ namespace PhoenixTests {
 
 		public WebsocketState state {
 			get {
-				switch (ws.ReadyState) {
-					case WebSocketState.Connecting:
-						return WebsocketState.Connecting;
-					case WebSocketState.Open:
-						return WebsocketState.Open;
-					case WebSocketState.Closing:
-						return WebsocketState.Closing;
-					default:
-						return WebsocketState.Closed;
-				}
+				return ws.ReadyState switch {
+					WebSocketState.Connecting => WebsocketState.Connecting,
+					WebSocketState.Open => WebsocketState.Open,
+					WebSocketState.Closing => WebsocketState.Closing,
+					_ => WebsocketState.Closed,
+				};
 			}
 		}
 

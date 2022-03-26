@@ -88,12 +88,11 @@ namespace PhoenixTests {
 		}
 
 		public void Close(ushort? code = null, string message = null) {
-			WebSocketCloseStatus status;
 			Task closeTask;
 
 			this.config.onCloseCallback(this, code ?? 0, message);
 
-			if (code.HasValue && Enum.TryParse(code.ToString(), out status)) {
+			if (code.HasValue && Enum.TryParse(code.ToString(), out WebSocketCloseStatus status)) {
 				closeTask = this.ws.CloseAsync(status, message, CancellationToken.None);
 			} else {
 				closeTask = this.ws.CloseAsync(WebSocketCloseStatus.Empty, message, CancellationToken.None);

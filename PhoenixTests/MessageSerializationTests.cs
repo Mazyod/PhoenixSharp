@@ -10,7 +10,7 @@ namespace PhoenixTests {
 	[TestFixture()]
 	public class MessageSerializationTests {
 
-		private Message sampleMessage {
+		private static Message sampleMessage {
 			get {
 				var payload = new Dictionary<string, object> {
 					{ "some key", 12 },
@@ -28,7 +28,7 @@ namespace PhoenixTests {
 			}
 		}
 
-		private Message replyMessage {
+		private static Message replyMessage {
 			get {
 				var payload = new Dictionary<string, object> {
 					{ "status", "ok" },

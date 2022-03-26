@@ -36,16 +36,16 @@ namespace PhoenixTests {
 			var address = string.Format("http://{0}/api/health-check", host);
 
 			// heroku health check
-			using (WebClient client = new WebClient()) {
+			using (WebClient client = new()) {
 				client.Headers.Add("Content-Type", "application/json");
 				client.DownloadString(address);
 			}
 
 			var onOpenCount = 0;
-			Socket.OnOpenDelegate onOpenCallback = () => onOpenCount++;
+			void onOpenCallback() => onOpenCount++;
 
 			List<Message> onMessageData = new();
-			Socket.OnMessageDelegate onMessageCallback = m => onMessageData.Add(m);
+			void onMessageCallback(Message m) => onMessageData.Add(m);
 
 			// connecting is synchronous as implemented above
 			var socketAddress = string.Format("ws://{0}/socket", host);
@@ -213,11 +213,11 @@ namespace PhoenixTests {
 		[Test()]
 		public void MultipleJoinIntegrationTest() {
 			var onOpenCount = 0;
-			Socket.OnOpenDelegate onOpenCallback = () => onOpenCount++;
-			Socket.OnClosedDelegate onClosedCallback = (code, message) => onOpenCount--;
+			void onOpenCallback() => onOpenCount++;
+			void onClosedCallback(ushort code, string reason) => onOpenCount--;
 
 			List<Message> onMessageData = new();
-			Socket.OnMessageDelegate onMessageCallback = m => onMessageData.Add(m);
+			void onMessageCallback(Message m) => onMessageData.Add(m);
 
 			var socketAddress = string.Format("ws://{0}/socket", host);
 			var socketFactory = new DotNetWebSocketFactory();
