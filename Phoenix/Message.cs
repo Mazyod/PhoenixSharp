@@ -37,16 +37,12 @@ namespace Phoenix {
 						return Status.error;
 					}
 
-					switch (status) {
-						case "ok":
-							return Status.ok;
-						case "error":
-							return Status.error;
-						case "timeout":
-							return Status.timeout;
-						default:
-							throw new ArgumentException("Unknown status: " + status);
-					}
+					return status switch {
+						"ok" => Status.ok,
+						"error" => Status.error,
+						"timeout" => Status.timeout,
+						_ => throw new ArgumentException("Unknown status: " + status),
+					};
 				}
 
 			}
@@ -80,11 +76,11 @@ namespace Phoenix {
 		private Reply _cachedReply;
 
 		public Message(
-				string topic = null,
-				string @event = null,
-				Dictionary<string, object> payload = null,
-				string @ref = null,
-				string joinRef = null
+			string topic = null,
+			string @event = null,
+			Dictionary<string, object> payload = null,
+			string @ref = null,
+			string joinRef = null
 		) {
 			this.topic = topic;
 			this.@event = @event;
@@ -118,13 +114,13 @@ namespace Phoenix {
 		}
 
 		public override bool Equals(object obj) {
-			return (obj is Message) && Equals((Message)obj);
+			return (obj is Message message) && Equals(message);
 		}
 
 		public bool Equals(Message that) {
-			return this.topic == that.topic
-					&& this.@event == that.@event
-					&& this.@ref == that.@ref
+			return topic == that.topic
+					&& @event == that.@event
+					&& @ref == that.@ref
 					/* dictionary equality is hard */
 					;
 		}

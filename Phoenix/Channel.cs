@@ -230,13 +230,13 @@ namespace Phoenix {
 					socket.Log(LogLevel.Debug, "channel", $"leave {topic}");
 				}
 
-				// TODO: figure out the best way to trigger this
 				Trigger(new Message(
 					@event: Message.InBoundEvent.phx_close.ToString()
 				));
 			}
 
-			var leavePush = new Push(this, Message.OutBoundEvent.phx_leave.ToString(), null, timeout ?? this.timeout);
+			var leaveEvent = Message.OutBoundEvent.phx_leave.ToString();
+			var leavePush = new Push(this, leaveEvent, null, timeout ?? this.timeout);
 			leavePush
 					.Receive(Message.Reply.Status.ok, (_) => onClose())
 					.Receive(Message.Reply.Status.timeout, (_) => onClose());

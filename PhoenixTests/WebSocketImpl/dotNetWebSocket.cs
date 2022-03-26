@@ -1,7 +1,5 @@
 ﻿using Phoenix;
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
@@ -12,10 +10,10 @@ namespace PhoenixTests {
 
 		private readonly ClientWebSocket ws;
 		private readonly WebsocketConfiguration config;
-		private UTF8Encoding encoder = new UTF8Encoding();
+		private readonly UTF8Encoding encoder = new();
 		private const int receiveChunkSize = 1024;
 		private Task<WebSocketReceiveResult> receiveTask;
-		private bool async;
+		private readonly bool async;
 
 		public DotNetWebSocketAdapter(ClientWebSocket ws, WebsocketConfiguration config, bool async = false) {
 			this.ws = ws;
@@ -27,16 +25,13 @@ namespace PhoenixTests {
 
 		public WebsocketState state {
 			get {
-				switch (ws.State) {
-					case WebSocketState.Connecting:
-						return WebsocketState.Connecting;
-					case WebSocketState.Open:
-						return WebsocketState.Open;
-					case WebSocketState.CloseSent:
-						return WebsocketState.Closing;
-					default:
-						return WebsocketState.Closed;
-				}
+				return ws.State switch {
+					WebSocketState.Connecting => WebsocketState.Connecting,
+					WebSocketState.Open => WebsocketState.Open,
+					WebSocketState.CloseSent => WebsocketState.Closing,
+					WebSocketState.CloseReceived => WebsocketState.Closing,
+					_ => WebsocketState.Closed,
+				};
 			}
 		}
 
@@ -98,7 +93,7 @@ namespace PhoenixTests {
 
 			this.config.onCloseCallback(this, code ?? 0, message);
 
-			if (code.HasValue && Enum.TryParse<WebSocketCloseStatus>(code.ToString(), out status)) {
+			if (code.HasValue && Enum.TryParse(code.ToString(), out status)) {
 				closeTask = this.ws.CloseAsync(status, message, CancellationToken.None);
 			} else {
 				closeTask = this.ws.CloseAsync(WebSocketCloseStatus.Empty, message, CancellationToken.None);
