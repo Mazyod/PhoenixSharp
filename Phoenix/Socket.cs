@@ -411,7 +411,8 @@ namespace Phoenix {
 				Log(LogLevel.Debug, "receive", $"Received {message}");
 			}
 
-			channels.ForEach(channel => {
+			// copy channels before triggering callbacks, since they might modify the channels list
+			channels.ToList().ForEach(channel => {
 				// violates tell don't ask, but that's how Phoenix JS is implemented
 				if (channel.IsMember(message)) {
 					channel.Trigger(message);
