@@ -1,12 +1,18 @@
-﻿using Newtonsoft.Json.Linq;
+﻿using System.Collections.Generic;
+using Newtonsoft.Json.Linq;
 
 
 namespace Phoenix {
 
 	public sealed class JSONMessageSerializer : IMessageSerializer {
 		public string Serialize(Message message) {
-			return JObject
-				.FromObject(message)
+			return new JArray(
+					message.joinRef,
+					message.@ref,
+					message.topic,
+					message.@event,
+					message.payload == null ? null : JObject.FromObject(message.payload)
+				)
 				.ToString(
 					Newtonsoft.Json.Formatting.None,
 					new Newtonsoft.Json.Converters.StringEnumConverter()
@@ -16,9 +22,14 @@ namespace Phoenix {
 		public Message Deserialize(string message) {
 			System.Console.WriteLine("===> Receive: {0}", message.Trim('\u0000'));
 
-			return JObject
-				.Parse(message)
-				.ToObject<Message>();
+			var array = JArray.Parse(message);
+			return new Message(
+				joinRef: array[0].ToObject<string>(),
+				@ref: array[1].ToObject<string>(),
+				topic: array[2].ToObject<string>(),
+				@event: array[3].ToObject<string>(),
+				payload: array[4].ToObject<Dictionary<string, object>>()
+			);
 		}
 	}
 }

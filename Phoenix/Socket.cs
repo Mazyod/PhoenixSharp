@@ -25,6 +25,8 @@ namespace Phoenix {
 		}
 
 		public sealed class Options {
+			// The serializer's protocol version to send on connect.
+			public string vsn = "2.0.0";
 			// Message serializer to allow different serialization methods
 			public IMessageSerializer messageSerializer = new JSONMessageSerializer();
 			// The default timeout to trigger push timeouts.
@@ -139,7 +141,10 @@ namespace Phoenix {
 
 		private Uri EndPointURL() {
 			// very primitive query string builder
-			var stringParams = (@params ?? new Dictionary<string, string>())
+			var @params = this.@params ?? new();
+			@params["vsn"] = opts.vsn;
+
+			var stringParams = @params
 					.Select(pair => string.Format("{0}={1}", pair.Key, pair.Value))
 					.ToArray();
 

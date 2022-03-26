@@ -41,7 +41,8 @@ namespace PhoenixTests {
 					topic: "phoenix-test",
 					@event: Message.InBoundEvent.phx_reply.ToString(),
 					@ref: "123",
-					payload: payload
+					payload: payload,
+					joinRef: "456"
 				);
 			}
 		}
@@ -52,12 +53,8 @@ namespace PhoenixTests {
 
 			var serializer = new JSONMessageSerializer();
 			var serialized = serializer.Serialize(sampleMessage);
-			var expected = "{"
-				+ "\"topic\":\"phoenix-test\","
-				+ "\"event\":\"phx_join\","
-				+ "\"ref\":\"123\","
-				+ "\"payload\":{\"some key\":12,\"another key\":{\"nested\":\"value\"}}"
-				+ "}";
+			var expected = @"['456','123','phoenix-test','phx_join',{'some key':12,'another key':{'nested':'value'}}]"
+				.Replace("'", "\"");
 
 			Assert.AreEqual(serialized, expected);
 		}
@@ -75,9 +72,16 @@ namespace PhoenixTests {
 		}
 
 		[Test()]
+		public void NullJoinRefTest() {
+			var serializer = new JSONMessageSerializer();
+			var message = serializer.Deserialize(@"[null, null, null, null, null]");
+			Assert.IsNull(message.joinRef);
+		}
+
+		[Test()]
 		public void SerializingNullPayloadTest() {
 
-			var message = new Message(null, null, null, null);
+			var message = new Message();
 			Assert.IsNull(message.payload); // inconsistent with phoenix.js
 		}
 

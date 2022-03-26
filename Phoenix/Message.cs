@@ -75,10 +75,8 @@ namespace Phoenix {
 		public string @event;
 		public readonly string @ref;
 		public readonly Dictionary<string, object> payload;
-
-		[System.Runtime.Serialization.IgnoreDataMember]
 		public readonly string joinRef;
-		[System.Runtime.Serialization.IgnoreDataMember]
+		// private members are ignore by default
 		private Reply _cachedReply;
 
 		public Message(
