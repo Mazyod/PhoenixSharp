@@ -130,8 +130,8 @@ namespace Phoenix {
 
 			reconnectTimer = new(
 					() => Teardown(() => Connect()),
-					opts.reconnectAfter,
-					opts.delayedExecutor
+					this.opts.reconnectAfter,
+					this.opts.delayedExecutor
 			);
 		}
 
