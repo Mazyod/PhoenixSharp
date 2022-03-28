@@ -27,39 +27,6 @@ namespace PhoenixTests {
 			Assert.AreEqual(conn.callSend.Count, 1);
 		}
 
-		/**
-    describe("flushSendBuffer", function(){
-      beforeEach(function(){
-        socket = new Socket("/socket")
-        socket.connect()
-      })
-
-      it("calls callbacks in buffer when connected", function(){
-        socket.conn.readyState = 1 // open
-        const spy1 = sinon.spy()
-        const spy2 = sinon.spy()
-        const spy3 = sinon.spy()
-        socket.sendBuffer.push(spy1)
-        socket.sendBuffer.push(spy2)
-
-        socket.flushSendBuffer()
-
-        assert.ok(spy1.calledOnce)
-        assert.ok(spy2.calledOnce)
-        assert.equal(spy3.callCount, 0)
-      })
-
-      it("empties sendBuffer", function(){
-        socket.conn.readyState = 1 // open
-        socket.sendBuffer.push(() => {})
-
-        socket.flushSendBuffer()
-
-        assert.deepEqual(socket.sendBuffer.length, 0)
-      })
-    })
-    */
-
 		/** Test Github Issue #19:
 		 *	phx_join never sent if socket is not open by the time Join is called.
 		 */
