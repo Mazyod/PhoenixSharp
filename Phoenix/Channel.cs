@@ -180,8 +180,6 @@ namespace Phoenix {
 			var subscriptions = bindings.GetValueOrDefault(anyEvent) ?? (bindings[anyEvent] = new());
 			subscriptions.Add(subscription);
 
-			socket.Log(LogLevel.Debug, "channel", $"subscription added: {anyEvent} {callback.Target} {callback.Method.Name}");
-
 			return subscription;
 		}
 
@@ -260,7 +258,7 @@ namespace Phoenix {
 
 			if (message.joinRef != null && message.joinRef != joinRef) {
 				if (socket.HasLogger()) {
-					socket.opts.logger.Log(
+					socket.Log(
 							LogLevel.Info,
 							"Channel",
 							$"dropping outdated message for topic '{topic}' (joinRef {message.joinRef} does not match joinRef {joinRef})"
@@ -290,9 +288,7 @@ namespace Phoenix {
 
 			var eventBindings = bindings.GetValueOrDefault(message.@event);
 
-			socket.Log(LogLevel.Debug, "channel", $"channel '{topic}' triggering: {message.@event}");
 			eventBindings?.ForEach(subscription => {
-				socket.Log(LogLevel.Debug, "channel", $"channel '{topic}' triggering event '{message.@event}' to {subscription.callback.Method.Name}");
 				subscription.callback(new Message(
 						message.topic,
 						message.@event,
