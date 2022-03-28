@@ -290,11 +290,9 @@ namespace Phoenix {
 
 			eventBindings?.ForEach(subscription => {
 				subscription.callback(new Message(
-						message.topic,
-						message.@event,
-						handledPayload,
-						message.@ref,
-						message.joinRef ?? joinRef
+						payload: handledPayload,
+						@ref: message.@ref,
+						joinRef: message.joinRef ?? joinRef
 				));
 			});
 		}
