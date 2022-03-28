@@ -77,14 +77,12 @@ namespace Phoenix {
 		}
 
 		private void MatchReceive(Message message) {
-			channel.socket.Log(LogLevel.Debug, "channel", $"channel.matchReceive({message})");
 
 			var reply = message.ParseReply();
 			if (reply == null) {
 				return;
 			}
 
-			channel.socket.Log(LogLevel.Debug, "channel", $"find hooks for status {reply.status}");
 			recHooks
 				.GetValueOrDefault(reply.replyStatus)?
 				.ForEach(callback => callback(message));
