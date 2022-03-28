@@ -94,7 +94,7 @@ namespace Phoenix {
 		// private readonly Dictionary<Event, List<Subscription>> stateChangeCallbacks = new();
 
 		private readonly List<Channel> channels = new();
-		private readonly List<Action> sendBuffer = new();
+		internal readonly List<Action> sendBuffer = new();
 		private uint @ref = 0;
 
 		// TODO: support defaultEncode/defaultDecoder
@@ -390,7 +390,7 @@ namespace Phoenix {
 			}
 		}
 
-		private void FlushSendBuffer() {
+		internal void FlushSendBuffer() {
 			if (IsConnected() && sendBuffer.Count > 0) {
 				sendBuffer.ForEach(callback => callback());
 				sendBuffer.Clear();
