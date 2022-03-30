@@ -79,8 +79,8 @@ namespace Phoenix {
 		#endregion
 
 		public State state = new();
-		private List<Diff> pendingDiffs = new();
-		private Channel channel;
+		private readonly List<Diff> pendingDiffs = new();
+		private readonly Channel channel;
 		private string joinRef = null;
 
 		public Presence(Channel channel, Options opts = null) {
@@ -88,7 +88,8 @@ namespace Phoenix {
 
 			var options = opts ?? new();
 
-			channel.On(options.stateEvent, newState => {
+			channel.On(options.stateEvent, message => {
+				var newState = channel.socket.opts.messageSerializer.MapPayload<State>(message.payload);
 				joinRef = channel.joinRef;
 				state = SyncState(state, newState, OnJoin, OnLeave);
 
@@ -102,7 +103,8 @@ namespace Phoenix {
 				OnSync?.Invoke();
 			});
 
-			channel.On(options.diffEvent, diff => {
+			channel.On(options.diffEvent, message => {
+				var diff = channel.socket.opts.messageSerializer.MapPayload<Diff>(message.payload);
 				if (InPendingSyncState()) {
 					pendingDiffs.Add(diff);
 				} else {
