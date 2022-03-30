@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
@@ -228,9 +228,7 @@ namespace Phoenix {
 					socket.Log(LogLevel.Debug, "channel", $"leave {topic}");
 				}
 
-				Trigger(new Message(
-					@event: Message.InBoundEvent.phx_close.ToString()
-				));
+				Trigger(Message.InBoundEvent.phx_close);
 			}
 
 			var leaveEvent = Message.OutBoundEvent.phx_leave.ToString();
@@ -278,6 +276,11 @@ namespace Phoenix {
 			socket.LeaveOpenTopic(topic);
 			state = State.Joining;
 			joinPush.Resend(timeout ?? this.timeout);
+		}
+
+		// Helper method not found in PhoenixJS
+		internal void Trigger(Message.InBoundEvent @event) {
+			Trigger(new Message(@event: @event.ToString()));
 		}
 
 		internal void Trigger(Message message) {

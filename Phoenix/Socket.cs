@@ -322,7 +322,7 @@ namespace Phoenix {
 		private void TriggerChanError() {
 			channels.ForEach(channel => {
 				if (!(channel.IsErrored() || channel.IsLeaving() || channel.IsClosed())) {
-					channel.Trigger(new Message(@event: Message.InBoundEvent.phx_error.ToString()));
+					channel.Trigger(Message.InBoundEvent.phx_error);
 				}
 			});
 		}
