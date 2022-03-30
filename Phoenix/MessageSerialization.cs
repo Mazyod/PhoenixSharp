@@ -31,6 +31,10 @@ namespace Phoenix {
 				payload: array[4].ToObject<Dictionary<string, object>>()
 			);
 		}
+
+		public T MapPayload<T>(Dictionary<string, object> payload) {
+			return payload == null ? default : JObject.FromObject(payload).ToObject<T>();
+		}
 	}
 }
 

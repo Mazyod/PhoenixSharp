@@ -8,6 +8,8 @@ namespace Phoenix {
 	public interface IMessageSerializer {
 		string Serialize(Message message);
 		Message Deserialize(string message);
+
+		T MapPayload<T>(Dictionary<string, object> payload);
 	}
 
 	#region payloads
@@ -15,7 +17,7 @@ namespace Phoenix {
 	/** 
 		* A reply payload, in response to a push.
 		*/
-	public sealed class Reply {
+	public sealed record Reply {
 
 		public enum Status {
 			ok,
@@ -55,7 +57,7 @@ namespace Phoenix {
 
 	#endregion
 
-	public class Message : IEquatable<Message> {
+	public sealed record Message {
 		#region nested types
 
 		public enum InBoundEvent {
@@ -75,10 +77,8 @@ namespace Phoenix {
 		// unfortunate mutation of the original message
 		public string @event;
 		public readonly string @ref;
-		public readonly Dictionary<string, object> payload;
-		public readonly string joinRef;
-		// private members are ignore by default
-		private Reply _cachedReply;
+		public Dictionary<string, object> payload;
+		public string joinRef;
 
 		public Message(
 			string topic = null,
@@ -92,73 +92,6 @@ namespace Phoenix {
 			this.payload = payload;
 			this.@ref = @ref;
 			this.joinRef = joinRef;
-		}
-
-		public Reply ParseReply() {
-			if (_cachedReply != null) {
-				return _cachedReply;
-			}
-			if (!@event.StartsWith(Reply.replyEventPrefix)
-					&& @event != InBoundEvent.phx_reply.ToString()) {
-				return null;
-			}
-
-			// TODO: use serializer to avoid coupling with JObject
-			_cachedReply = JObject.FromObject(payload).ToObject<Reply>();
-			return _cachedReply;
-		}
-
-		public override string ToString() {
-			return string.Format("Message: {0} - {1}: {2}", @ref, topic, @event);
-		}
-
-		#region IEquatable methods
-
-		public override int GetHashCode() {
-			return topic.GetHashCode() + @event.GetHashCode() + @ref.GetHashCode();
-		}
-
-		public override bool Equals(object obj) {
-			return (obj is Message message) && Equals(message);
-		}
-
-		public bool Equals(Message that) {
-			return topic == that.topic
-					&& @event == that.@event
-					&& @ref == that.@ref
-					/* dictionary equality is hard */
-					;
-		}
-
-		#endregion
-	}
-
-
-	public static class MessageInBoundEventExtensions {
-
-		public static Message.InBoundEvent? Parse(string rawChannelEvent) {
-
-			foreach (Message.InBoundEvent inboundEvent in Enum.GetValues(typeof(Message.InBoundEvent))) {
-				if (inboundEvent.ToString() == rawChannelEvent) {
-					return inboundEvent;
-				}
-			}
-
-			return null;
-		}
-	}
-
-	public static class MessageOutBoundEventExtensions {
-
-		public static Message.OutBoundEvent Parse(string rawChannelEvent) {
-
-			foreach (Message.OutBoundEvent outboundEvent in Enum.GetValues(typeof(Message.OutBoundEvent))) {
-				if (outboundEvent.ToString() == rawChannelEvent) {
-					return outboundEvent;
-				}
-			}
-
-			throw new ArgumentOutOfRangeException(rawChannelEvent);
 		}
 	}
 }

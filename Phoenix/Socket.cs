@@ -97,8 +97,6 @@ namespace Phoenix {
 		internal readonly List<Action> sendBuffer = new();
 		private uint @ref = 0;
 
-		// TODO: support defaultEncode/defaultDecoder
-
 		private bool closeWasClean = false;
 
 		// TODO: binaryType?
@@ -310,9 +308,6 @@ namespace Phoenix {
 			if (HasLogger()) {
 				Log(LogLevel.Debug, "transport", $"Error {error}");
 			}
-
-			// TODO: pass callback parameters
-			// callback(error, transportBefore, establishedBefore)
 			
 			OnError?.Invoke(error);
 
@@ -407,7 +402,6 @@ namespace Phoenix {
 			}
 
 			if (HasLogger()) {
-				// TODO: `${payload.status || ""} ${topic} ${event} ${ref && "(" + ref + ")" || ""}`, payload
 				Log(LogLevel.Debug, "receive", $"Received {message}");
 			}
 

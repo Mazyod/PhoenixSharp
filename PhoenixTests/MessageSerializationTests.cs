@@ -66,9 +66,15 @@ namespace PhoenixTests {
 			var serialized = serializer.Serialize(sampleMessage);
 			var deserialized = serializer.Deserialize(serialized);
 
-			Assert.AreEqual(deserialized, sampleMessage);
-			Assert.IsInstanceOf(typeof(JObject), deserialized.payload["another key"]);
-			Assert.IsNull(deserialized.ParseReply());
+			Assert.AreEqual(
+				deserialized with {  payload = null },
+				sampleMessage with {  payload = null }
+			);
+
+			var payloadObject = deserialized.payload["another key"] as JObject;
+			Assert.IsNotNull(payloadObject);
+			Assert.AreEqual(payloadObject["nested"].ToObject<string>(), "value");
+			Assert.IsNull(serializer.MapPayload<Reply>(deserialized.payload).status);
 		}
 
 		[Test()]
@@ -92,10 +98,13 @@ namespace PhoenixTests {
 			var serialized = serializer.Serialize(replyMessage);
 			var deserialized = serializer.Deserialize(serialized);
 
-			Assert.AreEqual(deserialized, replyMessage);
+			Assert.AreEqual(
+				deserialized with { payload = null },
+				replyMessage with { payload = null }
+			);
 			Assert.IsInstanceOf(typeof(JObject), deserialized.payload["response"]);
 
-			var reply = deserialized.ParseReply();
+			var reply = serializer.MapPayload<Reply>(deserialized.payload);
 			Assert.AreEqual(reply.status, "ok");
 			Assert.AreEqual(reply.response["some_key"], 42);
 		}

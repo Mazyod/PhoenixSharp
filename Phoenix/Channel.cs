@@ -1,7 +1,5 @@
-using System;
-using System.Linq;
+﻿using System;
 using System.Collections.Generic;
-using Newtonsoft.Json.Linq;
 
 using ParamsType = System.Collections.Generic.Dictionary<string, object>;
 
@@ -137,13 +135,9 @@ namespace Phoenix {
 
 			// on phx_reply, also trigger a message for the push using replyEventName
 			On(Message.InBoundEvent.phx_reply.ToString(), message => {
-				Trigger(new Message(
-						topic: topic,
-						@event: ReplyEventName(message.@ref),
-						payload: message.payload,
-						@ref: message.@ref,
-						joinRef: message.joinRef
-				));
+				Trigger(message with {
+					@event = ReplyEventName(message.@ref),
+				});
 			});
 		}
 
@@ -292,11 +286,10 @@ namespace Phoenix {
 			var eventBindings = bindings.GetValueOrDefault(message.@event);
 
 			eventBindings?.ForEach(subscription => {
-				subscription.callback(new Message(
-						payload: handledPayload,
-						@ref: message.@ref,
-						joinRef: message.joinRef ?? joinRef
-				));
+				subscription.callback(message with {
+						payload = handledPayload,
+						joinRef = message.joinRef ?? joinRef
+				});
 			});
 		}
 
