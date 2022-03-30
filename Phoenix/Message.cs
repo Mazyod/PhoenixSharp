@@ -4,54 +4,59 @@ using Newtonsoft.Json.Linq;
 
 
 namespace Phoenix {
+
 	public interface IMessageSerializer {
 		string Serialize(Message message);
 		Message Deserialize(string message);
 	}
 
-	public class Message : IEquatable<Message> {
-		#region nested types
+	#region payloads
 
-		/** 
-		 * A reply appears within a message, returning a status and response.
-		 */
-		public sealed class Reply {
+	/** 
+		* A reply payload, in response to a push.
+		*/
+	public sealed class Reply {
 
-			public enum Status {
-				ok,
-				error,
-				timeout,
-			}
+		public enum Status {
+			ok,
+			error,
+			timeout,
+		}
 
-			// PhoenixJS maps incoming phx_reply to chan_reply_{ref} when broadcasting the event
-			public static readonly string replyEventPrefix = "chan_reply_";
+		// PhoenixJS maps incoming phx_reply to chan_reply_{ref} when broadcasting the event
+		public static readonly string replyEventPrefix = "chan_reply_";
 
-			public readonly string status;
-			public readonly Dictionary<string, object> response;
+		public readonly string status;
+		public readonly Dictionary<string, object> response;
 
-			[System.Runtime.Serialization.IgnoreDataMember]
-			public Status replyStatus {
-				get {
-					if (status == null) {
-						// shouldn't happen
-						return Status.error;
-					}
-
-					return status switch {
-						"ok" => Status.ok,
-						"error" => Status.error,
-						"timeout" => Status.timeout,
-						_ => throw new ArgumentException("Unknown status: " + status),
-					};
+		[System.Runtime.Serialization.IgnoreDataMember]
+		public Status replyStatus {
+			get {
+				if (status == null) {
+					// shouldn't happen
+					return Status.error;
 				}
 
+				return status switch {
+					"ok" => Status.ok,
+					"error" => Status.error,
+					"timeout" => Status.timeout,
+					_ => throw new ArgumentException("Unknown status: " + status),
+				};
 			}
 
-			public Reply(string status, Dictionary<string, object> response) {
-				this.status = status;
-				this.response = response;
-			}
 		}
+
+		public Reply(string status, Dictionary<string, object> response) {
+			this.status = status;
+			this.response = response;
+		}
+	}
+
+	#endregion
+
+	public class Message : IEquatable<Message> {
+		#region nested types
 
 		public enum InBoundEvent {
 			phx_reply,

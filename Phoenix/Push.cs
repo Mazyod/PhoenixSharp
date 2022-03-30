@@ -17,9 +17,9 @@ namespace Phoenix {
 		// internal state
 		internal string @ref = null;
 		private string refEvent = null;
-		private Message.Reply receivedResp = null;
+		private Reply receivedResp = null;
 		private DelayedExecution? delayedExecution = null;
-		private readonly Dictionary<Message.Reply.Status, List<Action<Dictionary<string, object>>>> recHooks = new();
+		private readonly Dictionary<Reply.Status, List<Action<Dictionary<string, object>>>> recHooks = new();
 		//private bool sent = false;
 
 		internal uint timerId;
@@ -42,7 +42,7 @@ namespace Phoenix {
 		}
 
 		public void Send() {
-			if (HasReceived(Message.Reply.Status.timeout)) {
+			if (HasReceived(Reply.Status.timeout)) {
 				return;
 			}
 
@@ -57,7 +57,7 @@ namespace Phoenix {
 			));
 		}
 
-		public Push Receive(Message.Reply.Status status, Action<Dictionary<string, object>> callback) {
+		public Push Receive(Reply.Status status, Action<Dictionary<string, object>> callback) {
 			if (HasReceived(status)) {
 				callback(receivedResp.response);
 			}
@@ -76,7 +76,7 @@ namespace Phoenix {
 			// sent = false;
 		}
 
-		private void MatchReceive(Message.Reply reply) {
+		private void MatchReceive(Reply reply) {
 
 			if (reply == null) {
 				return;
@@ -113,15 +113,15 @@ namespace Phoenix {
 			});
 
 			delayedExecution = channel.socket.opts.delayedExecutor.Execute(() => {
-				Trigger(Message.Reply.Status.timeout);
+				Trigger(Reply.Status.timeout);
 			}, timeout);
 		}
 
-		private bool HasReceived(Message.Reply.Status status) {
+		private bool HasReceived(Reply.Status status) {
 			return receivedResp?.replyStatus == status;
 		}
 
-		internal void Trigger(Message.Reply.Status status) {
+		internal void Trigger(Reply.Status status) {
 			channel.Trigger(new Message(
 				@event: refEvent,
 				payload: new Dictionary<string, object> {
