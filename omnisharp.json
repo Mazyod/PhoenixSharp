@@ -20,7 +20,7 @@
         "NewLineForFinally": false,
         "NewLineForMembersInObjectInit": false,
         "NewLineForMembersInAnonymousTypes": false,
-        "NewLineForClausesInQuery": false,
+        "NewLineForClausesInQuery": false
     }
 }
 
