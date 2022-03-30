@@ -65,8 +65,8 @@ namespace PhoenixTests {
 			/// 
 			/// test channel error on join
 			/// 
-			Message okReply = null;
-			Message errorReply = null;
+			Reply okReply = null;
+			Reply errorReply = null;
 			bool closeCalled = false;
 
 			var errorChannel = socket.Channel("tester:phoenix-sharp");
@@ -86,8 +86,8 @@ namespace PhoenixTests {
 			/// 
 			/// test channel joining and receiving a custom event
 			/// 
-			Message joinOkReply = null;
-			Message joinErrorReply = null;
+			Reply joinOkReply = null;
+			Reply joinErrorReply = null;
 
 			Message afterJoinMessage = null;
 			Message closeMessage = null;
@@ -127,7 +127,7 @@ namespace PhoenixTests {
 
 			roomChannel
 				.Push("reply_test", payload)
-				.Receive(Reply.Status.ok, r => testOkReply = r.ParseReply());
+				.Receive(Reply.Status.ok, r => testOkReply = r);
 
 			Assert.That(() => testOkReply != null, Is.True.After(networkDelay, 10));
 			Assert.IsNotNull(testOkReply.response);
@@ -140,7 +140,7 @@ namespace PhoenixTests {
 
 			roomChannel
 				.Push("error_test")
-				.Receive(Reply.Status.error, r => testErrorReply = r.ParseReply());
+				.Receive(Reply.Status.error, r => testErrorReply = r);
 
 			Assert.That(() => testErrorReply != null, Is.True.After(networkDelay, 10));
 			Assert.AreEqual(testErrorReply.replyStatus, Reply.Status.error);
@@ -148,7 +148,7 @@ namespace PhoenixTests {
 			/// 
 			/// test timeout reply
 			/// 
-			Message testTimeoutReply = null;
+			Reply testTimeoutReply = null;
 
 			roomChannel
 				.Push("timeout_test", null, TimeSpan.FromMilliseconds(50))
@@ -234,8 +234,8 @@ namespace PhoenixTests {
 			Assert.IsTrue(socket.state == WebsocketState.Open);
 			Assert.AreEqual(1, onOpenCount);
 
-			Message joinOkReply = null;
-			Message joinErrorReply = null;
+			Reply joinOkReply = null;
+			Reply joinErrorReply = null;
 			Message afterJoinMessage = null;
 			Message closeMessage = null;
 			Message errorMessage = null;

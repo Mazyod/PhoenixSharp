@@ -19,7 +19,7 @@ namespace Phoenix {
 		private string refEvent = null;
 		private Reply receivedResp = null;
 		private DelayedExecution? delayedExecution = null;
-		private readonly Dictionary<Reply.Status, List<Action<Dictionary<string, object>>>> recHooks = new();
+		private readonly Dictionary<Reply.Status, List<Action<Reply>>> recHooks = new();
 		//private bool sent = false;
 
 		internal uint timerId;
@@ -57,9 +57,9 @@ namespace Phoenix {
 			));
 		}
 
-		public Push Receive(Reply.Status status, Action<Dictionary<string, object>> callback) {
+		public Push Receive(Reply.Status status, Action<Reply> callback) {
 			if (HasReceived(status)) {
-				callback(receivedResp.response);
+				callback(receivedResp);
 			}
 
 			var callbacks = recHooks.GetValueOrDefault(status) ?? (recHooks[status] = new());
@@ -84,7 +84,7 @@ namespace Phoenix {
 
 			recHooks
 				.GetValueOrDefault(reply.replyStatus)?
-				.ForEach(callback => callback(reply.response));
+				.ForEach(callback => callback(reply));
 		}
 
 		private void CancelRefEvent() {
