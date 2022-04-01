@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 
 /**
@@ -26,8 +27,17 @@ using System.Linq;
 	a `:phx_ref_prev` key will be present containing the previous
 	`:phx_ref` value.
  */
-using State = System.Collections.Generic.Dictionary<
+using State = System.Collections.Immutable.ImmutableDictionary<
 	string, Phoenix.Presence.MetadataContainer>;
+
+using MutableState = System.Collections.Generic.Dictionary<
+	string, Phoenix.Presence.MetadataContainer>;
+
+using DiffList = System.Collections.Immutable.ImmutableList<
+	Phoenix.Presence.Diff>;
+
+using MetadataList = System.Collections.Immutable.ImmutableList<
+	Phoenix.Presence.Metadata>;
 
 namespace Phoenix {
 	/**
@@ -35,8 +45,10 @@ namespace Phoenix {
 	* @param {Channel} channel - The Channel
 	* @param {Object} opts - The options,
 	*        for example `{events: {state: "state", diff: "diff"}}`
+	*
+	* TODO: We are using immutable types since the PhoenixJS implementation uses deep clone.
+	* TODO: Immutable types generate a lot of garbage, so we should consider using a different approach.
 	*/
-
 	public sealed class Presence {
 
 		#region nested types
@@ -46,20 +58,17 @@ namespace Phoenix {
 			public string diffEvent = "presence_diff";
 		}
 
-		public sealed class Metadata {
-			public uint id;
-			public string state;
-			public string phxRef;
-		}
+		public sealed record Metadata(
+			uint id, string state, string phxRef
+		);
 
-		public sealed class MetadataContainer {
-			public List<Metadata> metas;
-		}
+		public sealed record MetadataContainer(
+			MetadataList metas
+		);
 
-		public sealed class Diff {
-			public State joins;
-			public State leaves;
-		}
+		public sealed record Diff(
+			State joins, State leaves
+		);
 
 		#endregion
 
@@ -78,8 +87,8 @@ namespace Phoenix {
 
 		#endregion
 
-		public State state = new();
-		private readonly List<Diff> pendingDiffs = new();
+		public State state = State.Empty;
+		private readonly DiffList pendingDiffs = DiffList.Empty;
 		private readonly Channel channel;
 		private string joinRef = null;
 
@@ -94,8 +103,8 @@ namespace Phoenix {
 				state = SyncState(state, newState, OnJoin, OnLeave);
 
 				state = pendingDiffs.Aggregate(
-					state, 
-					(state, diff) => SyncDiff(state, diff, OnJoin, OnLeave)
+					state,
+					(state, diff) => SyncDiff(new(state), diff, OnJoin, OnLeave)
 				);
 
 				pendingDiffs.Clear();
@@ -108,7 +117,7 @@ namespace Phoenix {
 				if (InPendingSyncState()) {
 					pendingDiffs.Add(diff);
 				} else {
-					state = SyncDiff(state, diff, OnJoin, OnLeave);
+					state = SyncDiff(new(state), diff, OnJoin, OnLeave);
 					OnSync?.Invoke();
 				}
 			});
@@ -134,10 +143,9 @@ namespace Phoenix {
 			OnJoinDelegate onJoin,
 			OnLeaveDelegate onLeave
 		) {
-			// TODO: figure out how to deep clone
-			var state = new State(currentState);
-			var joins = new State();
-			var leaves = new State();
+			var state = currentState;
+			var joins = new MutableState();
+			var leaves = new MutableState();
 
 			foreach (var key in state.Keys) {
 				if (!newState.ContainsKey(key)) {
@@ -154,20 +162,18 @@ namespace Phoenix {
 					var joinedMetas = newPresence.metas.Where(m => curRefs.IndexOf(m.phxRef) < 0).ToList();
 					var leftMetas = currentPresence.metas.Where(m => newRefs.IndexOf(m.phxRef) < 0).ToList();
 					if (joinedMetas.Count > 0) {
-						joins[key] = newPresence;
-						joins[key].metas = joinedMetas;
+						joins[key] = newPresence with { metas = joinedMetas.ToImmutableList() };
 					}
 					if (leftMetas.Count > 0) {
-						// TODO: figure out deep clone of currentPresence
-						leaves[key] = currentPresence;
-						leaves[key].metas = leftMetas;
+						leaves[key] = currentPresence with { metas = leftMetas.ToImmutableList() };
 					}
 				} else {
 					joins[key] = newPresence;
 				}
 			}
 
-			return SyncDiff(state, new() { joins = joins, leaves = leaves }, onJoin, onLeave);
+			Diff diff = new(joins.ToImmutableDictionary(), leaves.ToImmutableDictionary());
+			return SyncDiff(new(state), diff, onJoin, onLeave);
 		}
 
 		/**
@@ -177,19 +183,18 @@ namespace Phoenix {
 		* joining or leaving from a device.
 		*/
 		public static State SyncDiff(
-			State state, 
-			Diff diff, 
-			OnJoinDelegate onJoin, 
+			MutableState state,
+			Diff diff,
+			OnJoinDelegate onJoin,
 			OnLeaveDelegate onLeave
 		) {
-			// TODO: figure out how to deep clone
+			// PhoenixJS: we don't clone here since we use immutable types
 			var joins = diff.joins;
 			var leaves = diff.leaves;
 
 			foreach (var key in diff.joins.Keys) {
 				var newPresence = diff.joins[key];
 				var currentPresence = state.GetValueOrDefault(key);
-				// TODO: figure out deep clone of newPresence
 				state[key] = newPresence;
 				if (currentPresence != null) {
 					var joinedRefs = state[key].metas.Select(m => m.phxRef).ToList();
@@ -206,16 +211,19 @@ namespace Phoenix {
 					continue;
 				}
 				var refsToRemove = leftPresence.metas.Select(m => m.phxRef).ToList();
-				currentPresence.metas = currentPresence.metas.Where(
+				var filteredMetas = currentPresence.metas.Where(
 					p => refsToRemove.IndexOf(p.phxRef) < 0).ToList();
 
-				onLeave?.Invoke(key, currentPresence, leftPresence);
-				if (currentPresence.metas.Count == 0) {
+				var newPresence = currentPresence with { metas = filteredMetas.ToImmutableList() };
+				onLeave?.Invoke(key, newPresence, leftPresence);
+				if (newPresence.metas.Count == 0) {
 					state.Remove(key);
+				} else {
+					state[key] = newPresence;
 				}
 			}
 
-			return state;
+			return state.ToImmutableDictionary();
 		}
 
 		/**
