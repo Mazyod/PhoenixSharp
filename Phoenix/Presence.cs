@@ -37,7 +37,7 @@ using DiffList = System.Collections.Immutable.ImmutableList<
 	Phoenix.Presence.Diff>;
 
 using MetadataList = System.Collections.Immutable.ImmutableList<
-	Phoenix.Presence.Metadata>;
+	System.Collections.Immutable.ImmutableDictionary<string, object>>;
 
 namespace Phoenix {
 	/**
@@ -57,10 +57,6 @@ namespace Phoenix {
 			public string stateEvent = "presence_state";
 			public string diffEvent = "presence_diff";
 		}
-
-		public sealed record Metadata(
-			uint id, string state, string phxRef
-		);
 
 		public sealed record MetadataContainer(
 			MetadataList metas
@@ -157,10 +153,10 @@ namespace Phoenix {
 				var newPresence = newState[key];
 				var currentPresence = state.GetValueOrDefault(key);
 				if (currentPresence != null) {
-					var newRefs = newPresence.metas.Select(m => m.phxRef).ToList();
-					var curRefs = currentPresence.metas.Select(m => m.phxRef).ToList();
-					var joinedMetas = newPresence.metas.Where(m => curRefs.IndexOf(m.phxRef) < 0).ToList();
-					var leftMetas = currentPresence.metas.Where(m => newRefs.IndexOf(m.phxRef) < 0).ToList();
+					var newRefs = newPresence.metas.Select(m => m["phx_ref"]).ToList();
+					var curRefs = currentPresence.metas.Select(m => m["phx_ref"]).ToList();
+					var joinedMetas = newPresence.metas.Where(m => curRefs.IndexOf(m["phx_ref"]) < 0).ToList();
+					var leftMetas = currentPresence.metas.Where(m => newRefs.IndexOf(m["phx_ref"]) < 0).ToList();
 					if (joinedMetas.Count > 0) {
 						joins[key] = newPresence with { metas = joinedMetas.ToImmutableList() };
 					}
@@ -197,8 +193,8 @@ namespace Phoenix {
 				var currentPresence = state.GetValueOrDefault(key);
 				state[key] = newPresence;
 				if (currentPresence != null) {
-					var joinedRefs = state[key].metas.Select(m => m.phxRef).ToList();
-					var curMetas = currentPresence.metas.Where(m => joinedRefs.IndexOf(m.phxRef) < 0).ToList();
+					var joinedRefs = state[key].metas.Select(m => m["phx_ref"]).ToList();
+					var curMetas = currentPresence.metas.Where(m => joinedRefs.IndexOf(m["phx_ref"]) < 0).ToList();
 					state[key].metas.InsertRange(0, curMetas);
 				}
 				onJoin?.Invoke(key, currentPresence, newPresence);
@@ -210,9 +206,9 @@ namespace Phoenix {
 				if (currentPresence == null) {
 					continue;
 				}
-				var refsToRemove = leftPresence.metas.Select(m => m.phxRef).ToList();
+				var refsToRemove = leftPresence.metas.Select(m => m["phx_ref"]).ToList();
 				var filteredMetas = currentPresence.metas.Where(
-					p => refsToRemove.IndexOf(p.phxRef) < 0).ToList();
+					m => refsToRemove.IndexOf(m["phx_ref"]) < 0).ToList();
 
 				var newPresence = currentPresence with { metas = filteredMetas.ToImmutableList() };
 				onLeave?.Invoke(key, newPresence, leftPresence);
