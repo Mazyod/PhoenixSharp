@@ -1,4 +1,7 @@
 {
+    "editor.semanticHighlighting.enabled": true,
+    "csharp.semanticHighlighting.enabled": true,
     "prettier.useTabs": true,
-    "omnisharp.enableRoslynAnalyzers": true
+    "omnisharp.enableRoslynAnalyzers": true,
+    "omnisharp.useModernNet": true
 }
