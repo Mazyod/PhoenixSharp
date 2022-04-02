@@ -12,7 +12,7 @@ namespace PhoenixTests {
 
 		#region ILogger implementation
 
-		public void Log(Phoenix.LogLevel level, string source, string message) {
+		public void Log(LogLevel level, string source, string message) {
 			Console.WriteLine("[{0}]: {1} - {2}", level, source, message);
 		}
 
