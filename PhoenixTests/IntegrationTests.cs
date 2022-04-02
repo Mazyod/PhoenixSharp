@@ -1,9 +1,9 @@
 ﻿using System;
-using System.Collections.Generic;
-using Phoenix;
-using NUnit.Framework;
 using System.Net;
+using System.Collections.Generic;
 using Newtonsoft.Json;
+using NUnit.Framework;
+using Phoenix;
 
 
 namespace PhoenixTests {
