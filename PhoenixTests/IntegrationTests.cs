@@ -19,7 +19,6 @@ namespace PhoenixTests {
 		#endregion
 	}
 
-
 	[TestFixture()]
 	public class IntegrationTests {
 
@@ -51,6 +50,9 @@ namespace PhoenixTests {
 			List<Message> onMessageData = new();
 			void onMessageCallback(Message m) => onMessageData.Add(m);
 
+			List<string> onErrorData = new();
+			void onErrorCallback(string message) => onErrorData.Add(message);
+
 			// connecting is synchronous as implemented above
 			var socketAddress = string.Format("ws://{0}/socket", host);
 			var socketFactory = new WebsocketSharpFactory();
@@ -61,10 +63,21 @@ namespace PhoenixTests {
 
 			socket.OnOpen += onOpenCallback;
 			socket.OnMessage += onMessageCallback;
+			socket.OnError += onErrorCallback;
 
 			socket.Connect();
 			Assert.AreEqual(socket.state, WebsocketState.Open);
 			Assert.AreEqual(1, onOpenCount);
+
+			///
+			/// test socket error recovery
+			///
+			socket.conn.Close();
+
+			Assert.AreEqual(socket.state, WebsocketState.Closed);
+			Assert.That(() => socket.state == WebsocketState.Open, Is.True.After(networkDelay));
+			Assert.AreEqual(onErrorData.Count, 1);
+			Assert.AreEqual(onErrorData[0], "An error has occurred in closing the connection.");
 
 			/// 
 			/// test channel error on join
