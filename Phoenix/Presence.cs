@@ -119,8 +119,8 @@ namespace Phoenix {
 			});
 		}
 
-		public List<MetadataContainer> List(
-			Func<KeyValuePair<string, MetadataContainer>, MetadataContainer> by
+		public List<object> List(
+			Func<KeyValuePair<string, MetadataContainer>, object> by
 		) => List(state, by);
 
 		public bool InPendingSyncState() => joinRef == null || joinRef != channel.joinRef;
@@ -136,8 +136,8 @@ namespace Phoenix {
 		public static State SyncState(
 			State currentState,
 			State newState,
-			OnJoinDelegate onJoin,
-			OnLeaveDelegate onLeave
+			OnJoinDelegate onJoin = null,
+			OnLeaveDelegate onLeave = null
 		) {
 			var state = currentState;
 			var joins = new MutableState();
@@ -225,9 +225,9 @@ namespace Phoenix {
 		/**
 		* Returns the array of presences, with selected metadata.
 		*/
-		public static List<MetadataContainer> List(
+		public static List<object> List(
 			State presences,
-			Func<KeyValuePair<string, MetadataContainer>, MetadataContainer> chooser = null
+			Func<KeyValuePair<string, MetadataContainer>, object> chooser = null
 		) {
 			if (chooser == null) {
 				chooser = keyPresenceTuple => keyPresenceTuple.Value;
