@@ -4,21 +4,23 @@ using System.Collections.Generic;
 namespace PhoenixTests {
 	public sealed class MockWebsocketAdapter : IWebsocket {
 
+		public WebsocketState mockState = WebsocketState.Closed;
 		public readonly WebsocketConfiguration config;
 
 		public MockWebsocketAdapter(WebsocketConfiguration config) {
 			this.config = config;
 		}
 
-
 		#region IWebsocket methods
 
 		public WebsocketState state => mockState;
-		public WebsocketState mockState = WebsocketState.Closed;
 
 		public int callConnectCount = 0;
 		public void Connect() {
 			callConnectCount += 1;
+
+			mockState = WebsocketState.Open;
+			config.onOpenCallback?.Invoke(this);
 		}
 
 		public List<string> callSend = new();
@@ -29,6 +31,8 @@ namespace PhoenixTests {
 		public int callCloseCount = 0;
 		public void Close(ushort? code = null, string message = null) {
 			callCloseCount += 1;
+
+			config.onCloseCallback?.Invoke(this, code ?? 0, message);
 		}
 
 		#endregion
