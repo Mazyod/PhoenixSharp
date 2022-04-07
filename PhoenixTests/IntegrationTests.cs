@@ -75,7 +75,7 @@ namespace PhoenixTests {
 			socket.conn.Close();
 
 			Assert.AreEqual(socket.state, WebsocketState.Closed);
-			Assert.That(() => socket.state == WebsocketState.Open, Is.True.After(networkDelay));
+			Assert.That(() => socket.state == WebsocketState.Open, Is.True.After(networkDelay, 10));
 			Assert.AreEqual(onErrorData.Count, 1);
 			Assert.AreEqual(onErrorData[0], "An error has occurred in closing the connection.");
 
