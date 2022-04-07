@@ -64,11 +64,14 @@ namespace PhoenixTests {
 			var serializer = new JSONMessageSerializer();
 			var serialized = serializer.Serialize(sampleMessage);
 			var deserialized = serializer.Deserialize(serialized);
+			// comparing payloads is tricky
+			var deserializedNoPayload = deserialized;
+			deserializedNoPayload.payload = null;
 
-			Assert.AreEqual(
-				deserialized with {  payload = null },
-				sampleMessage with {  payload = null }
-			);
+			var message = sampleMessage;
+			message.payload = null;
+
+			Assert.AreEqual(deserializedNoPayload, message);
 
 			var payloadObject = deserialized.payload["another key"] as JObject;
 			Assert.IsNotNull(payloadObject);
@@ -91,16 +94,19 @@ namespace PhoenixTests {
 		}
 
 		[Test()]
-		public void  ReplyDeserializationTest() {
-			
+		public void ReplyDeserializationTest() {
+
 			var serializer = new JSONMessageSerializer();
 			var serialized = serializer.Serialize(replyMessage);
 			var deserialized = serializer.Deserialize(serialized);
+			// comparing payloads is tricky
+			var deserializedNoPayload = deserialized;
+			deserializedNoPayload.payload = null;
 
-			Assert.AreEqual(
-				deserialized with { payload = null },
-				replyMessage with { payload = null }
-			);
+			var message = replyMessage;
+			message.payload = null;
+
+			Assert.AreEqual(deserializedNoPayload, message);
 			Assert.IsInstanceOf(typeof(JObject), deserialized.payload["response"]);
 
 			var reply = serializer.MapPayload<Reply>(deserialized.payload);
