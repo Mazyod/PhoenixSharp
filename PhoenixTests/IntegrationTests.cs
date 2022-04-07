@@ -342,7 +342,7 @@ namespace PhoenixTests {
 			// first, we get ack for joining the channel
 			Assert.That(() => joinOkReply != null, Is.True.After(networkDelay, 10));
 			// then, we get the presence state
-			Assert.That(() => joinCalls.Count == 1, Is.True.After(networkDelay, 10));
+			Assert.That(() => joinCalls.Count == 2, Is.True.After(networkDelay, 10));
 			// the key used by the server is the auth value we send
 			var presenceCall = joinCalls[0];
 			Assert.AreEqual(presenceCall.Item1, channelParams["auth"] as string);
