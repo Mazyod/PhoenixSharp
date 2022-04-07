@@ -325,10 +325,12 @@ namespace PhoenixTests {
 			var presence = new Presence(channel);
 
 			var joinCalls = new List<(string, Presence.MetadataContainer, Presence.MetadataContainer)>();
-			presence.OnJoin += (channel, joinMetadata, oldMetadata) => joinCalls.Add((channel, joinMetadata, oldMetadata));
+			presence.OnJoin += (channel, joinMetadata, oldMetadata)
+				=> joinCalls.Add((channel, joinMetadata, oldMetadata));
 
 			var leaveCalls = new List<(string, Presence.MetadataContainer, Presence.MetadataContainer)>();
-			presence.OnLeave += (channel, leaveMetadata, oldMetadata) => leaveCalls.Add((channel, leaveMetadata, oldMetadata));
+			presence.OnLeave += (channel, leaveMetadata, oldMetadata)
+				=> leaveCalls.Add((channel, leaveMetadata, oldMetadata));
 
 			var syncCalls = 0;
 			presence.OnSync += () => syncCalls++;
