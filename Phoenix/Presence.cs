@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.Immutable;
 using System.Linq;
 
 /**
@@ -27,17 +26,14 @@ using System.Linq;
 	a `:phx_ref_prev` key will be present containing the previous
 	`:phx_ref` value.
  */
-using State = System.Collections.Immutable.ImmutableDictionary<
+using State = System.Collections.Generic.Dictionary<
 	string, Phoenix.Presence.MetadataContainer>;
 
-using MutableState = System.Collections.Generic.Dictionary<
-	string, Phoenix.Presence.MetadataContainer>;
-
-using DiffList = System.Collections.Immutable.ImmutableList<
+using DiffList = System.Collections.Generic.List<
 	Phoenix.Presence.Diff>;
 
-using MetadataList = System.Collections.Immutable.ImmutableList<
-	System.Collections.Immutable.ImmutableDictionary<string, object>>;
+using MetadataList = System.Collections.Generic.List<
+	System.Collections.Generic.Dictionary<string, object>>;
 
 namespace Phoenix {
 	/**
@@ -58,13 +54,22 @@ namespace Phoenix {
 			public string diffEvent = "presence_diff";
 		}
 
-		public sealed record MetadataContainer(
-			MetadataList metas
-		);
+		/** MetadataContainer
+		avoiding structs since it's stored in a collection
+		*/
+		public sealed class MetadataContainer {
 
-		public sealed record Diff(
-			State joins, State leaves
-		);
+			public MetadataList metas;
+		}
+
+		/** Diff
+		avoiding structs since it's stored in a collection
+		*/
+		public sealed class Diff {
+
+			public State joins;
+			public State leaves;
+		}
 
 		#endregion
 
@@ -83,24 +88,25 @@ namespace Phoenix {
 
 		#endregion
 
-		public State state = State.Empty;
-		private readonly DiffList pendingDiffs = DiffList.Empty;
+		public State state = new State();
+		private readonly DiffList pendingDiffs = new DiffList();
 		private readonly Channel channel;
 		private string joinRef = null;
 
 		public Presence(Channel channel, Options opts = null) {
 			this.channel = channel;
 
-			var options = opts ?? new();
+			var options = opts ?? new Options();
 
 			channel.On(options.stateEvent, message => {
-				var newState = channel.socket.opts.messageSerializer.MapPayload<State>(message.payload);
+				var serializer = channel.socket.opts.messageSerializer;
+				var newState = serializer.MapPayload<State>(message.payload);
 				joinRef = channel.joinRef;
 				state = SyncState(state, newState, OnJoin, OnLeave);
 
 				state = pendingDiffs.Aggregate(
 					state,
-					(state, diff) => SyncDiff(new(state), diff, OnJoin, OnLeave)
+					(state, diff) => SyncDiff(new State(state), diff, OnJoin, OnLeave)
 				);
 
 				pendingDiffs.Clear();
@@ -113,7 +119,7 @@ namespace Phoenix {
 				if (InPendingSyncState()) {
 					pendingDiffs.Add(diff);
 				} else {
-					state = SyncDiff(new(state), diff, OnJoin, OnLeave);
+					state = SyncDiff(new State(state), diff, OnJoin, OnLeave);
 					OnSync?.Invoke();
 				}
 			});
@@ -140,8 +146,8 @@ namespace Phoenix {
 			OnLeaveDelegate onLeave = null
 		) {
 			var state = currentState;
-			var joins = new MutableState();
-			var leaves = new MutableState();
+			var joins = new State();
+			var leaves = new State();
 
 			foreach (var key in state.Keys) {
 				if (!newState.ContainsKey(key)) {
@@ -151,25 +157,25 @@ namespace Phoenix {
 
 			foreach (var key in newState.Keys) {
 				var newPresence = newState[key];
-				var currentPresence = state.GetValueOrDefault(key);
-				if (currentPresence != null) {
+				var found = state.TryGetValue(key, out var currentPresence);
+				if (found) {
 					var newRefs = newPresence.metas.Select(m => m["phx_ref"]).ToList();
 					var curRefs = currentPresence.metas.Select(m => m["phx_ref"]).ToList();
 					var joinedMetas = newPresence.metas.Where(m => curRefs.IndexOf(m["phx_ref"]) < 0).ToList();
 					var leftMetas = currentPresence.metas.Where(m => newRefs.IndexOf(m["phx_ref"]) < 0).ToList();
 					if (joinedMetas.Count > 0) {
-						joins[key] = newPresence with { metas = joinedMetas.ToImmutableList() };
+						joins[key] = new MetadataContainer { metas = joinedMetas };
 					}
 					if (leftMetas.Count > 0) {
-						leaves[key] = currentPresence with { metas = leftMetas.ToImmutableList() };
+						leaves[key] = new MetadataContainer { metas = leftMetas };
 					}
 				} else {
 					joins[key] = newPresence;
 				}
 			}
 
-			Diff diff = new(joins.ToImmutableDictionary(), leaves.ToImmutableDictionary());
-			return SyncDiff(new(state), diff, onJoin, onLeave);
+			Diff diff = new Diff() { joins = joins, leaves = leaves };
+			return SyncDiff(new State(state), diff, onJoin, onLeave);
 		}
 
 		/**
@@ -179,20 +185,16 @@ namespace Phoenix {
 		* joining or leaving from a device.
 		*/
 		public static State SyncDiff(
-			MutableState state,
+			State state,
 			Diff diff,
 			OnJoinDelegate onJoin,
 			OnLeaveDelegate onLeave
 		) {
-			// PhoenixJS: we don't clone here since we use immutable types
-			var joins = diff.joins;
-			var leaves = diff.leaves;
-
 			foreach (var key in diff.joins.Keys) {
 				var newPresence = diff.joins[key];
-				var currentPresence = state.GetValueOrDefault(key);
+				var found = state.TryGetValue(key, out var currentPresence);
 				state[key] = newPresence;
-				if (currentPresence != null) {
+				if (found) {
 					var joinedRefs = state[key].metas.Select(m => m["phx_ref"]).ToList();
 					var curMetas = currentPresence.metas.Where(m => joinedRefs.IndexOf(m["phx_ref"]) < 0).ToList();
 					state[key].metas.InsertRange(0, curMetas);
@@ -202,15 +204,15 @@ namespace Phoenix {
 
 			foreach (var key in diff.leaves.Keys) {
 				var leftPresence = diff.leaves[key];
-				var currentPresence = state.GetValueOrDefault(key);
-				if (currentPresence == null) {
+				var found = state.TryGetValue(key, out var currentPresence);
+				if (!found) {
 					continue;
 				}
 				var refsToRemove = leftPresence.metas.Select(m => m["phx_ref"]).ToList();
 				var filteredMetas = currentPresence.metas.Where(
 					m => refsToRemove.IndexOf(m["phx_ref"]) < 0).ToList();
 
-				var newPresence = currentPresence with { metas = filteredMetas.ToImmutableList() };
+				var newPresence = new MetadataContainer { metas = filteredMetas };
 				onLeave?.Invoke(key, newPresence, leftPresence);
 				if (newPresence.metas.Count == 0) {
 					state.Remove(key);
@@ -219,7 +221,7 @@ namespace Phoenix {
 				}
 			}
 
-			return state.ToImmutableDictionary();
+			return state;
 		}
 
 		/**

@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 
+using StatusHookTable = System.Collections.Generic.Dictionary<
+	Phoenix.Reply.Status,
+	System.Collections.Generic.List<System.Action<Phoenix.Reply>>>;
 
 namespace Phoenix {
 
@@ -16,9 +19,9 @@ namespace Phoenix {
 		// internal state
 		internal string @ref = null;
 		private string refEvent = null;
-		private Reply receivedResp = null;
+		private Reply? receivedResp = null;
 		private DelayedExecution? delayedExecution = null;
-		private readonly Dictionary<Reply.Status, List<Action<Reply>>> recHooks = new();
+		private readonly StatusHookTable recHooks = new StatusHookTable();
 		//private bool sent = false;
 
 		internal uint timerId;
@@ -58,10 +61,12 @@ namespace Phoenix {
 
 		public Push Receive(Reply.Status status, Action<Reply> callback) {
 			if (HasReceived(status)) {
-				callback(receivedResp);
+				callback(receivedResp.Value);
 			}
 
-			var callbacks = recHooks.GetValueOrDefault(status) ?? (recHooks[status] = new());
+			var callbacks = recHooks.GetValueOrDefault(status) ?? (
+				recHooks[status] = new List<Action<Reply>>()
+			);
 			callbacks.Add(callback);
 
 			return this;
@@ -75,15 +80,15 @@ namespace Phoenix {
 			// sent = false;
 		}
 
-		private void MatchReceive(Reply reply) {
+		private void MatchReceive(Reply? reply) {
 
-			if (reply == null) {
+			if (!reply.HasValue) {
 				return;
 			}
 
 			recHooks
-				.GetValueOrDefault(reply.replyStatus)?
-				.ForEach(callback => callback(reply));
+				.GetValueOrDefault(reply.Value.replyStatus)?
+				.ForEach(callback => callback(reply.Value));
 		}
 
 		private void CancelRefEvent() {

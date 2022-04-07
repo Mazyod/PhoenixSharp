@@ -67,7 +67,7 @@ namespace Phoenix {
 	public sealed class TimerBasedExecutor : IDelayedExecutor {
 		// Please ensure that you always start from 1, and leave 0 for uninitialized id
 		private uint id = 1;
-		private readonly Dictionary<uint, Timer> timers = new();
+		private readonly Dictionary<uint, Timer> timers = new Dictionary<uint, Timer>();
 
 
 		public DelayedExecution Execute(Action action, TimeSpan delay) {

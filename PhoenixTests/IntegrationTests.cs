@@ -82,8 +82,8 @@ namespace PhoenixTests {
 			/// 
 			/// test channel error on join
 			/// 
-			Reply okReply = null;
-			Reply errorReply = null;
+			Reply? okReply = null;
+			Reply? errorReply = null;
 			bool closeCalled = false;
 
 			var errorChannel = socket.Channel("tester:phoenix-sharp");
@@ -103,12 +103,12 @@ namespace PhoenixTests {
 			/// 
 			/// test channel joining and receiving a custom event
 			/// 
-			Reply joinOkReply = null;
-			Reply joinErrorReply = null;
+			Reply? joinOkReply = null;
+			Reply? joinErrorReply = null;
 
-			Message afterJoinMessage = null;
-			Message closeMessage = null;
-			Message errorMessage = null;
+			Message? afterJoinMessage = null;
+			Message? closeMessage = null;
+			Message? errorMessage = null;
 
 			var roomChannel = socket.Channel("tester:phoenix-sharp", channelParams);
 			roomChannel.On(Message.InBoundEvent.phx_close, m => closeMessage = m);
@@ -123,7 +123,7 @@ namespace PhoenixTests {
 			Assert.IsNull(joinErrorReply);
 
 			Assert.That(() => afterJoinMessage != null, Is.True.After(networkDelay, 10));
-			Assert.AreEqual("Welcome!", afterJoinMessage.payload["message"] as string);
+			Assert.AreEqual("Welcome!", afterJoinMessage?.payload["message"] as string);
 
 			// 1. heartbeat, 2. error, 3. join, 4. after_join
 			// TODO: see what changed here
@@ -136,32 +136,32 @@ namespace PhoenixTests {
 				{ "echo", "test" }
 			};
 
-			Reply testOkReply = null;
+			Reply? testOkReply = null;
 
 			roomChannel
 				.Push("reply_test", payload)
 				.Receive(Reply.Status.ok, r => testOkReply = r);
 
 			Assert.That(() => testOkReply != null, Is.True.After(networkDelay, 10));
-			Assert.IsNotNull(testOkReply.response);
-			CollectionAssert.AreEquivalent(testOkReply.response, payload);
+			Assert.IsNotNull(testOkReply?.response);
+			CollectionAssert.AreEquivalent(testOkReply?.response, payload);
 
 			/// 
 			/// test error reply
 			/// 
-			Reply testErrorReply = null;
+			Reply? testErrorReply = null;
 
 			roomChannel
 				.Push("error_test")
 				.Receive(Reply.Status.error, r => testErrorReply = r);
 
 			Assert.That(() => testErrorReply != null, Is.True.After(networkDelay, 10));
-			Assert.AreEqual(testErrorReply.replyStatus, Reply.Status.error);
+			Assert.AreEqual(testErrorReply?.replyStatus, Reply.Status.error);
 
 			/// 
 			/// test timeout reply
 			/// 
-			Reply testTimeoutReply = null;
+			Reply? testTimeoutReply = null;
 
 			roomChannel
 				.Push("timeout_test", null, TimeSpan.FromMilliseconds(50))
@@ -191,7 +191,7 @@ namespace PhoenixTests {
 			joinErrorReply = null;
 			errorMessage = null;
 			Assert.IsNull(closeMessage);
-			Message newCloseMessage = null;
+			Message? newCloseMessage = null;
 
 			var newRoomChannel = socket.Channel("tester:phoenix-sharp", channelParams);
 			newRoomChannel.On(Message.InBoundEvent.phx_close, m => newCloseMessage = m);
@@ -211,7 +211,7 @@ namespace PhoenixTests {
 			/// also, it should discard any additional messages
 			/// 
 			Assert.IsNull(newCloseMessage);
-			Message pushMessage = null;
+			Message? pushMessage = null;
 
 			newRoomChannel.On("push_test", m => pushMessage = m);
 			newRoomChannel.Push("push_test", payload);
@@ -252,11 +252,11 @@ namespace PhoenixTests {
 			Assert.AreEqual(socket.state, WebsocketState.Open);
 			Assert.AreEqual(1, onOpenCount);
 
-			Reply joinOkReply = null;
-			Reply joinErrorReply = null;
-			Message afterJoinMessage = null;
-			Message closeMessage = null;
-			Message errorMessage = null;
+			Reply? joinOkReply = null;
+			Reply? joinErrorReply = null;
+			Message? afterJoinMessage = null;
+			Message? closeMessage = null;
+			Message? errorMessage = null;
 
 			//Try to join for the first time
 			var roomChannel = socket.Channel("tester:phoenix-sharp", channelParams);
@@ -272,7 +272,7 @@ namespace PhoenixTests {
 			Assert.IsNull(joinErrorReply);
 
 			Assert.That(() => afterJoinMessage != null, Is.True.After(networkDelay, 10));
-			Assert.AreEqual("Welcome!", afterJoinMessage.payload["message"] as string);
+			Assert.AreEqual("Welcome!", afterJoinMessage?.payload["message"] as string);
 
 			Assert.AreEqual(Channel.State.Joined, roomChannel.state);
 
@@ -335,7 +335,7 @@ namespace PhoenixTests {
 			var syncCalls = 0;
 			presence.OnSync += () => syncCalls++;
 
-			Reply joinOkReply = null;
+			Reply? joinOkReply = null;
 			channel.Join()
 				.Receive(Reply.Status.ok, r => joinOkReply = r);
 

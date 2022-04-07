@@ -16,7 +16,7 @@ namespace Phoenix {
 	/** 
 		* A reply payload, in response to a push.
 		*/
-	public sealed record Reply {
+	public struct Reply {
 
 		public enum Status {
 			ok,
@@ -56,7 +56,7 @@ namespace Phoenix {
 
 	#endregion
 
-	public sealed record Message {
+	public struct Message {
 		#region nested types
 
 		public enum InBoundEvent {

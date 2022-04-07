@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 
 using ParamsType = System.Collections.Generic.Dictionary<string, object>;
+using SubscriptionTable = System.Collections.Generic.Dictionary<
+	string, System.Collections.Generic.List<Phoenix.Channel.Subscription>>;
 
 namespace Phoenix {
 
@@ -31,11 +33,11 @@ namespace Phoenix {
 		public readonly string topic;
 		public readonly Socket socket;
 
-		private readonly Dictionary<string, List<Subscription>> bindings = new();
+		private readonly SubscriptionTable bindings = new SubscriptionTable();
 		private TimeSpan timeout;
 		private bool joinedOnce = false;
 		private readonly Push joinPush;
-		private readonly List<Push> pushBuffer = new();
+		private readonly List<Push> pushBuffer = new List<Push>();
 
 		/** 
 		 *	See the stateChangeRefs comment in Socket.cs
@@ -135,9 +137,8 @@ namespace Phoenix {
 
 			// on phx_reply, also trigger a message for the push using replyEventName
 			On(Message.InBoundEvent.phx_reply.ToString(), message => {
-				Trigger(message with {
-					@event = ReplyEventName(message.@ref),
-				});
+				message.@event = ReplyEventName(message.@ref);
+				Trigger(message);
 			});
 		}
 
@@ -171,7 +172,9 @@ namespace Phoenix {
 				callback = callback
 			};
 
-			var subscriptions = bindings.GetValueOrDefault(anyEvent) ?? (bindings[anyEvent] = new());
+			var subscriptions = bindings.GetValueOrDefault(anyEvent)
+				?? (bindings[anyEvent] = new List<Subscription>());
+
 			subscriptions.Add(subscription);
 
 			return subscription;
@@ -286,10 +289,9 @@ namespace Phoenix {
 			var eventBindings = bindings.GetValueOrDefault(message.@event);
 
 			eventBindings?.ForEach(subscription => {
-				subscription.callback(message with {
-						payload = handledPayload,
-						joinRef = message.joinRef ?? joinRef
-				});
+				message.payload = handledPayload;
+				message.joinRef ??= joinRef;
+				subscription.callback(message);
 			});
 		}
 

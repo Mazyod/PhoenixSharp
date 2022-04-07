@@ -33,7 +33,7 @@ namespace Phoenix {
 			public TimeSpan timeout = TimeSpan.FromSeconds(10);
 			// The interval for rejoining an errored channel. Null means none
 			public Func<int, TimeSpan> rejoinAfter = (tries) => {
-				List<uint> rawIntervals = new() { 1_000, 2_000, 5_000 };
+				List<uint> rawIntervals = new List<uint>() { 1_000, 2_000, 5_000 };
 				List<TimeSpan> intervals = rawIntervals.Select(i => TimeSpan.FromMilliseconds(i)).ToList();
 
 				if (tries > intervals.Count) {
@@ -45,7 +45,7 @@ namespace Phoenix {
 			// The interval for reconnecting in the event of a connection error.
 			public Func<int, TimeSpan> reconnectAfter = (tries) => {
 				// TODO: cache these objects to avoid allocations
-				List<uint> rawIntervals = new() { 10, 50, 100, 150, 200, 250, 500, 1000, 2000 };
+				List<uint> rawIntervals = new List<uint>() { 10, 50, 100, 150, 200, 250, 500, 1000, 2000 };
 				List<TimeSpan> intervals = rawIntervals.Select(x => TimeSpan.FromMilliseconds(x)).ToList();
 
 				if (tries > intervals.Count) {
@@ -93,8 +93,8 @@ namespace Phoenix {
 		 */
 		// private readonly Dictionary<Event, List<Subscription>> stateChangeCallbacks = new();
 
-		private readonly List<Channel> channels = new();
-		internal readonly List<Action> sendBuffer = new();
+		private readonly List<Channel> channels = new List<Channel>();
+		internal readonly List<Action> sendBuffer = new List<Action>();
 		private uint @ref = 0;
 
 		private bool closeWasClean = false;
@@ -126,7 +126,7 @@ namespace Phoenix {
 			this.websocketFactory = websocketFactory;
 			this.opts = opts ?? new Options();
 
-			reconnectTimer = new(
+			reconnectTimer = new Scheduler(
 					() => Teardown(() => Connect()),
 					this.opts.reconnectAfter,
 					this.opts.delayedExecutor
@@ -139,7 +139,7 @@ namespace Phoenix {
 
 		private Uri EndPointURL() {
 			// very primitive query string builder
-			var @params = this.@params ?? new();
+			var @params = this.@params ?? new Dictionary<string, string>();
 			@params["vsn"] = opts.vsn;
 
 			var stringParams = @params
