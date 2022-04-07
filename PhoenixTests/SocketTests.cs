@@ -7,10 +7,16 @@ namespace PhoenixTests {
 	[TestFixture()]
 	public class SocketTests {
 
+		public static Socket socket {
+			get {
+				return new Socket("ws://localhost:1234", null, new MockWebsocketFactory());
+			}
+		}
+
 		[Test()]
 		public void BuffersDataWhenNotConnectedTest() {
 
-			var socket = new Socket("ws://localhost:1234", null, new MockWebsocketFactory());
+			var socket = SocketTests.socket;
 			socket.Connect();
 			var conn = socket.conn as MockWebsocketAdapter;
 
@@ -32,7 +38,7 @@ namespace PhoenixTests {
 		[Test()]
 		public void FlushSendBufferTest() {
 
-			var socket = new Socket("ws://localhost:1234", null, new MockWebsocketFactory());
+			var socket = SocketTests.socket;
 			socket.Connect();
 			var conn = socket.conn as MockWebsocketAdapter;
 
