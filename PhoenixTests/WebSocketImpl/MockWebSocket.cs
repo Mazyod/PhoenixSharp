@@ -14,21 +14,21 @@ namespace PhoenixTests {
 		#region IWebsocket methods
 
 		public WebsocketState state => mockState;
-    public WebsocketState mockState = WebsocketState.Closed;
+		public WebsocketState mockState = WebsocketState.Closed;
 
-    public int callConnectCount = 0;
+		public int callConnectCount = 0;
 		public void Connect() {
-      callConnectCount += 1;
+			callConnectCount += 1;
 		}
 
-    public List<string> callSend = new();
+		public List<string> callSend = new();
 		public void Send(string message) {
-      callSend.Add(message);
+			callSend.Add(message);
 		}
 
-    public int callCloseCount = 0;
+		public int callCloseCount = 0;
 		public void Close(ushort? code = null, string message = null) {
-      callCloseCount += 1;
+			callCloseCount += 1;
 		}
 
 		#endregion
