@@ -2,6 +2,7 @@
 using System.Net;
 using System.Collections.Generic;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using Phoenix;
 
@@ -123,7 +124,9 @@ namespace PhoenixTests {
 			Assert.IsNull(joinErrorReply);
 
 			Assert.That(() => afterJoinMessage != null, Is.True.After(networkDelay, 10));
-			Assert.AreEqual("Welcome!", afterJoinMessage?.payload["message"] as string);
+
+			var payload = afterJoinMessage?.payload as JObject;
+			Assert.AreEqual("Welcome!", payload["message"].ToObject<string>());
 
 			// 1. heartbeat, 2. error, 3. join, 4. after_join
 			// TODO: see what changed here
@@ -132,19 +135,19 @@ namespace PhoenixTests {
 			/// 
 			/// test echo reply
 			/// 
-			var payload = new Dictionary<string, object> {
+			var @params = new Dictionary<string, object> {
 				{ "echo", "test" }
 			};
 
 			Reply? testOkReply = null;
 
 			roomChannel
-				.Push("reply_test", payload)
+				.Push("reply_test", @params)
 				.Receive(Reply.Status.Ok, r => testOkReply = r);
 
 			Assert.That(() => testOkReply != null, Is.True.After(networkDelay, 10));
 			Assert.IsNotNull(testOkReply?.response);
-			CollectionAssert.AreEquivalent(testOkReply?.response, payload);
+			CollectionAssert.AreEquivalent(testOkReply?.response, @params);
 
 			/// 
 			/// test error reply
@@ -214,7 +217,7 @@ namespace PhoenixTests {
 			Message? pushMessage = null;
 
 			newRoomChannel.On("push_test", m => pushMessage = m);
-			newRoomChannel.Push("push_test", payload);
+			newRoomChannel.Push("push_test", @params);
 
 			Assert.IsNull(pushMessage);
 			newRoomChannel.Leave();
@@ -272,7 +275,9 @@ namespace PhoenixTests {
 			Assert.IsNull(joinErrorReply);
 
 			Assert.That(() => afterJoinMessage != null, Is.True.After(networkDelay, 10));
-			Assert.AreEqual("Welcome!", afterJoinMessage?.payload["message"] as string);
+
+			var payload = afterJoinMessage?.payload as JObject;
+			Assert.AreEqual("Welcome!", payload["message"].ToObject<string>());
 
 			Assert.AreEqual(Channel.State.Joined, roomChannel.state);
 

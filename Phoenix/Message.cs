@@ -8,7 +8,7 @@ namespace Phoenix {
 		string Serialize(Message message);
 		Message Deserialize(string message);
 
-		T MapPayload<T>(Dictionary<string, object> payload);
+		T MapPayload<T>(object payload);
 	}
 
 	#region payloads
@@ -76,13 +76,13 @@ namespace Phoenix {
 		// unfortunate mutation of the original message
 		public string @event;
 		public readonly string @ref;
-		public Dictionary<string, object> payload;
+		public object payload;
 		public string joinRef;
 
 		public Message(
 			string topic = null,
 			string @event = null,
-			Dictionary<string, object> payload = null,
+			object payload = null,
 			string @ref = null,
 			string joinRef = null
 		) {

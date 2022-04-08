@@ -242,7 +242,7 @@ namespace Phoenix {
 		}
 
 		// overrideable message hook
-		public virtual ParamsType OnMessage(Message message) {
+		public virtual object OnMessage(Message message) {
 			return message.payload;
 		}
 

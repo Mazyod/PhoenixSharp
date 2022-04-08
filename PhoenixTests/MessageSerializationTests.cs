@@ -73,9 +73,9 @@ namespace PhoenixTests {
 
 			Assert.AreEqual(deserializedNoPayload, message);
 
-			var payloadObject = deserialized.payload["another key"] as JObject;
-			Assert.IsNotNull(payloadObject);
-			Assert.AreEqual(payloadObject["nested"].ToObject<string>(), "value");
+			var payloadObject = deserialized.payload as JObject;
+			Assert.IsNotNull(payloadObject["another key"]);
+			Assert.AreEqual(payloadObject["another key"]["nested"].ToObject<string>(), "value");
 			Assert.IsNull(serializer.MapPayload<Reply>(deserialized.payload).status);
 		}
 
@@ -107,7 +107,7 @@ namespace PhoenixTests {
 			message.payload = null;
 
 			Assert.AreEqual(deserializedNoPayload, message);
-			Assert.IsInstanceOf(typeof(JObject), deserialized.payload["response"]);
+			Assert.IsInstanceOf(typeof(JObject), deserialized.payload);
 
 			var reply = serializer.MapPayload<Reply>(deserialized.payload);
 			Assert.AreEqual(reply.status, "ok");
