@@ -77,14 +77,14 @@ namespace Phoenix {
 			socket.OnError += SocketOnError;
 			socket.OnOpen += SocketOnOpen;
 
-			joinPush.Receive(Reply.Status.ok, message => {
+			joinPush.Receive(Reply.Status.Ok, message => {
 				state = State.Joined;
 				rejoinTimer.Reset();
 				pushBuffer.ForEach(push => push.Send());
 				pushBuffer.Clear();
 			});
 
-			joinPush.Receive(Reply.Status.error, message => {
+			joinPush.Receive(Reply.Status.Error, message => {
 				state = State.Errored;
 				if (socket.IsConnected()) {
 					rejoinTimer.ScheduleTimeout();
@@ -118,7 +118,7 @@ namespace Phoenix {
 				}
 			});
 
-			joinPush.Receive(Reply.Status.timeout, message => {
+			joinPush.Receive(Reply.Status.Timeout, message => {
 				if (socket.HasLogger()) {
 					socket.Log(LogLevel.Debug, "channel", $"timeout {topic} ({joinRef})");
 				}
@@ -231,12 +231,12 @@ namespace Phoenix {
 			var leaveEvent = Message.OutBoundEvent.phx_leave.ToString();
 			var leavePush = new Push(this, leaveEvent, null, timeout ?? this.timeout);
 			leavePush
-					.Receive(Reply.Status.ok, (_) => onClose())
-					.Receive(Reply.Status.timeout, (_) => onClose());
+					.Receive(Reply.Status.Ok, (_) => onClose())
+					.Receive(Reply.Status.Timeout, (_) => onClose());
 			leavePush.Send();
 
 			if (!CanPush()) {
-				leavePush.Trigger(Reply.Status.ok);
+				leavePush.Trigger(Reply.Status.Ok);
 			}
 			return leavePush;
 		}

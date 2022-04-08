@@ -44,7 +44,7 @@ namespace Phoenix {
 		}
 
 		public void Send() {
-			if (HasReceived(Reply.Status.timeout)) {
+			if (HasReceived(Reply.Status.Timeout)) {
 				return;
 			}
 
@@ -118,7 +118,7 @@ namespace Phoenix {
 			});
 
 			delayedExecution = channel.socket.opts.delayedExecutor.Execute(() => {
-				Trigger(Reply.Status.timeout);
+				Trigger(Reply.Status.Timeout);
 			}, timeout);
 		}
 
@@ -130,7 +130,7 @@ namespace Phoenix {
 			channel.Trigger(new Message(
 				@event: refEvent,
 				payload: new Dictionary<string, object> {
-					{ "status", status.ToString() },
+					{ "status", status.ToString().ToLower() },
 				}
 			));
 		}

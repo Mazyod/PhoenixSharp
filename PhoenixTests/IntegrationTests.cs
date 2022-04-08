@@ -90,8 +90,8 @@ namespace PhoenixTests {
 			errorChannel.On(Message.InBoundEvent.phx_close, _ => closeCalled = true);
 
 			errorChannel.Join()
-				.Receive(Reply.Status.ok, r => okReply = r)
-				.Receive(Reply.Status.error, r => errorReply = r);
+				.Receive(Reply.Status.Ok, r => okReply = r)
+				.Receive(Reply.Status.Error, r => errorReply = r);
 
 			Assert.That(() => errorReply != null, Is.True.After(networkDelay, 10));
 			Assert.IsNull(okReply);
@@ -116,8 +116,8 @@ namespace PhoenixTests {
 			roomChannel.On("after_join", m => afterJoinMessage = m);
 
 			roomChannel.Join()
-				.Receive(Reply.Status.ok, r => joinOkReply = r)
-				.Receive(Reply.Status.error, r => joinErrorReply = r);
+				.Receive(Reply.Status.Ok, r => joinOkReply = r)
+				.Receive(Reply.Status.Error, r => joinErrorReply = r);
 
 			Assert.That(() => joinOkReply != null, Is.True.After(networkDelay, 10));
 			Assert.IsNull(joinErrorReply);
@@ -140,7 +140,7 @@ namespace PhoenixTests {
 
 			roomChannel
 				.Push("reply_test", payload)
-				.Receive(Reply.Status.ok, r => testOkReply = r);
+				.Receive(Reply.Status.Ok, r => testOkReply = r);
 
 			Assert.That(() => testOkReply != null, Is.True.After(networkDelay, 10));
 			Assert.IsNotNull(testOkReply?.response);
@@ -153,10 +153,10 @@ namespace PhoenixTests {
 
 			roomChannel
 				.Push("error_test")
-				.Receive(Reply.Status.error, r => testErrorReply = r);
+				.Receive(Reply.Status.Error, r => testErrorReply = r);
 
 			Assert.That(() => testErrorReply != null, Is.True.After(networkDelay, 10));
-			Assert.AreEqual(testErrorReply?.replyStatus, Reply.Status.error);
+			Assert.AreEqual(testErrorReply?.replyStatus, Reply.Status.Error);
 
 			/// 
 			/// test timeout reply
@@ -165,7 +165,7 @@ namespace PhoenixTests {
 
 			roomChannel
 				.Push("timeout_test", null, TimeSpan.FromMilliseconds(50))
-				.Receive(Reply.Status.timeout, r => testTimeoutReply = r);
+				.Receive(Reply.Status.Timeout, r => testTimeoutReply = r);
 
 			Assert.That(() => testTimeoutReply != null, Is.False.After(20));
 			Assert.That(() => testTimeoutReply != null, Is.True.After(40));
@@ -197,8 +197,8 @@ namespace PhoenixTests {
 			newRoomChannel.On(Message.InBoundEvent.phx_close, m => newCloseMessage = m);
 
 			newRoomChannel.Join()
-				.Receive(Reply.Status.ok, r => joinOkReply = r)
-				.Receive(Reply.Status.error, r => joinErrorReply = r);
+				.Receive(Reply.Status.Ok, r => joinOkReply = r)
+				.Receive(Reply.Status.Error, r => joinErrorReply = r);
 
 			Assert.That(() => joinOkReply != null, Is.True.After(networkDelay, 10));
 			Assert.IsNull(joinErrorReply);
@@ -265,8 +265,8 @@ namespace PhoenixTests {
 			roomChannel.On("after_join", m => afterJoinMessage = m);
 
 			roomChannel.Join()
-				.Receive(Reply.Status.ok, r => joinOkReply = r)
-				.Receive(Reply.Status.error, r => joinErrorReply = r);
+				.Receive(Reply.Status.Ok, r => joinOkReply = r)
+				.Receive(Reply.Status.Error, r => joinErrorReply = r);
 
 			Assert.That(() => joinOkReply != null, Is.True.After(networkDelay, 10));
 			Assert.IsNull(joinErrorReply);
@@ -337,7 +337,7 @@ namespace PhoenixTests {
 
 			Reply? joinOkReply = null;
 			channel.Join()
-				.Receive(Reply.Status.ok, r => joinOkReply = r);
+				.Receive(Reply.Status.Ok, r => joinOkReply = r);
 
 			// first, we get ack for joining the channel
 			Assert.That(() => joinOkReply != null, Is.True.After(networkDelay, 10));

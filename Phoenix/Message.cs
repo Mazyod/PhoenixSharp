@@ -19,9 +19,9 @@ namespace Phoenix {
 	public struct Reply {
 
 		public enum Status {
-			ok,
-			error,
-			timeout,
+			Ok,
+			Error,
+			Timeout,
 		}
 
 		// PhoenixJS maps incoming phx_reply to chan_reply_{ref} when broadcasting the event
@@ -35,13 +35,13 @@ namespace Phoenix {
 			get {
 				if (status == null) {
 					// shouldn't happen
-					return Status.error;
+					return Status.Error;
 				}
 
 				return status switch {
-					"ok" => Status.ok,
-					"error" => Status.error,
-					"timeout" => Status.timeout,
+					"ok" => Status.Ok,
+					"error" => Status.Error,
+					"timeout" => Status.Timeout,
 					_ => throw new ArgumentException("Unknown status: " + status),
 				};
 			}
