@@ -38,7 +38,7 @@
             "problemMatcher": "$msCompile"
         },
         {
-            "label": "all tests",
+            "label": "run tests",
             "command": "dotnet",
             "type": "process",
             "args": [
