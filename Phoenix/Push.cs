@@ -51,11 +51,11 @@ namespace Phoenix {
 			StartTimeout();
 			// sent = true;
 			channel.socket.Push(new Message(
-					topic: channel.topic,
-					@event: @event,
-					payload: payload != null ? payload() : null,
-					@ref: @ref,
-					joinRef: channel.joinRef
+				topic: channel.topic,
+				@event: @event,
+				payload: payload != null ? payload() : null,
+				@ref: @ref,
+				joinRef: channel.joinRef
 			));
 		}
 
