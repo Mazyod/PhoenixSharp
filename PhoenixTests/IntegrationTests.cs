@@ -57,10 +57,15 @@ namespace PhoenixTests {
 			// connecting is synchronous as implemented above
 			var socketAddress = string.Format("ws://{0}/socket", host);
 			var socketFactory = new WebsocketSharpFactory();
-			var socket = new Socket(socketAddress, null, socketFactory, new Socket.Options {
-				reconnectAfter = _ => TimeSpan.FromMilliseconds(200),
-				logger = new BasicLogger()
-			});
+			var socket = new Socket(
+				socketAddress,
+				null,
+				socketFactory,
+				new(new JSONMessageSerializer()) {
+					reconnectAfter = _ => TimeSpan.FromMilliseconds(200),
+					logger = new BasicLogger()
+				}
+			);
 
 			socket.OnOpen += onOpenCallback;
 			socket.OnMessage += onMessageCallback;
@@ -242,10 +247,15 @@ namespace PhoenixTests {
 
 			var socketAddress = string.Format("ws://{0}/socket", host);
 			var socketFactory = new DotNetWebSocketFactory();
-			var socket = new Socket(socketAddress, null, socketFactory, new Socket.Options {
-				rejoinAfter = (_) => TimeSpan.FromMilliseconds(200),
-				logger = new BasicLogger()
-			});
+			var socket = new Socket(
+				socketAddress,
+				null,
+				socketFactory,
+				new(new JSONMessageSerializer()) {
+					rejoinAfter = (_) => TimeSpan.FromMilliseconds(200),
+					logger = new BasicLogger()
+				}
+			);
 
 			socket.OnOpen += onOpenCallback;
 			socket.OnClose += onClosedCallback;
@@ -311,10 +321,15 @@ namespace PhoenixTests {
 			// connecting is synchronous as implemented above
 			var socketAddress = string.Format("ws://{0}/socket", host);
 			var socketFactory = new WebsocketSharpFactory();
-			var socket = new Socket(socketAddress, null, socketFactory, new Socket.Options {
-				reconnectAfter = _ => TimeSpan.FromMilliseconds(200),
-				logger = new BasicLogger()
-			});
+			var socket = new Socket(
+				socketAddress,
+				null,
+				socketFactory,
+				new(new JSONMessageSerializer()) {
+					reconnectAfter = _ => TimeSpan.FromMilliseconds(200),
+					logger = new BasicLogger()
+				}
+			);
 
 			socket.OnOpen += onOpenCallback;
 			socket.OnMessage += onMessageCallback;

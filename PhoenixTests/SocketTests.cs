@@ -9,7 +9,12 @@ namespace PhoenixTests {
 
 		public static Socket socket {
 			get {
-				return new Socket("ws://localhost:1234", null, new MockWebsocketFactory());
+				return new Socket(
+					"ws://localhost:1234",
+					null,
+					new MockWebsocketFactory(),
+					new(new JSONMessageSerializer())
+				);
 			}
 		}
 

@@ -28,7 +28,7 @@ namespace Phoenix {
 			// The serializer's protocol version to send on connect.
 			public string vsn = "2.0.0";
 			// Message serializer to allow different serialization methods
-			public IMessageSerializer messageSerializer = new JSONMessageSerializer();
+			public IMessageSerializer messageSerializer;
 			// The default timeout to trigger push timeouts.
 			public TimeSpan timeout = TimeSpan.FromSeconds(10);
 			// The interval for rejoining an errored channel. Null means none
@@ -60,6 +60,11 @@ namespace Phoenix {
 			public ILogger logger = null;
 			// The object responsible for performing delayed executions
 			public IDelayedExecutor delayedExecutor = new TimerBasedExecutor();
+
+			// required parameters
+			public Options(IMessageSerializer messageSerializer) {
+				this.messageSerializer = messageSerializer;
+			}
 		}
 
 		#endregion
@@ -120,11 +125,16 @@ namespace Phoenix {
 		#endregion
 
 
-		public Socket(string endPoint, Dictionary<string, string> @params, IWebsocketFactory websocketFactory, Options opts = null) {
+		public Socket(
+			string endPoint,
+			Dictionary<string, string> @params,
+			IWebsocketFactory websocketFactory,
+			Options opts
+		) {
 			this.endPoint = endPoint;
 			this.@params = @params;
 			this.websocketFactory = websocketFactory;
-			this.opts = opts ?? new Options();
+			this.opts = opts ?? throw new NullReferenceException("Socket options requireed");
 
 			reconnectTimer = new Scheduler(
 					() => Teardown(() => Connect()),
