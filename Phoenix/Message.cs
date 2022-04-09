@@ -92,5 +92,9 @@ namespace Phoenix {
 			this.@ref = @ref;
 			this.joinRef = joinRef;
 		}
+
+		public T Payload<T>() {
+			return (T)payload;
+		}
 	}
 }
