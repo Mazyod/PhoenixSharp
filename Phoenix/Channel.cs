@@ -205,7 +205,7 @@ namespace Phoenix {
 			return socket.IsConnected() && IsJoined();
 		}
 
-		public Push Push(string @event, ParamsType payload = null, TimeSpan? timeout = null) {
+		public Push Push(string @event, object payload = null, TimeSpan? timeout = null) {
 			if (!joinedOnce) {
 				throw new Exception(
 					$"tried to push '{@event}' to '{topic}' before joining."
