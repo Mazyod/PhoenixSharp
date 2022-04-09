@@ -13,7 +13,7 @@ namespace Phoenix {
 
 		private readonly Channel channel;
 		private readonly string @event;
-		private readonly Func<Dictionary<string, object>> payload;
+		private readonly Func<object> payload;
 		private TimeSpan timeout;
 
 		// internal state
@@ -30,7 +30,7 @@ namespace Phoenix {
 
 
 		// define a constructor that takes a channel, event, payload, and timeout
-		public Push(Channel channel, string @event, Func<Dictionary<string, object>> payload, TimeSpan timeout) {
+		public Push(Channel channel, string @event, Func<object> payload, TimeSpan timeout) {
 			this.channel = channel;
 			this.@event = @event;
 			this.payload = payload;
