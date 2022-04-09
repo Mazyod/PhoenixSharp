@@ -1,11 +1,11 @@
-﻿using System.Collections.Generic;
-using Newtonsoft.Json.Linq;
+﻿using Newtonsoft.Json.Linq;
 
 
 namespace Phoenix {
 
 	public sealed class JSONMessageSerializer : IMessageSerializer {
 		public string Serialize(Message message) {
+
 			return new JArray(
 					message.joinRef,
 					message.@ref,
@@ -20,7 +20,6 @@ namespace Phoenix {
 		}
 
 		public Message Deserialize(string message) {
-			System.Console.WriteLine("===> Receive: {0}", message.Trim('\u0000'));
 
 			var array = JArray.Parse(message);
 			return new Message(
