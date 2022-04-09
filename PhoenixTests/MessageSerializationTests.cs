@@ -111,7 +111,7 @@ namespace PhoenixTests {
 
 			Reply reply = serializer.MapReply(deserialized.payload).Value;
 			Assert.AreEqual(reply.status, "ok");
-			Assert.AreEqual(reply.JSONResponse().Value<int>("some_key"), 42);
+			Assert.AreEqual(reply.JSONResponse<JObject>().Value<int>("some_key"), 42);
 		}
 	}
 }

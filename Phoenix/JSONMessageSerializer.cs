@@ -49,12 +49,12 @@ namespace Phoenix {
 
 	public static class JSONPayloadExtensions {
 
-		public static JToken JSONResponse(this Reply reply) {
-			return (JToken)reply.response;
+		public static T JSONResponse<T>(this Reply reply) {
+			return ((JToken)reply.response).ToObject<T>();
 		}
 
-		public static JToken JSONPayload(this Message message) {
-			return (JToken)message.payload;
+		public static T JSONPayload<T>(this Message message) {
+			return ((JToken)message.payload).ToObject<T>();
 		}
 	}
 }
