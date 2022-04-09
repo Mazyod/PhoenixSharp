@@ -207,7 +207,10 @@ namespace Phoenix {
 
 		public Push Push(string @event, ParamsType payload = null, TimeSpan? timeout = null) {
 			if (!joinedOnce) {
-				throw new Exception($"tried to push '{@event}' to '{topic}' before joining. Use channel.join() before pushing events");
+				throw new Exception(
+					$"tried to push '{@event}' to '{topic}' before joining."
+					+ " Use channel.join() before pushing events"
+				);
 			}
 
 			var pushEvent = new Push(this, @event, () => payload, timeout ?? this.timeout);
