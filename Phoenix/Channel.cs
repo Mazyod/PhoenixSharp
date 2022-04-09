@@ -154,16 +154,16 @@ namespace Phoenix {
 			return joinPush;
 		}
 
-		public void OnClose(Action<Message> callback) {
-			On(Message.InBoundEvent.phx_close, callback);
+		public Subscription OnClose(Action<Message> callback) {
+			return On(Message.InBoundEvent.phx_close, callback);
 		}
 
-		public void OnError(Action<Message> callback) {
-			On(Message.InBoundEvent.phx_error, callback);
+		public Subscription OnError(Action<Message> callback) {
+			return On(Message.InBoundEvent.phx_error, callback);
 		}
 
-		public void On(Message.InBoundEvent @event, Action<Message> callback) {
-			On(@event.ToString(), callback);
+		public Subscription On(Message.InBoundEvent @event, Action<Message> callback) {
+			return On(@event.ToString(), callback);
 		}
 
 		public Subscription On(string anyEvent, Action<Message> callback) {
