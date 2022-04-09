@@ -180,6 +180,13 @@ namespace Phoenix {
 			return subscription;
 		}
 
+		public Subscription On<T>(string anyEvent, Action<T> callback) {
+			return On(anyEvent, message => {
+				var serializer = socket.opts.messageSerializer;
+				callback(serializer.MapPayload<T>(message.payload));
+			});
+		}
+
 		public bool Off(Subscription subscription) {
 			return bindings
 					.GetValueOrDefault(subscription.@event)?

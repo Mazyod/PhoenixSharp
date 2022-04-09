@@ -37,16 +37,5 @@ namespace Phoenix {
 			return payload == null ? default : JObject.FromObject(payload).ToObject<T>();
 		}
 	}
-
-	public static class JSONMessageSerializerExtensions {
-
-		public static Action<Message> MapPayload<T>(this Action<T> callback) {
-			return message => callback(
-				message.payload == null
-					? default
-					: message.Payload<JObject>().ToObject<T>()
-			);
-		}
-	}
 }
 
