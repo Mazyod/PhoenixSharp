@@ -57,6 +57,7 @@ namespace Phoenix {
 	#endregion
 
 	public struct Message {
+
 		#region nested types
 
 		public enum InBoundEvent {
