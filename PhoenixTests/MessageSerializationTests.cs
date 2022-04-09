@@ -109,9 +109,9 @@ namespace PhoenixTests {
 			Assert.AreEqual(deserializedNoPayload, message);
 			Assert.IsInstanceOf(typeof(JObject), deserialized.payload);
 
-			var reply = serializer.MapPayload<Reply>(deserialized.payload);
+			Reply reply = serializer.MapReply(deserialized.payload).Value;
 			Assert.AreEqual(reply.status, "ok");
-			Assert.AreEqual(reply.response["some_key"], 42);
+			Assert.AreEqual(reply.JSONResponse().Value<int>("some_key"), 42);
 		}
 	}
 }

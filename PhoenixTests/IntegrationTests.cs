@@ -152,7 +152,10 @@ namespace PhoenixTests {
 
 			Assert.That(() => testOkReply != null, Is.True.After(networkDelay, 10));
 			Assert.IsNotNull(testOkReply?.response);
-			CollectionAssert.AreEquivalent(testOkReply?.response, @params);
+			CollectionAssert.AreEquivalent(
+				testOkReply?.JSONResponse().ToObject<Dictionary<string, object>>(),
+				@params
+			);
 
 			/// 
 			/// test error reply

@@ -1,5 +1,4 @@
-﻿using System;
-using Newtonsoft.Json.Linq;
+﻿using Newtonsoft.Json.Linq;
 
 
 namespace Phoenix {
@@ -33,9 +32,29 @@ namespace Phoenix {
 			);
 		}
 
+		public Reply? MapReply(object payload) {
+			var jObject = JObject.FromObject(payload);
+			return new Reply(
+				status: jObject.Value<string>("status"),
+				response: jObject["response"]
+			);
+		}
+
 		public T MapPayload<T>(object payload) {
-			return payload == null ? default : JObject.FromObject(payload).ToObject<T>();
+			return payload == null
+				? default
+				: JToken.FromObject(payload).ToObject<T>();
+		}
+	}
+
+	public static class JSONPayloadExtensions {
+
+		public static JToken JSONResponse(this Reply reply) {
+			return (JToken)reply.response;
+		}
+
+		public static JToken JSONPayload(this Message message) {
+			return (JToken)message.payload;
 		}
 	}
 }
-

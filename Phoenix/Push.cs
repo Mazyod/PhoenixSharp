@@ -110,10 +110,10 @@ namespace Phoenix {
 			refEvent = Channel.ReplyEventName(@ref);
 
 			var serializer = channel.socket.opts.messageSerializer;
-			channel.On(refEvent, (Reply? reply) => {
+			channel.On(refEvent, message => {
 				CancelRefEvent();
 				CancelTimeout();
-				receivedResp = reply;
+				receivedResp = serializer.MapReply(message.payload);
 				MatchReceive(receivedResp);
 			});
 

@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 
 
 namespace Phoenix {
@@ -8,6 +7,7 @@ namespace Phoenix {
 		string Serialize(Message message);
 		Message Deserialize(string message);
 
+		Reply? MapReply(object payload);
 		T MapPayload<T>(object payload);
 	}
 
@@ -28,7 +28,7 @@ namespace Phoenix {
 		public static readonly string replyEventPrefix = "chan_reply_";
 
 		public readonly string status;
-		public readonly Dictionary<string, object> response;
+		public readonly object response;
 
 		[System.Runtime.Serialization.IgnoreDataMember]
 		public Status replyStatus {
@@ -48,7 +48,7 @@ namespace Phoenix {
 
 		}
 
-		public Reply(string status, Dictionary<string, object> response) {
+		public Reply(string status, object response) {
 			this.status = status;
 			this.response = response;
 		}
@@ -92,10 +92,6 @@ namespace Phoenix {
 			this.payload = payload;
 			this.@ref = @ref;
 			this.joinRef = joinRef;
-		}
-
-		public T Payload<T>() {
-			return (T)payload;
 		}
 	}
 }
