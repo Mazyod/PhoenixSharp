@@ -25,33 +25,37 @@ namespace Phoenix {
 		}
 
 		public sealed class Options {
+
+			private static readonly uint[] connectIntervals = {
+				10, 50, 100, 150, 200, 250, 500, 1_000, 2_000
+			};
+
+			private static readonly uint[] joinIntervals = {
+				1_000, 2_000, 5_000
+			};
+
 			// The serializer's protocol version to send on connect.
 			public string vsn = "2.0.0";
 			// Message serializer to allow different serialization methods
 			public IMessageSerializer messageSerializer;
 			// The default timeout to trigger push timeouts.
 			public TimeSpan timeout = TimeSpan.FromSeconds(10);
-			// The interval for rejoining an errored channel. Null means none
+			// The interval for rejoining an errored channel. Null means none.
 			public Func<int, TimeSpan> rejoinAfter = (tries) => {
-				List<uint> rawIntervals = new List<uint>() { 1_000, 2_000, 5_000 };
-				List<TimeSpan> intervals = rawIntervals.Select(i => TimeSpan.FromMilliseconds(i)).ToList();
 
-				if (tries > intervals.Count) {
+				if (tries > joinIntervals.Length) {
 					return TimeSpan.FromSeconds(10);
 				} else {
-					return intervals[tries - 1];
+					return TimeSpan.FromMilliseconds(joinIntervals[tries - 1]);
 				}
 			};
-			// The interval for reconnecting in the event of a connection error.
+			// The interval for reconnecting in the event of a connection error. Null means none.
 			public Func<int, TimeSpan> reconnectAfter = (tries) => {
-				// TODO: cache these objects to avoid allocations
-				List<uint> rawIntervals = new List<uint>() { 10, 50, 100, 150, 200, 250, 500, 1000, 2000 };
-				List<TimeSpan> intervals = rawIntervals.Select(x => TimeSpan.FromMilliseconds(x)).ToList();
 
-				if (tries > intervals.Count) {
+				if (tries > connectIntervals.Length) {
 					return TimeSpan.FromSeconds(5);
 				} else {
-					return intervals[tries - 1];
+					return TimeSpan.FromMilliseconds(connectIntervals[tries - 1]);
 				}
 			};
 			// The interval to send a heartbeat message. Null means disable
@@ -136,11 +140,13 @@ namespace Phoenix {
 			this.websocketFactory = websocketFactory;
 			this.opts = opts ?? throw new NullReferenceException("Socket options requireed");
 
-			reconnectTimer = new Scheduler(
+			if (this.opts.reconnectAfter != null) {
+				reconnectTimer = new Scheduler(
 					() => Teardown(() => Connect()),
 					this.opts.reconnectAfter,
 					this.opts.delayedExecutor
-			);
+				);
+			}
 		}
 
 		// NOTE: ReplaceTransport functionality not support in this library
@@ -166,7 +172,7 @@ namespace Phoenix {
 		public void Disconnect(Action callback = null, ushort? code = null, string reason = null) {
 			// connectClock++;
 			closeWasClean = true;
-			reconnectTimer.Reset();
+			reconnectTimer?.Reset();
 			Teardown(callback, code, reason);
 		}
 
@@ -214,7 +220,7 @@ namespace Phoenix {
 			closeWasClean = false;
 			// establishedConnections++;
 			FlushSendBuffer();
-			reconnectTimer.Reset();
+			reconnectTimer?.Reset();
 			ResetHeartbeat();
 
 			OnOpen?.Invoke();
@@ -308,7 +314,7 @@ namespace Phoenix {
 			heartbeatTimer?.Cancel();
 
 			if (!closeWasClean && code != 1_000) {
-				reconnectTimer.ScheduleTimeout();
+				reconnectTimer?.ScheduleTimeout();
 			}
 
 			OnClose?.Invoke(code, reason);

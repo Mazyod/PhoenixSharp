@@ -68,18 +68,20 @@ namespace Phoenix {
 				timeout
 			);
 
-			rejoinTimer = new Scheduler(
+			if (socket.opts.rejoinAfter != null) {
+				rejoinTimer = new Scheduler(
 					() => { if (socket.IsConnected()) Rejoin(); },
 					socket.opts.rejoinAfter,
 					socket.opts.delayedExecutor
-			);
+				);
+			}
 
 			socket.OnError += SocketOnError;
 			socket.OnOpen += SocketOnOpen;
 
 			joinPush.Receive(Reply.Status.Ok, message => {
 				state = State.Joined;
-				rejoinTimer.Reset();
+				rejoinTimer?.Reset();
 				pushBuffer.ForEach(push => push.Send());
 				pushBuffer.Clear();
 			});
@@ -87,12 +89,12 @@ namespace Phoenix {
 			joinPush.Receive(Reply.Status.Error, message => {
 				state = State.Errored;
 				if (socket.IsConnected()) {
-					rejoinTimer.ScheduleTimeout();
+					rejoinTimer?.ScheduleTimeout();
 				}
 			});
 
 			OnClose(message => {
-				rejoinTimer.Reset();
+				rejoinTimer?.Reset();
 				if (socket.HasLogger()) {
 					socket.Log(LogLevel.Debug, "channel", $"close {topic}");
 				}
@@ -114,7 +116,7 @@ namespace Phoenix {
 				}
 				state = State.Errored;
 				if (socket.IsConnected()) {
-					rejoinTimer.ScheduleTimeout();
+					rejoinTimer?.ScheduleTimeout();
 				}
 			});
 
@@ -131,7 +133,7 @@ namespace Phoenix {
 				joinPush.Reset();
 
 				if (socket.IsConnected()) {
-					rejoinTimer.ScheduleTimeout();
+					rejoinTimer?.ScheduleTimeout();
 				}
 			});
 
@@ -225,7 +227,7 @@ namespace Phoenix {
 		}
 
 		public Push Leave(TimeSpan? timeout = null) {
-			rejoinTimer.Reset();
+			rejoinTimer?.Reset();
 			joinPush.CancelTimeout();
 
 			state = State.Leaving;
@@ -318,11 +320,11 @@ namespace Phoenix {
 		#region Socket Events
 
 		private void SocketOnError(string message) {
-			rejoinTimer.Reset();
+			rejoinTimer?.Reset();
 		}
 
 		private void SocketOnOpen() {
-			rejoinTimer.Reset();
+			rejoinTimer?.Reset();
 			if (IsErrored()) {
 				Rejoin();
 			}
