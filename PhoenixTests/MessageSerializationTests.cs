@@ -59,6 +59,19 @@ namespace PhoenixTests {
 		}
 
 		[Test()]
+		public void SerializeNullPayloadTest() {
+
+			var serializer = new JSONMessageSerializer();
+			var message = sampleMessage;
+			message.payload = null;
+			var serialized = serializer.Serialize(message);
+			var expected = @"['456','123','phoenix-test','phx_join',{}]"
+				.Replace("'", "\"");
+
+			Assert.AreEqual(serialized, expected);
+		}
+
+		[Test()]
 		public void DeserializationTest() {
 
 			var serializer = new JSONMessageSerializer();
@@ -84,13 +97,6 @@ namespace PhoenixTests {
 			var serializer = new JSONMessageSerializer();
 			var message = serializer.Deserialize(@"[null, null, null, null, null]");
 			Assert.IsNull(message.joinRef);
-		}
-
-		[Test()]
-		public void SerializingNullPayloadTest() {
-
-			var message = new Message();
-			Assert.IsNull(message.payload); // inconsistent with phoenix.js
 		}
 
 		[Test()]

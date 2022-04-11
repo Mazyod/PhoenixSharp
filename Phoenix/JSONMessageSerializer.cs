@@ -12,7 +12,11 @@ namespace Phoenix {
 					message.@ref,
 					message.topic,
 					message.@event,
-					message.payload == null ? null : JObject.FromObject(message.payload)
+					// phoenix.js: consistent with phoenix, also backwards compatible
+					// e.g. if the backend has handle_in(event, {}, socket)
+					message.payload == null
+						? new JObject()
+						: JObject.FromObject(message.payload)
 				)
 				.ToString(
 					Newtonsoft.Json.Formatting.None,
