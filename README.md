@@ -69,58 +69,58 @@ Once the socket is created, you can now join a channel. The API is so simple, yo
 ```cs
 // initialize a channel with topic and parameters
 var roomChannel = socket.Channel(
-	"tester:phoenix-sharp",
-	channelParams
+  "tester:phoenix-sharp",
+  channelParams
 );
 
 // prepare any event callbacks
 // e.g. listen to phx_error inbound event
 roomChannel.On(
-	Message.InBoundEvent.phx_error,
-	message => errorMessage = message
+  Message.InBoundEvent.phx_error,
+  message => errorMessage = message
 );
 // ... listen to a custom event
 roomChannel.On(
-	"after_join",
-	message => afterJoinMessage = message
+  "after_join",
+  message => afterJoinMessage = message
 );
 // ... you can also use a generic event callback
 // this will parse the message payload automatically
 roomChannel.On(
-	"custom_event",
-	CustomPayload payload => HandlePayload(payload)
+  "custom_event",
+  (CustomPayload payload) => Handle(payload)
 );
 
 // join the channel, handling the reply as needed
 roomChannel.Join()
-	.Receive(
-		Reply.Status.Ok, 
-		reply => joinOkReply = reply
-	)
-	.Receive(
-		Reply.Status.Error,
-		reply => joinErrorReply = reply
-	);
+  .Receive(
+    Reply.Status.Ok, 
+    reply => joinOkReply = reply
+  )
+  .Receive(
+    Reply.Status.Error,
+    reply => joinErrorReply = reply
+  );
 
 // push a message to the channel
 roomChannel
-	.Push("reply_test", @params)
-	.Receive(
-		Reply.Status.Ok, 
-		reply => testOkReply = reply
-	);
+  .Push("reply_test", @params)
+  .Receive(
+    Reply.Status.Ok, 
+    reply => testOkReply = reply
+  );
 ```
 
 ## PhoenixJS
 
 The difference between PhoenixJS and PhoenixSharp can be observed in the following areas:
 - The static typing nature of C#, and in contrast, the dynamic nature of JavaScript.
-	+ Defining types for various constructs.
-	+ Adding generic callbacks to automatically extract and parse payloads.
+  + Defining types for various constructs.
+  + Adding generic callbacks to automatically extract and parse payloads.
 - The flexibility required to allow PhoenixSharp to be adapted to different environments.
-	+ Abstracting away the websocket implementation.
-	+ Pluggable "Delayed Executor", useful for Unity developers.
-	+ Ability to disable socket reconnect / channel rejoin.
+  + Abstracting away the websocket implementation.
+  + Pluggable "Delayed Executor", useful for Unity developers.
+  + Ability to disable socket reconnect / channel rejoin.
 - The lack of features in PhoenixSharp due to lesser popularity and contributions.
 
 ## Tests
