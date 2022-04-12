@@ -15,7 +15,11 @@ namespace PhoenixTests {
 		private Task<WebSocketReceiveResult> receiveTask;
 		private readonly bool async;
 
-		public DotNetWebSocketAdapter(ClientWebSocket ws, WebsocketConfiguration config, bool async = false) {
+		public DotNetWebSocketAdapter(
+			ClientWebSocket ws,
+			WebsocketConfiguration config,
+			bool async = false
+		) {
 			this.ws = ws;
 			this.config = config;
 			this.async = async;
@@ -37,52 +41,51 @@ namespace PhoenixTests {
 
 		public void Connect() {
 			try {
-				var task = this.ws.ConnectAsync(config.uri, CancellationToken.None);
+				var task = ws.ConnectAsync(config.uri, CancellationToken.None);
 				task.Wait();
 				receiveTask = Receive();
 
-				this.config.onOpenCallback(this);
+				config.onOpenCallback(this);
 			} catch (Exception ex) {
-				this.config.onErrorCallback(this, ex.Message);
+				config.onErrorCallback(this, ex.Message);
 			}
 		}
 
 		public void Send(string message) {
-			if (!SendMessage(message))
+			if (!SendMessage(message)) {
 				return;
+			}
 
 			if (!async) {
 				try {
-					this.receiveTask.Wait();
+					receiveTask.Wait();
 				} catch (Exception e) {
-					this.config.onErrorCallback(this, e.Message);
-					return;
+					config.onErrorCallback(this, e.Message);
 				}
 			}
 		}
 
 		private async Task<WebSocketReceiveResult> Receive() {
 			byte[] buffer = new byte[receiveChunkSize];
-			var result = await this.ws.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+			var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
 			if (result.MessageType == WebSocketMessageType.Close) {
-				await this.ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None);
+				await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None);
 			} else {
-				this.config.onMessageCallback(this, System.Text.Encoding.Default.GetString(buffer));
-				this.receiveTask = Receive();
+				config.onMessageCallback(this, Encoding.Default.GetString(buffer));
+				receiveTask = Receive();
 			}
 			return result;
 		}
 
 		private bool SendMessage(string message) {
 
-			//byte[] buffer = encoder.GetBytes("{\"op\":\"blocks_sub\"}"); //"{\"op\":\"unconfirmed_sub\"}");
 			byte[] buffer = encoder.GetBytes(message);
 
-			if (this.ws.State == WebSocketState.Open) {
-				this.ws.SendAsync(new ArraySegment<byte>(buffer), WebSocketMessageType.Text, true, CancellationToken.None);
+			if (ws.State == WebSocketState.Open) {
+				ws.SendAsync(new ArraySegment<byte>(buffer), WebSocketMessageType.Text, true, CancellationToken.None);
 				return true;
 			} else {
-				this.config.onErrorCallback(this, "Could not send message because websocket is closed.");
+				config.onErrorCallback(this, "Could not send message because websocket is closed.");
 				return false;
 			}
 		}
@@ -90,19 +93,19 @@ namespace PhoenixTests {
 		public void Close(ushort? code = null, string message = null) {
 			Task closeTask;
 
-			this.config.onCloseCallback(this, code ?? 0, message);
+			config.onCloseCallback(this, code ?? 0, message);
 
 			if (code.HasValue && Enum.TryParse(code.ToString(), out WebSocketCloseStatus status)) {
-				closeTask = this.ws.CloseAsync(status, message, CancellationToken.None);
+				closeTask = ws.CloseAsync(status, message, CancellationToken.None);
 			} else {
-				closeTask = this.ws.CloseAsync(WebSocketCloseStatus.Empty, message, CancellationToken.None);
+				closeTask = ws.CloseAsync(WebSocketCloseStatus.Empty, message, CancellationToken.None);
 			}
 			try {
 				closeTask.Wait();
 			} catch (Exception ex) {
-				this.config.onErrorCallback(this, ex.Message);
+				config.onErrorCallback(this, ex.Message);
 			} finally {
-				this.ws.Dispose();
+				ws.Dispose();
 			}
 
 		}
@@ -111,7 +114,9 @@ namespace PhoenixTests {
 	}
 
 	public sealed class DotNetWebSocketFactory : IWebsocketFactory {
+
 		public IWebsocket Build(WebsocketConfiguration config) {
+
 			var socket = new ClientWebSocket();
 			return new DotNetWebSocketAdapter(socket, config);
 		}
