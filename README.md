@@ -5,23 +5,22 @@ A C# Phoenix Channels client. Unity Compatible. Proudly powering [Dama King](htt
 
 > Graphic is a shameless mix between unity, phoenix logos. Please don't sue me. Thanks.
 
-+ [**Roadmap**](#roadmap): Transparency on what's next!
++ [**Overview**](#overview): What this library is about.
 + [**Getting Started**](#getting-started): A quicky guide on how to use this library.
 + [**PhoenixJS**](#phoenixjs): How this library differs from PhoenixJs.
 + [**Tests**](#tests): How to run the tests to make sure we're golden.
 + [**Dependencies**](#dependencies): A rant about dependencies.
 + [**Unity**](#unity): Important remarks for Unity developers.
 
-## Roadmap
+## Overview
 
-This project will remain as a prerelease until Unity ships their .Net profile upgrade, which ~should be soon~ **will debut in Unity 2017.1!!**. This will allow this library to utilize the latest and greatest .Net 4.6 features, enhancing the experience further, and allowing us to reach v1.0!
+PhoenixSharp has the following main goals:
+- Aspires to be the defacto Phoenix C# client.
+- Portable enough to work out of the box in Unity and other C# environments.
 
-For now, I am also experimenting with the best API implementation, so breaking changes might be introduced. Once we reach v1.0, API should be stabile, and we can then focus on integrating CI, and uploading the package to NuGet.
-
-Also, here is a basic TODO:
-
-- [ ] Presence
-- [ ] Socket automatic recovery
+In order to achieve the goals stated, it is necessary to:
+- Maintain a close resemblence to the Phoenix.js implementation.
+- Engage the community to accommodate different requirements based on various environments.
 
 ## Getting Started
 
@@ -29,6 +28,8 @@ For now, you can use git submodules or simply download the sources and drop them
 Once you grab the source, you can look at `IntegrationTests.cs` for a full example:
 
 ##### Implementing `IWebsocketFactory` and `IWebsocket`
+
+> TODO: Need to update this example
 
 ```cs
 public sealed class WebsocketSharpAdapter: IWebsocket {
@@ -80,6 +81,8 @@ public sealed class WebsocketSharpFactory: IWebsocketFactory {
 
 ##### Creating a Socket
 
+> TODO: update example, as we pass parameters on initialization now
+
 ```cs
 var socketFactory = new WebsocketSharpFactory();
 var socket = new Socket(socketFactory);
@@ -90,6 +93,8 @@ socket.Connect(string.Format("ws://{0}/socket", host), null);
 ```
 
 ##### Joining a Channel
+
+> TODO: update example with latest APIs
 
 ```cs
 var roomChannel = socket.MakeChannel("tester:phoenix-sharp");
@@ -103,13 +108,11 @@ roomChannel.Join(params)
 
 ## PhoenixJS
 
-After porting the PhoenixJs library almost line-by-line to C#, it didn't prove to be a good fit for this statically typed language. JavaScript is chaotic, you can spin off timers quite liberally, and you can simply retry stuff till it works. Not in C#.
-
-In C#, we would like very predictable and controlled behavior. We want to control which threads the library uses, and how it delivers its callbacks. We also want to control the reconnect/rety logic on our end, in order to properly determine the application state.
+In C#, we would like to have very predictable and controlled behavior. We want to control which threads the library uses, and how it delivers its callbacks. We also want to control the reconnect/rety logic on our end, in order to properly determine the application state.
 
 With that being said, here are the main deviations this library has from the PhoenixJS library:
 
-+ Ability to control channel rejoin
++ Ability to control socket reconnect / channel rejoin
 + Pluggable "Delayed Executor", useful for Unity developers
 
 ## Tests
@@ -126,17 +129,16 @@ phoenix-integration-tester.herokuapp.com
 
 ### Production Dependencies
 
-1. Newtonsoft.Json
+1. (Optional) Newtonsoft.Json
 
 ### Development/Test Dependencies
 
-1. Newtonsoft.Json
-2. Websocket-sharp
-3. NUnit
+1. NUnit
+2. (Optional) Newtonsoft.Json
 
 #### Details:
 
-I really wanted to break the JSON and Websocket dependencies, allowing developers to plug in whatever libraries they prefer to use. Breaking the Websocket dependency was simple, but alas, the JSON dependency remained.
+> TODO
 
 The issue with breaking the JSON dependency is the need to properly represent intermidiate data passed in from the socket all the way to the library caller. For example:
 
@@ -148,11 +150,15 @@ The issue with breaking the JSON dependency is the need to properly represent in
 
 #### Main Thread Callbacks
 
+> TODO
+
 Unity ships with an old .Net profile for now, so our main thread synchronization tools are extremely limited. Hence, for now, you should use the `Socket.Options.delayedExecutor` property to plug in a `MonoBehaviour` that can execute code after a certain delay, using Coroutines or something similar. This will ensure the library will always run on the main thread.
 
 If you are **not** concerned with multithreading issues, the library ships with a default `Timer` based executor, which executes after a delay using `System.Timers.Timer`.
 
 #### Useful Libraries
+
+> TODO
 
 I'm personally shipping this library with my Unity game, so you can rest assured it will always support Unity. Here are some important notes I learned from integrating PhoenixSharp with Unity:
 
@@ -167,6 +173,6 @@ Whether you open new issues or send in some PRs .. It's all welcome here!
 
 ## Author
 
-Maz (Mazyad Alabduljalil)
+Maz (Mazyad Alabduljaleel)
 
 [phoenix-integration-tests-repo]: https://github.com/Mazyod/phoenix-integration-tester

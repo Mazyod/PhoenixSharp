@@ -300,8 +300,8 @@ namespace Phoenix {
 			}
 
 			opts.delayedExecutor.Execute(
-					() => WaitForSocketClosed(callback, tries + 1),
-					TimeSpan.FromMilliseconds(150 * tries)
+				() => WaitForSocketClosed(callback, tries + 1),
+				TimeSpan.FromMilliseconds(150 * tries)
 			);
 		}
 
