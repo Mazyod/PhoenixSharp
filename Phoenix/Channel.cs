@@ -19,7 +19,12 @@ namespace Phoenix {
 			Errored, // errored channels are rejoined automatically
 		}
 
-		public struct Subscription {
+		/**
+		 * Subscription
+		 * Represents a subscription to a channel event.
+		 * We use a class since subscriptions are stored in an array.
+		 */
+		public sealed class Subscription {
 			public string @event;
 			public Action<Message> callback;
 		}
