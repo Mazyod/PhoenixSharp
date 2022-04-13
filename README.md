@@ -106,7 +106,7 @@ roomChannel.Join()
 
 // push a message to the channel
 roomChannel
-  .Push("reply_test", @params)
+  .Push("reply_test", payload)
   .Receive(
     Reply.Status.Ok, 
     reply => testOkReply = reply

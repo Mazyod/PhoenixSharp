@@ -63,6 +63,18 @@ Instead of returning `uint`, `DelayedExecutor` now returns `DelayedExecution` in
 +channel.Join();
 ```
 
+#### Channel Push
+
+Previously, pushing to a channel required a `JObject` instance. This required coupling the caller with the serializer, not to a lot of redundant code.
+
+Now, you can simply pass any object that you know the serializer can handle. The library will simply pass this object to the serializer before sending it to the server.
+
+```diff
+// here, chat is an instance of some custom class
+-channel.PushJson("chat", JObject.FromObject(chat));
++channel.Push("chat", chat);
+```
+
 #### Channel / Push Callbacks
 
 If you're interested in the `Message.payload` property of a channel event, you can use the new generic `On` method to get the payload mapped directly.
