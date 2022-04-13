@@ -7,6 +7,8 @@ The library underwent a major overhaul since the pre-release version, so it will
 
 Here is a best-effort guide to the changes made in the latest release. Please feel free to raise a PR / issue in case something is missing.
 
+**IMPORTANT:** The changes are not exhaustive.
+
 #### IWebSocket Changes
 
 `IWebSocket` interface now requires the underlying socket to report its state.
@@ -117,3 +119,7 @@ channel.Off(@event, sub2);
 -channel.canPush;
 +channel.CanPush();
 ```
+
+#### Under the Hood
+
+Under the hood, the library now uses Phoenix V2 serialization format, which uses arrays instead of dictionaries to save on redundant JSON keys. It should be transparent to the user, since the backend will handle the serialization automatically based on the `vsn` property sent with the request.

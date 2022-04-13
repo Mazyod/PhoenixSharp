@@ -159,11 +159,13 @@ We try to mitigate the effects of this "type loss" issue by providing higher-lev
 
 #### Main Thread Callbacks
 
-> TODO: revisit this section since .net profile is updated now.
-
-Unity ships with an old .Net profile for now, so our main thread synchronization tools are extremely limited. Hence, for now, you should use the `Socket.Options.delayedExecutor` property to plug in a `MonoBehaviour` that can execute code after a certain delay, using Coroutines or something similar. This will ensure the library will always run on the main thread.
+When this library was first conceived, Unity was shipping with an old .Net profile with linited main thread synchronization tools. That inspired the introduction of `Socket.Options.delayedExecutor` property to plug in a `MonoBehaviour` that can execute code after a certain delay, using Coroutines or something similar. This will ensure the library callbacks will always run on the main thread.
 
 If you are **not** concerned with multithreading issues, the library ships with a default `Timer` based executor, which executes after a delay using `System.Timers.Timer`.
+
+However...
+
+Since then, Unity has upgraded their .Net profile, and the community has introduced cool new libraries to deal with async operations, such as [UniTask][unitask-repo]. This problem, however, was not tackled in v1 of the library simply due to time constraints. We will hopefully address this issue in the future.
 
 #### Useful Libraries
 
@@ -184,6 +186,7 @@ Whether you open new issues or send in some PRs .. It's all welcome here!
 
 Maz (Mazyad Alabduljaleel)
 
+[unitask-repo]: https://github.com/Cysharp/UniTask
 [migration-guide]: https://github.com/Mazyod/PhoenixSharp/blob/master/Migration.md
 [phoenix-integration-tests-repo]: https://github.com/Mazyod/phoenix-integration-tester
 [phoenix-v2-serialization-format]: https://github.com/phoenixframework/phoenix/blob/master/lib/phoenix/socket/serializers/v2_json_serializer.ex
