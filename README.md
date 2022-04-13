@@ -157,9 +157,11 @@ We try to mitigate the effects of this "type loss" issue by providing higher-lev
 
 ## Unity
 
+First off, it would very much be worth your while to read [Microsoft's documentation on Unity's scripting upgrade][microsoft-docs-unity]. It highlights the main opportunities and challenges, which is also an inspiration for this library to take things further with the new scripting upgrade.
+
 #### Main Thread Callbacks
 
-When this library was first conceived, Unity was shipping with an old .Net profile with linited main thread synchronization tools. That inspired the introduction of `Socket.Options.delayedExecutor` property to plug in a `MonoBehaviour` that can execute code after a certain delay, using Coroutines or something similar. This will ensure the library callbacks will always run on the main thread.
+When this library was first conceived, Unity was shipping with an old .Net profile with limited main thread synchronization tools. That inspired the introduction of `Socket.Options.delayedExecutor` property to plug in a `MonoBehaviour` that can execute code after a certain delay, using Coroutines or something similar. This will ensure the library callbacks will always run on the main thread.
 
 If you are **not** concerned with multithreading issues, the library ships with a default `Timer` based executor, which executes after a delay using `System.Timers.Timer`.
 
@@ -186,6 +188,7 @@ Whether you open new issues or send in some PRs .. It's all welcome here!
 
 Maz (Mazyad Alabduljaleel)
 
+[microsoft-docs-unity]: https://docs.microsoft.com/en-us/visualstudio/gamedev/unity/unity-scripting-upgrade
 [unitask-repo]: https://github.com/Cysharp/UniTask
 [migration-guide]: https://github.com/Mazyod/PhoenixSharp/blob/master/Migration.md
 [phoenix-integration-tests-repo]: https://github.com/Mazyod/phoenix-integration-tester
