@@ -119,6 +119,7 @@ The difference between PhoenixJS and PhoenixSharp can be observed in the followi
 - The static typing nature of C#, and in contrast, the dynamic nature of JavaScript.
   + Defining types for various constructs.
   + Adding generic callbacks to automatically extract and parse payloads.
+  + Using delegates, instead of callbacks, to handle events.
 - The flexibility required to allow PhoenixSharp to be adapted to different environments.
   + Abstracting away the websocket implementation.
   + Pluggable "Delayed Executor", useful for Unity developers.
