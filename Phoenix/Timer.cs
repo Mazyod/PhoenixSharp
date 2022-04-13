@@ -20,9 +20,9 @@ namespace Phoenix {
 	}
 
 	/**
- * IDelayedExecutor
- * This class is equivalent to javascript setTimeout/clearTimeout functions.
- */
+	* IDelayedExecutor
+	* This class is equivalent to javascript setTimeout/clearTimeout functions.
+	*/
 	public interface IDelayedExecutor {
 
 		DelayedExecution Execute(Action action, TimeSpan delay);
@@ -30,9 +30,9 @@ namespace Phoenix {
 	}
 
 	/** 
-* Scheduler
-* This class is equivalent to the Timer class in the Phoenix JS library.
-*/
+	* Scheduler
+	* This class is equivalent to the Timer class in the Phoenix JS library.
+	*/
 	public sealed class Scheduler {
 
 		private readonly Action callback;
