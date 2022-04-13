@@ -24,6 +24,8 @@ In order to achieve the goals stated, it is necessary to:
 
 ## Getting Started
 
+**Migrating from the pre-release version of PhoenixSharp? [See our migration guide][migration-guide]**
+
 For now, you can use git submodules or simply download the sources and drop them in your project.
 
 Once you grab the source, you can look at `IntegrationTests.cs` for a full example. Otherwise, keep reading to learn more.
@@ -182,5 +184,6 @@ Whether you open new issues or send in some PRs .. It's all welcome here!
 
 Maz (Mazyad Alabduljaleel)
 
+[migration-guide]: https://github.com/Mazyod/PhoenixSharp/blob/master/Migration.md
 [phoenix-integration-tests-repo]: https://github.com/Mazyod/phoenix-integration-tester
 [phoenix-v2-serialization-format]: https://github.com/phoenixframework/phoenix/blob/master/lib/phoenix/socket/serializers/v2_json_serializer.ex
