@@ -130,7 +130,7 @@ namespace Phoenix {
 			channel.Trigger(new Message(
 				@event: refEvent,
 				payload: new Dictionary<string, object> {
-					{ "status", status.ToString().ToLower() },
+					{ "status", status.Serialized() },
 				}
 			));
 		}

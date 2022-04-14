@@ -93,7 +93,7 @@ namespace PhoenixTests {
 			bool closeCalled = false;
 
 			var errorChannel = socket.Channel("tester:phoenix-sharp");
-			errorChannel.On(Message.InBoundEvent.phx_close, _ => closeCalled = true);
+			errorChannel.On(Message.InBoundEvent.Close, _ => closeCalled = true);
 
 			errorChannel.Join()
 				.Receive(Reply.Status.Ok, r => okReply = r)
@@ -117,8 +117,8 @@ namespace PhoenixTests {
 			Message? errorMessage = null;
 
 			var roomChannel = socket.Channel("tester:phoenix-sharp", channelParams);
-			roomChannel.On(Message.InBoundEvent.phx_close, m => closeMessage = m);
-			roomChannel.On(Message.InBoundEvent.phx_error, m => errorMessage = m);
+			roomChannel.On(Message.InBoundEvent.Close, m => closeMessage = m);
+			roomChannel.On(Message.InBoundEvent.Error, m => errorMessage = m);
 			roomChannel.On("after_join", m => afterJoinMessage = m);
 
 			roomChannel.Join()
@@ -205,7 +205,7 @@ namespace PhoenixTests {
 			Message? newCloseMessage = null;
 
 			var newRoomChannel = socket.Channel("tester:phoenix-sharp", channelParams);
-			newRoomChannel.On(Message.InBoundEvent.phx_close, m => newCloseMessage = m);
+			newRoomChannel.On(Message.InBoundEvent.Close, m => newCloseMessage = m);
 
 			newRoomChannel.Join()
 				.Receive(Reply.Status.Ok, r => joinOkReply = r)
@@ -276,8 +276,8 @@ namespace PhoenixTests {
 
 			//Try to join for the first time
 			var roomChannel = socket.Channel("tester:phoenix-sharp", channelParams);
-			roomChannel.On(Message.InBoundEvent.phx_close, m => closeMessage = m);
-			roomChannel.On(Message.InBoundEvent.phx_error, m => errorMessage = m);
+			roomChannel.On(Message.InBoundEvent.Close, m => closeMessage = m);
+			roomChannel.On(Message.InBoundEvent.Error, m => errorMessage = m);
 			roomChannel.On("after_join", m => afterJoinMessage = m);
 
 			roomChannel.Join()

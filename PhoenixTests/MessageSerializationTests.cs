@@ -19,7 +19,7 @@ namespace PhoenixTests {
 
 				return new Message(
 					topic: "phoenix-test",
-					@event: Message.OutBoundEvent.phx_join.ToString(),
+					@event: Message.OutBoundEvent.Join.Serialized(),
 					@ref: "123",
 					payload: payload,
 					joinRef: "456"
@@ -38,7 +38,7 @@ namespace PhoenixTests {
 
 				return new Message(
 					topic: "phoenix-test",
-					@event: Message.InBoundEvent.phx_reply.ToString(),
+					@event: Message.InBoundEvent.Reply.Serialized(),
 					@ref: "123",
 					payload: payload,
 					joinRef: "456"

@@ -78,7 +78,7 @@ var roomChannel = socket.Channel(
 // prepare any event callbacks
 // e.g. listen to phx_error inbound event
 roomChannel.On(
-  Message.InBoundEvent.phx_error,
+  Message.InBoundEvent.Error,
   message => errorMessage = message
 );
 // ... listen to a custom event

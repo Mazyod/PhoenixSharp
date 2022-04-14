@@ -39,6 +39,17 @@ Instead of returning `uint`, `DelayedExecutor` now returns `DelayedExecution` in
 }
 ```
 
+### Message Event Enums
+
+Enum values are now standardized as per the C# naming convention.
+
+Avoiding to use the enum names as the corresponding event names also has the advantage of avoiding the use of `.ToString()` on enums, which is much [less performant][enum-tostring-performance] than a simple switch with static strings.
+
+```diff
+-Message.InBoundEvent.phx_error.ToString()
++Message.InBoundEvent.Error.Serialized()
+```
+
 #### Socket / Channel Initialization
 
 1. Instead of passing parameters on connect / join, we pass them on initialization.
@@ -135,3 +146,5 @@ channel.Off(@event, sub2);
 #### Under the Hood
 
 Under the hood, the library now uses Phoenix V2 serialization format, which uses arrays instead of dictionaries to save on redundant JSON keys. It should be transparent to the user, since the backend will handle the serialization automatically based on the `vsn` property sent with the request.
+
+[enum-tostring-performance]: https://youtu.be/BoE5Y6Xkm6w

@@ -57,7 +57,7 @@ namespace PhoenixTests {
 			Assert.AreEqual(socket.sendBuffer.Count, 0);
 			Assert.AreEqual(conn.callSend.Count, 1);
 
-			var joinEvent = Message.OutBoundEvent.phx_join.ToString();
+			var joinEvent = Message.OutBoundEvent.Join.Serialized();
 			Assert.That(conn.callSend[0].Contains(joinEvent));
 		}
 	}

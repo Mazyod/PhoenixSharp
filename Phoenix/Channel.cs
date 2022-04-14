@@ -68,7 +68,7 @@ namespace Phoenix {
 			timeout = socket.opts.timeout;
 			joinPush = new Push(
 				this,
-				Message.OutBoundEvent.phx_join.ToString(),
+				Message.OutBoundEvent.Join.Serialized(),
 				() => @params,
 				timeout
 			);
@@ -130,7 +130,7 @@ namespace Phoenix {
 					socket.Log(LogLevel.Debug, "channel", $"timeout {topic} ({joinRef})");
 				}
 
-				var leaveEvent = Message.OutBoundEvent.phx_leave.ToString();
+				var leaveEvent = Message.OutBoundEvent.Leave.Serialized();
 				var leavePush = new Push(this, leaveEvent, null, timeout);
 				leavePush.Send();
 
@@ -143,7 +143,7 @@ namespace Phoenix {
 			});
 
 			// on phx_reply, also trigger a message for the push using replyEventName
-			On(Message.InBoundEvent.phx_reply.ToString(), message => {
+			On(Message.InBoundEvent.Reply.Serialized(), message => {
 				message.@event = ReplyEventName(message.@ref);
 				Trigger(message);
 			});
@@ -162,15 +162,15 @@ namespace Phoenix {
 		}
 
 		public Subscription OnClose(Action<Message> callback) {
-			return On(Message.InBoundEvent.phx_close, callback);
+			return On(Message.InBoundEvent.Close, callback);
 		}
 
 		public Subscription OnError(Action<Message> callback) {
-			return On(Message.InBoundEvent.phx_error, callback);
+			return On(Message.InBoundEvent.Error, callback);
 		}
 
 		public Subscription On(Message.InBoundEvent @event, Action<Message> callback) {
-			return On(@event.ToString(), callback);
+			return On(@event.Serialized(), callback);
 		}
 
 		public Subscription On(string anyEvent, Action<Message> callback) {
@@ -200,9 +200,8 @@ namespace Phoenix {
 					.Remove(subscription) ?? false;
 		}
 
-		public bool Off(Enum eventEnum) {
-			return Off(eventEnum.ToString());
-		}
+		public bool Off(Message.InBoundEvent @event) => Off(@event.Serialized());
+		public bool Off(Message.OutBoundEvent @event) => Off(@event.Serialized());
 
 		public bool Off(string anyEvent) {
 			return bindings.Remove(anyEvent);
@@ -242,10 +241,10 @@ namespace Phoenix {
 					socket.Log(LogLevel.Debug, "channel", $"leave {topic}");
 				}
 
-				Trigger(Message.InBoundEvent.phx_close);
+				Trigger(Message.InBoundEvent.Close);
 			}
 
-			var leaveEvent = Message.OutBoundEvent.phx_leave.ToString();
+			var leaveEvent = Message.OutBoundEvent.Leave.Serialized();
 			var leavePush = new Push(this, leaveEvent, null, timeout ?? this.timeout);
 			leavePush
 					.Receive(Reply.Status.Ok, (_) => onClose())
@@ -294,7 +293,7 @@ namespace Phoenix {
 
 		// Helper method not found in PhoenixJS
 		internal void Trigger(Message.InBoundEvent @event) {
-			Trigger(new Message(@event: @event.ToString()));
+			Trigger(new Message(@event: @event.Serialized()));
 		}
 
 		internal void Trigger(Message message) {

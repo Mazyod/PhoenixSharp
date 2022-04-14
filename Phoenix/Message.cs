@@ -22,6 +22,8 @@ namespace Phoenix {
 			Ok,
 			Error,
 			Timeout,
+
+			// extension methods also implemented below
 		}
 
 		// PhoenixJS maps incoming phx_reply to chan_reply_{ref} when broadcasting the event
@@ -61,14 +63,18 @@ namespace Phoenix {
 		#region nested types
 
 		public enum InBoundEvent {
-			phx_reply,
-			phx_close,
-			phx_error,
+			Reply,
+			Close,
+			Error,
+
+			// extension methods defined below
 		}
 
 		public enum OutBoundEvent {
-			phx_join,
-			phx_leave,
+			Join,
+			Leave,
+
+			// extension methods defined below
 		}
 
 		#endregion
@@ -92,6 +98,53 @@ namespace Phoenix {
 			this.payload = payload;
 			this.@ref = @ref;
 			this.joinRef = joinRef;
+		}
+	}
+
+	public static class StatusExtensions {
+
+		/** 
+		 * Serialized value of the enum.
+		 * Is apparently much more performant than ToString.
+		 */
+		public static string Serialized(this Reply.Status status) {
+			return status switch {
+				Reply.Status.Ok => "ok",
+				Reply.Status.Error => "error",
+				Reply.Status.Timeout => "timeout",
+				_ => throw new ArgumentOutOfRangeException(nameof(status), status, null)
+			};
+		}
+	}
+
+	public static class MessageInBoundEventExtensions {
+
+		/** 
+		 * Serialized value of the enum.
+		 * Is apparently much more performant than ToString.
+		 */
+		public static string Serialized(this Message.InBoundEvent @event) {
+			return @event switch {
+				Message.InBoundEvent.Reply => "phx_reply",
+				Message.InBoundEvent.Close => "phx_close",
+				Message.InBoundEvent.Error => "phx_error",
+				_ => throw new ArgumentOutOfRangeException(nameof(@event), @event, null)
+			};
+		}
+	}
+
+	public static class MessageOutBoundEventExtensions {
+
+		/** 
+		 * Serialized value of the enum.
+		 * Is apparently much more performant than ToString.
+		 */
+		public static string Serialized(this Message.OutBoundEvent @event) {
+			return @event switch {
+				Message.OutBoundEvent.Join => "phx_join",
+				Message.OutBoundEvent.Leave => "phx_leave",
+				_ => throw new ArgumentOutOfRangeException(nameof(@event), @event, null)
+			};
 		}
 	}
 }
