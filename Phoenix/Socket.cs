@@ -63,7 +63,7 @@ namespace Phoenix {
 			// The optional function for specialized logging
 			public ILogger logger = null;
 			// The object responsible for performing delayed executions
-			public IDelayedExecutor delayedExecutor = new TimerBasedExecutor();
+			public IDelayedExecutor delayedExecutor = new TaskDelayedExecutor();
 
 			// required parameters
 			public Options(IMessageSerializer messageSerializer) {
@@ -123,7 +123,7 @@ namespace Phoenix {
 		private readonly IWebsocketFactory websocketFactory;
 		internal readonly Options opts;
 
-		private DelayedExecution? heartbeatTimer = null;
+		private IDelayedExecution heartbeatTimer = null;
 		private string pendingHeartbeatRef = null;
 
 		#endregion

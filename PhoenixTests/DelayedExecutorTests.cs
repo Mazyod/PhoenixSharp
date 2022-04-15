@@ -6,13 +6,13 @@ using Phoenix;
 namespace PhoenixTests {
 
 	[TestFixture()]
-	public class TimerTests {
+	public class DelayedExecutorTests {
 
 		[Test()]
-		public void TimerInvokationTest() {
+		public void DelayedExecutorInvokationTest() {
 
 			var works = false;
-			var executor = new TimerBasedExecutor();
+			var executor = new TaskDelayedExecutor();
 			executor.Execute(() => works = true, TimeSpan.FromMilliseconds(1));
 
 			Assert.IsFalse(works);
@@ -20,10 +20,10 @@ namespace PhoenixTests {
 		}
 
 		[Test()]
-		public void TimerResetTest() {
+		public void DelayedExecutorResetTest() {
 
 			var works = false;
-			var executor = new TimerBasedExecutor();
+			var executor = new TaskDelayedExecutor();
 			var execution = executor.Execute(() => works = true, TimeSpan.FromMilliseconds(1));
 
 			Assert.IsFalse(works);

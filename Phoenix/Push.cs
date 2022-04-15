@@ -20,7 +20,7 @@ namespace Phoenix {
 		internal string @ref = null;
 		private string refEvent = null;
 		private Reply? receivedResp = null;
-		private DelayedExecution? delayedExecution = null;
+		private IDelayedExecution delayedExecution = null;
 		private readonly StatusHookTable recHooks = new StatusHookTable();
 		//private bool sent = false;
 

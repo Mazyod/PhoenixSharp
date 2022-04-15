@@ -28,14 +28,14 @@ public WebsocketState state {
 
 #### DelayedExecutor Changes
 
-Instead of returning `uint`, `DelayedExecutor` now returns `DelayedExecution` instance. It just holds a reference to the `DelayedExecutor` instance in order to be able to cancel the execution using a simple `Cancel()` method.
+Instead of returning `uint`, `DelayedExecutor` now returns `IDelayedExecution` instance. It is a simple object that "knows" how to cancel the delayed exection.
 
 ```diff
 -public uint Execute(Action action, TimeSpan delay) {
-+public DelayedExecution Execute(Action action, TimeSpan delay) {
++public IDelayedExecution Execute(Action action, TimeSpan delay) {
    // ...
 -  return id;
-+  return new(id, this);
++  return new DelayedExecution(id, this);
 }
 ```
 
