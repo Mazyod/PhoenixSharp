@@ -36,13 +36,13 @@ Once you grab the source, you can look at `IntegrationTests.cs` for a full examp
 
 The library requires you to implement `IWebsocketFactory` and `IWebsocket` in order to provide a websocket implementation of your choosing.
 
-Under the PhoenixTests/WebSocketImpl folder, you'll find a few sample implementations of these interfaces which you could also use out-of-the-box.
+Under the PhoenixTests/WebSocketImpl folder, you'll find a few sample implementations of these interfaces which you could simply copy to your project as needed.
 
 #### Implementing IMessageSerializer
 
 `IMessageSerializer` is the interface that allows you to customize the serialization of your Phoenix messages.
 
-The library ships with a default implementation: `JSONMessageSerializer`. It relies on Newtonsoft.Json to provide JSON serialization based on [Phoenix V2 format][phoenix-v2-serialization-format]. The implementation is self-contained in a single file. This means, by removing that one file, you can decouple your code from Newtonsoft.Json.
+The library ships with a default implementation: `JSONMessageSerializer`. It relies on [Newtonsoft.Json][newtonsoft-website] to provide JSON serialization based on [Phoenix V2 format][phoenix-v2-serialization-format]. The implementation is self-contained in a single file. This means, by removing that one file, you can decouple your code from Newtonsoft.Json if you like.
 
 ### Establishing a Connection
 
@@ -146,7 +146,7 @@ phoenix-integration-tester.herokuapp.com
 
 1. NUnit
 2. WebSocketSharp
-3. (Optional) Newtonsoft.Json
+3. Newtonsoft.Json
 
 #### Details about the Dependencies
 
@@ -162,13 +162,11 @@ First off, it would very much be worth your while to read [Microsoft's documenta
 
 #### Main Thread Callbacks
 
-When this library was first conceived, Unity was shipping with an old .Net profile with limited main thread synchronization tools. That inspired the introduction of `Socket.Options.delayedExecutor` property to plug in a `MonoBehaviour` that can execute code after a certain delay, using Coroutines or something similar. This will ensure the library callbacks will always run on the main thread.
+One of the core components of the library is a mechanism that mimics javascipt's `setTimeout` and `setInterval` functions. It is used to trigger timeout event in case we don't get a response back in time.
 
-If you are **not** concerned with multithreading issues, the library ships with a default `Timer` based executor, which executes after a delay using `System.Timers.Timer`.
+By default, the library uses the `System.Threading.Task` class to schedule the callbacks. Based on our tests, this works well in Unity out-of-the-box thanks to the `SynchronizationContext`.
 
-However...
-
-Since then, Unity has upgraded their .Net profile, and the community has introduced cool new libraries to deal with async operations, such as [UniTask][unitask-repo]. This problem, however, was not tackled in v1 of the library simply due to time constraints. We will hopefully address this issue in the future.
+If you'd rather not use the `Task` based executor, you can easily replace it with a custom implementation by implementing the `IDelayedExecutor` interface. For example, you can use the `CoroutineDelayedExecutor` available in the Reference directory of this repo. Another option is to provide a custom implementation based on [UniTask][unitask-repo] if you see it more performant and beneficial to your project.
 
 #### Useful Libraries
 
@@ -178,8 +176,8 @@ I'm personally shipping this library with my Unity game, so you can rest assured
 - **Json.NET** instead of Newtonsoft.Json, that's what I'm using. I've experienced weird issues in the past with the opensource Newtonsoft.Json on mobile platforms.
 
 **NOTE:**
-- Many people are using BestHTTP, so I figured it would be useful to add that integration separately in the repo, for people to use. See the directory, `Vendor/Unity/BestHTTP`.
-- Under `Vendor/Unity` directory as well, you will find a sample implementation for `DelayedExecutor` that can be used in Unity projects.
+- Many people are using BestHTTP, so I figured it would be useful to add that integration separately in the repo, for people to use. See the directory, `Reference/Unity/BestHTTP`.
+- Under `Reference/Unity` directory as well, you will find a sample implementation for `IDelayedExecutor` that can be used in Unity projects.
 
 ## Contributions
 
@@ -189,6 +187,7 @@ Whether you open new issues or send in some PRs .. It's all welcome here!
 
 Maz (Mazyad Alabduljaleel)
 
+[newtonsoft-website]: https://www.newtonsoft.com/json
 [microsoft-docs-unity]: https://docs.microsoft.com/en-us/visualstudio/gamedev/unity/unity-scripting-upgrade
 [unitask-repo]: https://github.com/Cysharp/UniTask
 [migration-guide]: https://github.com/Mazyod/PhoenixSharp/blob/master/Migration.md
