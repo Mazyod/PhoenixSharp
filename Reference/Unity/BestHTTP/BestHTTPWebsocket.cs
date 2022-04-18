@@ -4,52 +4,52 @@ using BestHTTP.WebSocket;
 
 
 namespace Networking {
-	
-	public sealed class BestHTTPWebsocketFactory: IWebsocketFactory {
 
-		public IWebsocket Build(WebsocketConfiguration config) {
+    public sealed class BestHTTPWebsocketFactory : IWebsocketFactory {
 
-			var websocket = new WebSocket(config.uri);
-			websocket.InternalRequest.ConnectTimeout = TimeSpan.FromSeconds(8);
+        public IWebsocket Build(WebsocketConfiguration config) {
 
-			var adapter = new BestHTTPWebsocketAdapter(websocket);
+            var websocket = new WebSocket(config.uri);
+            websocket.InternalRequest.ConnectTimeout = TimeSpan.FromSeconds(8);
 
-			websocket.OnOpen += (_) => config.onOpenCallback(adapter);
-			websocket.OnClosed += (_, code, message) => config.onCloseCallback(adapter, code, message);
-			websocket.OnError += (_, message) => config.onErrorCallback(adapter, message);
-			websocket.OnMessage += (_, msg) => config.onMessageCallback(adapter, msg);
+            var adapter = new BestHTTPWebsocketAdapter(websocket);
 
-			return adapter;
-		}
-	}
+            websocket.OnOpen += (_) => config.onOpenCallback(adapter);
+            websocket.OnClosed += (_, code, message) => config.onCloseCallback(adapter, code, message);
+            websocket.OnError += (_, message) => config.onErrorCallback(adapter, message);
+            websocket.OnMessage += (_, msg) => config.onMessageCallback(adapter, msg);
 
-	sealed class BestHTTPWebsocketAdapter: IWebsocket {
+            return adapter;
+        }
+    }
 
-		public WebSocket ws { get; private set; }
+    sealed class BestHTTPWebsocketAdapter : IWebsocket {
 
-		public WebsocketState state {
-			get {
-				return ws.State switch {
-					WebSocketStates.Connecting => WebsocketState.Connecting,
-					WebSocketStates.Open => WebsocketState.Open,
-					WebSocketStates.Closing => WebsocketState.Closing,
-					_ => WebsocketState.Closed,
-				};
-			}
-		}
+        public WebSocket ws { get; private set; }
 
-		public BestHTTPWebsocketAdapter(WebSocket ws) {
-			this.ws = ws;
-		}
+        public WebsocketState state {
+            get {
+                return ws.State switch {
+                    WebSocketStates.Connecting => WebsocketState.Connecting,
+                    WebSocketStates.Open => WebsocketState.Open,
+                    WebSocketStates.Closing => WebsocketState.Closing,
+                    _ => WebsocketState.Closed,
+                };
+            }
+        }
 
-		public void Connect() => ws.Open();
-		public void Send(string message) => ws.Send(message);
-		public void Close(ushort? code = null, string message = null) { 
-			if (code.HasValue) {
-				ws.Close(code.Value, message); 
-			} else {
-				ws.Close();
-			}
-		}
-	}
+        public BestHTTPWebsocketAdapter(WebSocket ws) {
+            this.ws = ws;
+        }
+
+        public void Connect() => ws.Open();
+        public void Send(string message) => ws.Send(message);
+        public void Close(ushort? code = null, string message = null) {
+            if (code.HasValue) {
+                ws.Close(code.Value, message);
+            } else {
+                ws.Close();
+            }
+        }
+    }
 }
