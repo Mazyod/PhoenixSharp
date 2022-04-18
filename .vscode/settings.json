@@ -1,0 +1,6 @@
+{
+    "editor.semanticHighlighting.enabled": true,
+    "csharp.semanticHighlighting.enabled": true,
+    "omnisharp.enableRoslynAnalyzers": true,
+    "omnisharp.useModernNet": true
+}

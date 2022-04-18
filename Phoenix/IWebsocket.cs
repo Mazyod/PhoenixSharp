@@ -1,26 +1,36 @@
 ﻿using System;
 
+namespace Phoenix
+{
+    public enum WebsocketState
+    {
+        Connecting,
+        Open,
+        Closing,
+        Closed
+    }
 
-namespace Phoenix {
+    public struct WebsocketConfiguration
+    {
+        public Uri uri;
 
-	public struct WebsocketConfiguration {
+        public Action<IWebsocket> onOpenCallback;
+        public Action<IWebsocket, ushort, string> onCloseCallback;
+        public Action<IWebsocket, string> onErrorCallback;
+        public Action<IWebsocket, string> onMessageCallback;
+    }
 
-		public Uri uri;
+    public interface IWebsocketFactory
+    {
+        IWebsocket Build(WebsocketConfiguration config);
+    }
 
-		public Action<IWebsocket> onOpenCallback;
-		public Action<IWebsocket, ushort, string> onCloseCallback;
-		public Action<IWebsocket, string> onErrorCallback;
-		public Action<IWebsocket, string> onMessageCallback;
-	}
+    public interface IWebsocket
+    {
+        WebsocketState State { get; }
 
-	public interface IWebsocketFactory {
-		IWebsocket Build(WebsocketConfiguration config);
-	}
-
-	public interface IWebsocket {
-
-		void Connect();
-		void Send(string data);
-		void Close(ushort? code = null, string reason = null);
-	}
+        void Connect();
+        void Send(string data);
+        void Close(ushort? code = null, string reason = null);
+    }
 }

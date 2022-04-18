@@ -1,63 +1,145 @@
 using System;
 using System.Collections.Generic;
-using Newtonsoft.Json.Linq;
+using StatusHookTable = System.Collections.Generic.Dictionary<
+    Phoenix.ReplyStatus, System.Collections.Generic.List<System.Action<Phoenix.Reply>>>;
 
+namespace Phoenix
+{
+    public sealed class Push
+    {
+        private readonly Channel _channel;
+        private readonly string _event;
+        private readonly Func<object> _payload;
 
-namespace Phoenix {
-	
-	public sealed class Push {
+        private readonly StatusHookTable _recHooks = new StatusHookTable();
+        private IDelayedExecution _delayedExecution;
+        private Reply? _receivedResp;
+        private string _refEvent;
+        private TimeSpan _timeout;
 
-		#region properties
+        // internal state
+        internal string Ref;
 
-		public readonly Message message;
+        // define a constructor that takes a channel, event, payload, and timeout
+        public Push(Channel channel, string @event, Func<object> payload, TimeSpan timeout)
+        {
+            _channel = channel;
+            _event = @event;
+            _payload = payload;
+            _timeout = timeout;
+        }
 
-		internal uint timerId;
-		internal Reply? reply = null;
+        public void Resend(TimeSpan timeout)
+        {
+            _timeout = timeout;
+            Reset();
+            Send();
+        }
 
-		private readonly Dictionary<Reply.Status, Action<Reply>> replyHooks = new Dictionary<Reply.Status, Action<Reply>>();
+        public void Send()
+        {
+            if (HasReceived(ReplyStatus.Timeout))
+            {
+                return;
+            }
 
-		#endregion
+            StartTimeout();
+            // sent = true;
+            _channel.Socket.Push(new Message(
+                _channel.Topic,
+                _event,
+                _payload?.Invoke(),
+                Ref,
+                _channel.JoinRef
+            ));
+        }
 
+        public Push Receive(ReplyStatus status, Action<Reply> callback)
+        {
+            if (HasReceived(status) && _receivedResp.HasValue)
+            {
+                callback(_receivedResp.Value);
+            }
 
-		public Push(Message message) {
-			this.message = message;
-		}
+            var callbacks = _recHooks.GetValueOrDefault(status) ?? (
+                _recHooks[status] = new List<Action<Reply>>()
+            );
+            callbacks.Add(callback);
 
+            return this;
+        }
 
-		#region public methods
+        internal void Reset()
+        {
+            CancelRefEvent();
+            Ref = null;
+            _refEvent = null;
+            _receivedResp = null;
+            // sent = false;
+        }
 
-		public Push Receive(Reply.Status status, Action<Reply> callback) {
-			
-			if (reply.HasValue && reply.Value.status == status) {
-				callback(reply.Value);
-			}
+        private void MatchReceive(Reply? reply)
+        {
+            if (!reply.HasValue)
+            {
+                return;
+            }
 
-			replyHooks[status] = callback;
-			return this;
-		}
+            _recHooks
+                .GetValueOrDefault(reply.Value.ReplyStatus)?
+                .ForEach(callback => callback(reply.Value));
+        }
 
-		#endregion
+        private void CancelRefEvent()
+        {
+            if (_refEvent != null)
+            {
+                _channel.Off(_refEvent);
+            }
+        }
 
+        internal void CancelTimeout()
+        {
+            _delayedExecution?.Cancel();
+            _delayedExecution = null;
+        }
 
-		#region private & internal methods
+        internal void StartTimeout()
+        {
+            // PhoenixJS: null check implicit
+            CancelTimeout();
 
-		internal void TriggerTimeout() {
-			TriggerReplyCallback(new Reply { status = Reply.Status.Timeout });
-		}
+            Ref = _channel.Socket.MakeRef();
+            _refEvent = Channel.ReplyEventName(Ref);
 
-		internal void TriggerReplyCallback(Reply reply) {
+            var serializer = _channel.Socket.Opts.MessageSerializer;
+            _channel.On(_refEvent, message =>
+            {
+                CancelRefEvent();
+                CancelTimeout();
+                _receivedResp = serializer.MapReply(message.Payload);
+                MatchReceive(_receivedResp);
+            });
 
-			if (this.reply.HasValue) {
-				return;
-			}
+            _delayedExecution =
+                _channel.Socket.Opts.DelayedExecutor.Execute(() => { Trigger(ReplyStatus.Timeout); }, _timeout);
+        }
 
-			this.reply = reply;
+        private bool HasReceived(ReplyStatus status)
+        {
+            return _receivedResp?.ReplyStatus == status;
+        }
 
-			if (replyHooks.ContainsKey(reply.status)) {
-				replyHooks[reply.status].Invoke(reply);
-			}
-		}
-
-		#endregion
-	}
+        internal void Trigger(ReplyStatus status)
+        {
+            _channel.Trigger(new Message(
+                @event: _refEvent,
+                payload: new Dictionary<string, object>
+                {
+                    {"status", status.Serialized()}
+                }
+            ));
+        }
+        //private bool sent = false;
+    }
 }

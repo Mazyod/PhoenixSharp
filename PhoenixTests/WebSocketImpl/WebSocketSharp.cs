@@ -1,86 +1,80 @@
-﻿using Phoenix;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System;
+using Phoenix;
 using WebSocketSharp;
 
-namespace PhoenixTests
+namespace PhoenixTests.WebSocketImpl
 {
-	public sealed class WebsocketSharpAdapter : IWebsocket
-	{
+    public sealed class WebsocketSharpAdapter : IWebsocket
+    {
+        private readonly WebsocketConfiguration _config;
 
-		private readonly WebSocket ws;
-		private readonly WebsocketConfiguration config;
-
-
-		public WebsocketSharpAdapter(WebSocket ws, WebsocketConfiguration config)
-		{
-
-			this.ws = ws;
-			this.config = config;
-
-			ws.OnOpen += OnWebsocketOpen;
-			ws.OnClose += OnWebsocketClose;
-			ws.OnError += OnWebsocketError;
-			ws.OnMessage += OnWebsocketMessage;
-		}
+        private readonly WebSocket _ws;
 
 
-		#region IWebsocket methods
+        public WebsocketSharpAdapter(WebSocket ws, WebsocketConfiguration config)
+        {
+            _ws = ws;
+            _config = config;
 
-		public void Connect()
-		{
-			ws.Connect();
-		}
-
-		public void Send(string message)
-		{
-			ws.Send(message);
-		}
-
-		public void Close(ushort? code = null, string message = null)
-		{
-			ws.Close();
-		}
-
-		#endregion
+            ws.OnOpen += OnWebsocketOpen;
+            ws.OnClose += OnWebsocketClose;
+            ws.OnError += OnWebsocketError;
+            ws.OnMessage += OnWebsocketMessage;
+        }
 
 
-		#region websocketsharp callbacks
+        public WebsocketState State =>
+            _ws.ReadyState switch
+            {
+                WebSocketState.Connecting => WebsocketState.Connecting,
+                WebSocketState.Open => WebsocketState.Open,
+                WebSocketState.Closing => WebsocketState.Closing,
+                _ => WebsocketState.Closed
+            };
 
-		public void OnWebsocketOpen(object sender, EventArgs args)
-		{
-			config.onOpenCallback(this);
-		}
+        public void Connect()
+        {
+            _ws.Connect();
+        }
 
-		public void OnWebsocketClose(object sender, CloseEventArgs args)
-		{
-			config.onCloseCallback(this, args.Code, args.Reason);
-		}
+        public void Send(string message)
+        {
+            _ws.Send(message);
+        }
 
-		public void OnWebsocketError(object sender, ErrorEventArgs args)
-		{
-			config.onErrorCallback(this, args.Message);
-		}
+        public void Close(ushort? code = null, string message = null)
+        {
+            _ws.Close();
+        }
 
-		public void OnWebsocketMessage(object sender, MessageEventArgs args)
-		{
-			config.onMessageCallback(this, args.Data);
-		}
 
-		#endregion
-	}
+        private void OnWebsocketOpen(object sender, EventArgs args)
+        {
+            _config.onOpenCallback(this);
+        }
 
-	public sealed class WebsocketSharpFactory : IWebsocketFactory
-	{
+        private void OnWebsocketClose(object sender, CloseEventArgs args)
+        {
+            _config.onCloseCallback(this, args.Code, args.Reason);
+        }
 
-		public IWebsocket Build(WebsocketConfiguration config)
-		{
+        private void OnWebsocketError(object sender, ErrorEventArgs args)
+        {
+            _config.onErrorCallback(this, args.Message);
+        }
 
-			var socket = new WebSocket(config.uri.AbsoluteUri);
-			return new WebsocketSharpAdapter(socket, config);
-		}
-	}
+        private void OnWebsocketMessage(object sender, MessageEventArgs args)
+        {
+            _config.onMessageCallback(this, args.Data);
+        }
+    }
+
+    public sealed class WebsocketSharpFactory : IWebsocketFactory
+    {
+        public IWebsocket Build(WebsocketConfiguration config)
+        {
+            var socket = new WebSocket(config.uri.AbsoluteUri);
+            return new WebsocketSharpAdapter(socket, config);
+        }
+    }
 }

@@ -1,88 +1,159 @@
 ﻿using System;
-using System.Collections.Generic;
-using Newtonsoft.Json.Linq;
+using System.Runtime.Serialization;
+
+namespace Phoenix
+{
+    public interface IMessageSerializer
+    {
+        string Serialize(Message message);
+        Message Deserialize(string message);
+
+        Reply? MapReply(object payload);
+        T MapPayload<T>(object payload);
+    }
+
+    /**
+     * A reply payload, in response to a push.
+     */
+    public readonly struct Reply
+    {
+        // PhoenixJS maps incoming phx_reply to chan_reply_{ref} when broadcasting the event
+        public const string ReplyEventPrefix = "chan_reply_";
+
+        public readonly string Status;
+        public readonly object Response;
+
+        [IgnoreDataMember]
+        public ReplyStatus ReplyStatus
+        {
+            get
+            {
+                if (Status == null) // shouldn't happen
+                {
+                    return ReplyStatus.Error;
+                }
+
+                return Status switch
+                {
+                    "ok" => ReplyStatus.Ok,
+                    "error" => ReplyStatus.Error,
+                    "timeout" => ReplyStatus.Timeout,
+                    _ => throw new ArgumentException("Unknown status: " + Status)
+                };
+            }
+        }
+
+        public Reply(string status, object response)
+        {
+            Status = status;
+            Response = response;
+        }
+    }
+
+    public enum ReplyStatus
+    {
+        Ok,
+        Error,
+        Timeout
+
+        // extension methods also implemented below
+    }
 
 
-namespace Phoenix {
-	
-	public class Message : IEquatable<Message> {
+    public struct Message
+    {
+        public enum InBoundEvent
+        {
+            Reply,
+            Close,
+            Error
 
-		public enum InBoundEvent {
-			phx_reply,
-			phx_close,
-			phx_error,
-		}
+            // extension methods defined below
+        }
 
-		public enum OutBoundEvent {
-			phx_join,
-			phx_leave,
-		}
+        public enum OutBoundEvent
+        {
+            Join,
+            Leave
 
-		public readonly string topic;
-		public readonly string @event;
-		public readonly string @ref;
-		public readonly JObject payload;
-
-
-		public Message(string topic, string @event, string @ref, JObject payload) {
-
-			this.topic = topic;
-			this.@event = @event;
-			this.@ref = @ref;
-			this.payload = payload ?? new JObject();
-		}
-
-		public override string ToString() {
-			return string.Format("[{0}] {1}: {2}", @ref, topic, @event);
-		}
-
-		#region IEquatable methods
-
-		public override int GetHashCode() {
-			return topic.GetHashCode() + @event.GetHashCode() + @ref.GetHashCode();
-		}
-
-		public override bool Equals(object obj) {
-			return (obj is Message) && Equals((Message)obj);
-		}
-
-		public bool Equals(Message that) {
-			return this.topic == that.topic
-				&& this.@event == that.@event
-				&& this.@ref == that.@ref
-				/* dictionary equality is hard */
-				;
-		}
-
-		#endregion
-	}
+            // extension methods defined below
+        }
 
 
-	public static class MessageInBoundEventExtensions {
+        public readonly string Topic;
 
-		public static Message.InBoundEvent? Parse(string rawChannelEvent) {
+        // unfortunate mutation of the original message
+        public string Event;
+        public readonly string Ref;
+        public object Payload;
+        public string JoinRef;
 
-			foreach (Message.InBoundEvent inboundEvent in Enum.GetValues(typeof(Message.InBoundEvent))) {
-				if (inboundEvent.ToString() == rawChannelEvent) {
-					return inboundEvent;
-				}
-			}
+        public Message(
+            string topic = null,
+            string @event = null,
+            object payload = null,
+            string @ref = null,
+            string joinRef = null
+        )
+        {
+            Topic = topic;
+            Event = @event;
+            Payload = payload;
+            Ref = @ref;
+            JoinRef = joinRef;
+        }
+    }
 
-			return null;
-		}
-	}
+    public static class ReplyStatusExtensions
+    {
+        /** 
+         * Serialized value of the enum.
+         * Is apparently much more performant than ToString.
+         */
+        public static string Serialized(this ReplyStatus status)
+        {
+            return status switch
+            {
+                ReplyStatus.Ok => "ok",
+                ReplyStatus.Error => "error",
+                ReplyStatus.Timeout => "timeout",
+                _ => throw new ArgumentOutOfRangeException(nameof(status), status, null)
+            };
+        }
+    }
 
-	public static class MessageOutBoundEventExtensions {
+    public static class MessageInBoundEventExtensions
+    {
+        /** 
+         * Serialized value of the enum.
+         * Is apparently much more performant than ToString.
+         */
+        public static string Serialized(this Message.InBoundEvent @event)
+        {
+            return @event switch
+            {
+                Message.InBoundEvent.Reply => "phx_reply",
+                Message.InBoundEvent.Close => "phx_close",
+                Message.InBoundEvent.Error => "phx_error",
+                _ => throw new ArgumentOutOfRangeException(nameof(@event), @event, null)
+            };
+        }
+    }
 
-		public static Message.OutBoundEvent Parse(string rawChannelEvent) {
-
-			foreach (Message.OutBoundEvent outboundEvent in Enum.GetValues(typeof(Message.OutBoundEvent))) {
-				if (outboundEvent.ToString() == rawChannelEvent) {
-					return outboundEvent;
-				}
-			}
-
-			throw new ArgumentOutOfRangeException(rawChannelEvent);
-		}
-	}
+    public static class MessageOutBoundEventExtensions
+    {
+        /** 
+         * Serialized value of the enum.
+         * Is apparently much more performant than ToString.
+         */
+        public static string Serialized(this Message.OutBoundEvent @event)
+        {
+            return @event switch
+            {
+                Message.OutBoundEvent.Join => "phx_join",
+                Message.OutBoundEvent.Leave => "phx_leave",
+                _ => throw new ArgumentOutOfRangeException(nameof(@event), @event, null)
+            };
+        }
+    }
 }
