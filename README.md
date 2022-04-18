@@ -1,6 +1,8 @@
 
 ![Imgur](http://i.imgur.com/B8ClrWe.png)
 
+[![.NET](https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml/badge.svg)](https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml)
+
 A C# Phoenix Channels client. Unity Compatible. Proudly powering [Dama King][level3-website].
 
 > Graphic is a shameless mix between unity, phoenix logos. Please don't sue me. Thanks.
