@@ -60,10 +60,7 @@ namespace Phoenix
     {
         internal bool Cancelled;
 
-        public void Cancel()
-        {
-            Cancelled = true;
-        }
+        public void Cancel() => Cancelled = true;
     }
 
 

@@ -23,19 +23,14 @@ namespace PhoenixTests.WebSocketImpl
         }
 
 
-        public WebsocketState State
-        {
-            get
+        public WebsocketState State =>
+            _ws.ReadyState switch
             {
-                return _ws.ReadyState switch
-                {
-                    WebSocketState.Connecting => WebsocketState.Connecting,
-                    WebSocketState.Open => WebsocketState.Open,
-                    WebSocketState.Closing => WebsocketState.Closing,
-                    _ => WebsocketState.Closed
-                };
-            }
-        }
+                WebSocketState.Connecting => WebsocketState.Connecting,
+                WebSocketState.Open => WebsocketState.Open,
+                WebSocketState.Closing => WebsocketState.Closing,
+                _ => WebsocketState.Closed
+            };
 
         public void Connect()
         {
