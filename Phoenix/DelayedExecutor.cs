@@ -54,7 +54,7 @@ namespace Phoenix
         }
     }
 
-    // Provide a default delayed executor that uses a async / await.
+    // Provide a default delayed executor that uses Tasks API.
 
     public sealed class TaskExecution : IDelayedExecution
     {
