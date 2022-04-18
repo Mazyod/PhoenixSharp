@@ -1,124 +1,158 @@
-﻿using Phoenix;
-using System;
+﻿using System;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Phoenix;
 
-namespace PhoenixTests {
-	public sealed class DotNetWebSocketAdapter : IWebsocket {
+namespace PhoenixTests.WebSocketImpl
+{
+    public sealed class DotNetWebSocketAdapter : IWebsocket
+    {
+        private const int ReceiveChunkSize = 1024;
+        private readonly bool _async;
+        private readonly WebsocketConfiguration _config;
+        private readonly UTF8Encoding _encoder = new();
 
-		private readonly ClientWebSocket ws;
-		private readonly WebsocketConfiguration config;
-		private readonly UTF8Encoding encoder = new();
-		private const int receiveChunkSize = 1024;
-		private Task<WebSocketReceiveResult> receiveTask;
-		private readonly bool async;
+        private readonly ClientWebSocket _ws;
+        private Task<WebSocketReceiveResult> _receiveTask;
 
-		public DotNetWebSocketAdapter(
-			ClientWebSocket ws,
-			WebsocketConfiguration config,
-			bool async = false
-		) {
-			this.ws = ws;
-			this.config = config;
-			this.async = async;
-		}
+        public DotNetWebSocketAdapter(
+            ClientWebSocket ws,
+            WebsocketConfiguration config,
+            bool async = false
+        )
+        {
+            _ws = ws;
+            _config = config;
+            _async = async;
+        }
 
-		#region IWebsocket methods
 
-		public WebsocketState state {
-			get {
-				return ws.State switch {
-					WebSocketState.Connecting => WebsocketState.Connecting,
-					WebSocketState.Open => WebsocketState.Open,
-					WebSocketState.CloseSent => WebsocketState.Closing,
-					WebSocketState.CloseReceived => WebsocketState.Closing,
-					_ => WebsocketState.Closed,
-				};
-			}
-		}
+        public WebsocketState State =>
+            _ws.State switch
+            {
+                WebSocketState.Connecting => WebsocketState.Connecting,
+                WebSocketState.Open => WebsocketState.Open,
+                WebSocketState.CloseSent => WebsocketState.Closing,
+                WebSocketState.CloseReceived => WebsocketState.Closing,
+                _ => WebsocketState.Closed
+            };
 
-		public void Connect() {
-			try {
-				var task = ws.ConnectAsync(config.uri, CancellationToken.None);
-				task.Wait();
-				receiveTask = Receive();
+        public void Connect()
+        {
+            try
+            {
+                var task = _ws.ConnectAsync(_config.uri, CancellationToken.None);
+                task.Wait();
+                _receiveTask = Receive();
 
-				config.onOpenCallback(this);
-			} catch (Exception ex) {
-				config.onErrorCallback(this, ex.Message);
-			}
-		}
+                _config.onOpenCallback(this);
+            }
+            catch (Exception ex)
+            {
+                _config.onErrorCallback(this, ex.Message);
+            }
+        }
 
-		public void Send(string message) {
-			if (!SendMessage(message)) {
-				return;
-			}
+        public void Send(string message)
+        {
+            if (!SendMessage(message))
+            {
+                return;
+            }
 
-			if (!async) {
-				try {
-					receiveTask.Wait();
-				} catch (Exception e) {
-					config.onErrorCallback(this, e.Message);
-				}
-			}
-		}
+            if (_async)
+            {
+                return;
+            }
 
-		private async Task<WebSocketReceiveResult> Receive() {
-			byte[] buffer = new byte[receiveChunkSize];
-			var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-			if (result.MessageType == WebSocketMessageType.Close) {
-				await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None);
-			} else {
-				config.onMessageCallback(this, Encoding.Default.GetString(buffer));
-				receiveTask = Receive();
-			}
-			return result;
-		}
+            try
+            {
+                _receiveTask.Wait();
+            }
+            catch (Exception e)
+            {
+                _config.onErrorCallback(this, e.Message);
+            }
+        }
 
-		private bool SendMessage(string message) {
+        public void Close(ushort? code = null, string message = null)
+        {
+            Task closeTask;
 
-			byte[] buffer = encoder.GetBytes(message);
+            _config.onCloseCallback(this, code ?? 0, message);
 
-			if (ws.State == WebSocketState.Open) {
-				ws.SendAsync(new ArraySegment<byte>(buffer), WebSocketMessageType.Text, true, CancellationToken.None);
-				return true;
-			} else {
-				config.onErrorCallback(this, "Could not send message because websocket is closed.");
-				return false;
-			}
-		}
+            if (code.HasValue && Enum.TryParse(code.ToString(), out WebSocketCloseStatus status))
+            {
+                closeTask = _ws.CloseAsync(status, message, CancellationToken.None);
+            }
+            else
+            {
+                closeTask = _ws.CloseAsync(WebSocketCloseStatus.Empty, message, CancellationToken.None);
+            }
 
-		public void Close(ushort? code = null, string message = null) {
-			Task closeTask;
+            try
+            {
+                closeTask.Wait();
+            }
+            catch (Exception ex)
+            {
+                _config.onErrorCallback(this, ex.Message);
+            }
+            finally
+            {
+                _ws.Dispose();
+            }
+        }
 
-			config.onCloseCallback(this, code ?? 0, message);
+        private async Task<WebSocketReceiveResult> Receive()
+        {
+            var buffer = new byte[ReceiveChunkSize];
+            var result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+            if (result.MessageType == WebSocketMessageType.Close)
+            {
+                await _ws.CloseAsync(
+                    WebSocketCloseStatus.NormalClosure,
+                    string.Empty,
+                    CancellationToken.None
+                );
+            }
+            else
+            {
+                _config.onMessageCallback(this, Encoding.Default.GetString(buffer));
+                _receiveTask = Receive();
+            }
 
-			if (code.HasValue && Enum.TryParse(code.ToString(), out WebSocketCloseStatus status)) {
-				closeTask = ws.CloseAsync(status, message, CancellationToken.None);
-			} else {
-				closeTask = ws.CloseAsync(WebSocketCloseStatus.Empty, message, CancellationToken.None);
-			}
-			try {
-				closeTask.Wait();
-			} catch (Exception ex) {
-				config.onErrorCallback(this, ex.Message);
-			} finally {
-				ws.Dispose();
-			}
+            return result;
+        }
 
-		}
+        private bool SendMessage(string message)
+        {
+            var buffer = _encoder.GetBytes(message);
 
-		#endregion
-	}
+            if (_ws.State == WebSocketState.Open)
+            {
+                _ws.SendAsync(
+                    new ArraySegment<byte>(buffer),
+                    WebSocketMessageType.Text,
+                    true,
+                    CancellationToken.None
+                );
+                return true;
+            }
 
-	public sealed class DotNetWebSocketFactory : IWebsocketFactory {
+            _config.onErrorCallback(this, "Could not send message because websocket is closed.");
+            return false;
+        }
+    }
 
-		public IWebsocket Build(WebsocketConfiguration config) {
-
-			var socket = new ClientWebSocket();
-			return new DotNetWebSocketAdapter(socket, config);
-		}
-	}
+    public sealed class DotNetWebSocketFactory : IWebsocketFactory
+    {
+        public IWebsocket Build(WebsocketConfiguration config)
+        {
+            var socket = new ClientWebSocket();
+            return new DotNetWebSocketAdapter(socket, config);
+        }
+    }
 }

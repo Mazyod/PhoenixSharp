@@ -1,150 +1,159 @@
 ﻿using System;
+using System.Runtime.Serialization;
+
+namespace Phoenix
+{
+    public interface IMessageSerializer
+    {
+        string Serialize(Message message);
+        Message Deserialize(string message);
+
+        Reply? MapReply(object payload);
+        T MapPayload<T>(object payload);
+    }
+
+    /**
+     * A reply payload, in response to a push.
+     */
+    public readonly struct Reply
+    {
+        // PhoenixJS maps incoming phx_reply to chan_reply_{ref} when broadcasting the event
+        public const string ReplyEventPrefix = "chan_reply_";
+
+        public readonly string Status;
+        public readonly object Response;
+
+        [IgnoreDataMember]
+        public ReplyStatus ReplyStatus
+        {
+            get
+            {
+                if (Status == null) // shouldn't happen
+                {
+                    return ReplyStatus.Error;
+                }
+
+                return Status switch
+                {
+                    "ok" => ReplyStatus.Ok,
+                    "error" => ReplyStatus.Error,
+                    "timeout" => ReplyStatus.Timeout,
+                    _ => throw new ArgumentException("Unknown status: " + Status)
+                };
+            }
+        }
+
+        public Reply(string status, object response)
+        {
+            Status = status;
+            Response = response;
+        }
+    }
+
+    public enum ReplyStatus
+    {
+        Ok,
+        Error,
+        Timeout
+
+        // extension methods also implemented below
+    }
 
 
-namespace Phoenix {
+    public struct Message
+    {
+        public enum InBoundEvent
+        {
+            Reply,
+            Close,
+            Error
 
-	public interface IMessageSerializer {
-		string Serialize(Message message);
-		Message Deserialize(string message);
+            // extension methods defined below
+        }
 
-		Reply? MapReply(object payload);
-		T MapPayload<T>(object payload);
-	}
+        public enum OutBoundEvent
+        {
+            Join,
+            Leave
 
-	#region payloads
+            // extension methods defined below
+        }
 
-	/** 
-		* A reply payload, in response to a push.
-		*/
-	public struct Reply {
 
-		public enum Status {
-			Ok,
-			Error,
-			Timeout,
+        public readonly string Topic;
 
-			// extension methods also implemented below
-		}
+        // unfortunate mutation of the original message
+        public string Event;
+        public readonly string Ref;
+        public object Payload;
+        public string JoinRef;
 
-		// PhoenixJS maps incoming phx_reply to chan_reply_{ref} when broadcasting the event
-		public static readonly string replyEventPrefix = "chan_reply_";
+        public Message(
+            string topic = null,
+            string @event = null,
+            object payload = null,
+            string @ref = null,
+            string joinRef = null
+        )
+        {
+            Topic = topic;
+            Event = @event;
+            Payload = payload;
+            Ref = @ref;
+            JoinRef = joinRef;
+        }
+    }
 
-		public readonly string status;
-		public readonly object response;
+    public static class ReplyStatusExtensions
+    {
+        /** 
+         * Serialized value of the enum.
+         * Is apparently much more performant than ToString.
+         */
+        public static string Serialized(this ReplyStatus status)
+        {
+            return status switch
+            {
+                ReplyStatus.Ok => "ok",
+                ReplyStatus.Error => "error",
+                ReplyStatus.Timeout => "timeout",
+                _ => throw new ArgumentOutOfRangeException(nameof(status), status, null)
+            };
+        }
+    }
 
-		[System.Runtime.Serialization.IgnoreDataMember]
-		public Status replyStatus {
-			get {
-				if (status == null) {
-					// shouldn't happen
-					return Status.Error;
-				}
+    public static class MessageInBoundEventExtensions
+    {
+        /** 
+         * Serialized value of the enum.
+         * Is apparently much more performant than ToString.
+         */
+        public static string Serialized(this Message.InBoundEvent @event)
+        {
+            return @event switch
+            {
+                Message.InBoundEvent.Reply => "phx_reply",
+                Message.InBoundEvent.Close => "phx_close",
+                Message.InBoundEvent.Error => "phx_error",
+                _ => throw new ArgumentOutOfRangeException(nameof(@event), @event, null)
+            };
+        }
+    }
 
-				return status switch {
-					"ok" => Status.Ok,
-					"error" => Status.Error,
-					"timeout" => Status.Timeout,
-					_ => throw new ArgumentException("Unknown status: " + status),
-				};
-			}
-
-		}
-
-		public Reply(string status, object response) {
-			this.status = status;
-			this.response = response;
-		}
-	}
-
-	#endregion
-
-	public struct Message {
-
-		#region nested types
-
-		public enum InBoundEvent {
-			Reply,
-			Close,
-			Error,
-
-			// extension methods defined below
-		}
-
-		public enum OutBoundEvent {
-			Join,
-			Leave,
-
-			// extension methods defined below
-		}
-
-		#endregion
-
-		public readonly string topic;
-		// unfortunate mutation of the original message
-		public string @event;
-		public readonly string @ref;
-		public object payload;
-		public string joinRef;
-
-		public Message(
-			string topic = null,
-			string @event = null,
-			object payload = null,
-			string @ref = null,
-			string joinRef = null
-		) {
-			this.topic = topic;
-			this.@event = @event;
-			this.payload = payload;
-			this.@ref = @ref;
-			this.joinRef = joinRef;
-		}
-	}
-
-	public static class StatusExtensions {
-
-		/** 
-		 * Serialized value of the enum.
-		 * Is apparently much more performant than ToString.
-		 */
-		public static string Serialized(this Reply.Status status) {
-			return status switch {
-				Reply.Status.Ok => "ok",
-				Reply.Status.Error => "error",
-				Reply.Status.Timeout => "timeout",
-				_ => throw new ArgumentOutOfRangeException(nameof(status), status, null)
-			};
-		}
-	}
-
-	public static class MessageInBoundEventExtensions {
-
-		/** 
-		 * Serialized value of the enum.
-		 * Is apparently much more performant than ToString.
-		 */
-		public static string Serialized(this Message.InBoundEvent @event) {
-			return @event switch {
-				Message.InBoundEvent.Reply => "phx_reply",
-				Message.InBoundEvent.Close => "phx_close",
-				Message.InBoundEvent.Error => "phx_error",
-				_ => throw new ArgumentOutOfRangeException(nameof(@event), @event, null)
-			};
-		}
-	}
-
-	public static class MessageOutBoundEventExtensions {
-
-		/** 
-		 * Serialized value of the enum.
-		 * Is apparently much more performant than ToString.
-		 */
-		public static string Serialized(this Message.OutBoundEvent @event) {
-			return @event switch {
-				Message.OutBoundEvent.Join => "phx_join",
-				Message.OutBoundEvent.Leave => "phx_leave",
-				_ => throw new ArgumentOutOfRangeException(nameof(@event), @event, null)
-			};
-		}
-	}
+    public static class MessageOutBoundEventExtensions
+    {
+        /** 
+         * Serialized value of the enum.
+         * Is apparently much more performant than ToString.
+         */
+        public static string Serialized(this Message.OutBoundEvent @event)
+        {
+            return @event switch
+            {
+                Message.OutBoundEvent.Join => "phx_join",
+                Message.OutBoundEvent.Leave => "phx_leave",
+                _ => throw new ArgumentOutOfRangeException(nameof(@event), @event, null)
+            };
+        }
+    }
 }

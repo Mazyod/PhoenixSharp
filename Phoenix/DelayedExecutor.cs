@@ -1,79 +1,86 @@
 ﻿using System;
 using System.Threading.Tasks;
 
-namespace Phoenix {
+namespace Phoenix
+{
+    public interface IDelayedExecution
+    {
+        void Cancel();
+    }
 
-	public interface IDelayedExecution {
-		void Cancel();
-	}
+    /**
+     * IDelayedExecutor
+     * This class is equivalent to javascript setTimeout/clearTimeout functions.
+     */
+    public interface IDelayedExecutor
+    {
+        IDelayedExecution Execute(Action action, TimeSpan delay);
+    }
 
-	/**
-	* IDelayedExecutor
-	* This class is equivalent to javascript setTimeout/clearTimeout functions.
-	*/
-	public interface IDelayedExecutor {
+    /** 
+     * Scheduler
+     * This class is equivalent to the Timer class in the Phoenix JS library.
+     */
+    public sealed class Scheduler
+    {
+        private readonly Action _callback;
+        private readonly IDelayedExecutor _delayedExecutor;
+        private readonly Func<int, TimeSpan> _timerCalc;
+        private IDelayedExecution _execution;
+        private int _tries;
 
-		IDelayedExecution Execute(Action action, TimeSpan delay);
-	}
+        public Scheduler(Action callback, Func<int, TimeSpan> timerCalc, IDelayedExecutor delayedExecutor)
+        {
+            _callback = callback;
+            _timerCalc = timerCalc;
+            _delayedExecutor = delayedExecutor;
+        }
 
-	/** 
-	* Scheduler
-	* This class is equivalent to the Timer class in the Phoenix JS library.
-	*/
-	public sealed class Scheduler {
+        public void Reset()
+        {
+            _tries = 0;
+            _execution?.Cancel();
+            _execution = null;
+        }
 
-		private readonly Action callback;
-		private readonly Func<int, TimeSpan> timerCalc;
-		private readonly IDelayedExecutor delayedExecutor;
-		private IDelayedExecution execution = null;
-		private int tries = 0;
+        public void ScheduleTimeout()
+        {
+            _execution?.Cancel();
+            _execution = _delayedExecutor.Execute(() =>
+            {
+                _tries += 1;
+                _callback();
+            }, _timerCalc(_tries + 1));
+        }
+    }
 
-		public Scheduler(Action callback, Func<int, TimeSpan> timerCalc, IDelayedExecutor delayedExecutor) {
-			this.callback = callback;
-			this.timerCalc = timerCalc;
-			this.delayedExecutor = delayedExecutor;
-		}
+    // Provide a default delayed executor that uses a async / await.
 
-		public void Reset() {
-			tries = 0;
-			execution?.Cancel();
-			execution = null;
-		}
+    public sealed class TaskExecution : IDelayedExecution
+    {
+        internal bool Cancelled;
 
-		public void ScheduleTimeout() {
-			execution?.Cancel();
-			execution = delayedExecutor.Execute(() => {
-				tries += 1;
-				callback();
-			}, timerCalc(tries + 1));
-		}
-	}
-
-	// Provide a default delayed executor that uses a async / await.
-
-	public sealed class DelayedExecution : IDelayedExecution {
-
-		internal bool cancelled = false;
-
-		public void Cancel() {
-			cancelled = true;
-		}
-	}
+        public void Cancel()
+        {
+            Cancelled = true;
+        }
+    }
 
 
-	public sealed class TaskDelayedExecutor : IDelayedExecutor {
+    public sealed class TaskDelayedExecutor : IDelayedExecutor
+    {
+        public IDelayedExecution Execute(Action action, TimeSpan delay)
+        {
+            var execution = new TaskExecution();
+            Task.Delay(delay).ContinueWith(_ =>
+            {
+                if (!execution.Cancelled)
+                {
+                    action();
+                }
+            });
 
-		public IDelayedExecution Execute(Action action, TimeSpan delay) {
-
-			var execution = new DelayedExecution();
-			Task.Delay(delay).ContinueWith(_ => {
-				if (!execution.cancelled) {
-					action();
-				}
-			});
-
-			return execution;
-		}
-	}
+            return execution;
+        }
+    }
 }
-

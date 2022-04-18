@@ -1,241 +1,265 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-
+// ReSharper disable once InvalidXmlDocComment
 /**
-	## Presence data structure
+    ## Presence data structure
 
-	The presence information is returned as a map with presences grouped
-	by key, cast as a string, and accumulated metadata, with the following form:
+    The presence information is returned as a map with presences grouped
+    by key, cast as a string, and accumulated metadata, with the following form:
 
-			%{key => %{metas: [%{phx_ref: ..., ...}, ...]}}
+            %{key => %{metas: [%{phx_ref: ..., ...}, ...]}}
 
-	For example, imagine a user with id `123` online from two
-	different devices, as well as a user with id `456` online from
-	just one device. The following presence information might be returned:
+    For example, imagine a user with id `123` online from two
+    different devices, as well as a user with id `456` online from
+    just one device. The following presence information might be returned:
 
-			%{"123" => %{metas: [%{status: "away", phx_ref: ...},
-													 %{status: "online", phx_ref: ...}]},
-				"456" => %{metas: [%{status: "online", phx_ref: ...}]}}
+            %{"123" => %{metas: [%{status: "away", phx_ref: ...},
+                                                     %{status: "online", phx_ref: ...}]},
+                "456" => %{metas: [%{status: "online", phx_ref: ...}]}}
 
-	The keys of the map will usually point to a resource ID. The value
-	will contain a map with a `:metas` key containing a list of metadata
-	for each resource. Additionally, every metadata entry will contain a
-	`:phx_ref` key which can be used to uniquely identify metadata for a
-	given key. In the event that the metadata was previously updated,
-	a `:phx_ref_prev` key will be present containing the previous
-	`:phx_ref` value.
+    The keys of the map will usually point to a resource ID. The value
+    will contain a map with a `:metas` key containing a list of metadata
+    for each resource. Additionally, every metadata entry will contain a
+    `:phx_ref` key which can be used to uniquely identify metadata for a
+    given key. In the event that the metadata was previously updated,
+    a `:phx_ref_prev` key will be present containing the previous
+    `:phx_ref` value.
  */
 using State = System.Collections.Generic.Dictionary<
-	string, Phoenix.Presence.MetadataContainer>;
-
+    string, Phoenix.Presence.MetadataContainer>;
 using DiffList = System.Collections.Generic.List<
-	Phoenix.Presence.Diff>;
+    Phoenix.Presence.Diff>;
+using MetadataList = System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, object>>;
 
-using MetadataList = System.Collections.Generic.List<
-	System.Collections.Generic.Dictionary<string, object>>;
+namespace Phoenix
+{
+    /**
+     * Initializes the Presence
+     * @param {Channel} channel - The Channel
+     * @param {Object} opts - The options,
+     * for example `{events: {state: "state", diff: "diff"}}`
+     * 
+     * TODO: We are using immutable types since the PhoenixJS implementation uses deep clone.
+     * TODO: Immutable types generate a lot of garbage, so we should consider using a different approach.
+     */
+    public sealed class Presence
+    {
+        public delegate void OnJoinDelegate(
+            string key, MetadataContainer currentPresence, MetadataContainer newPresence);
 
-namespace Phoenix {
-	/**
-	* Initializes the Presence
-	* @param {Channel} channel - The Channel
-	* @param {Object} opts - The options,
-	*        for example `{events: {state: "state", diff: "diff"}}`
-	*
-	* TODO: We are using immutable types since the PhoenixJS implementation uses deep clone.
-	* TODO: Immutable types generate a lot of garbage, so we should consider using a different approach.
-	*/
-	public sealed class Presence {
+        public delegate void OnLeaveDelegate(
+            string key, MetadataContainer currentPresence, MetadataContainer newPresence);
 
-		#region nested types
+        public delegate void OnSyncDelegate();
 
-		public sealed class Options {
-			public string stateEvent = "presence_state";
-			public string diffEvent = "presence_diff";
-		}
+        private readonly Channel _channel;
+        private readonly DiffList _pendingDiffs = new DiffList();
+        private string _joinRef;
 
-		/** MetadataContainer
-		avoiding structs since it's stored in a collection
-		*/
-		public sealed class MetadataContainer {
+        public OnJoinDelegate OnJoin;
 
-			public MetadataList metas;
-		}
+        public OnLeaveDelegate OnLeave;
 
-		/** Diff
-		avoiding structs since it's stored in a collection
-		*/
-		public sealed class Diff {
+        public OnSyncDelegate OnSync;
 
-			public State joins;
-			public State leaves;
-		}
+        public State State = new State();
 
-		#endregion
+        public Presence(Channel channel, Options opts = null)
+        {
+            _channel = channel;
 
-		#region events
+            var options = opts ?? new Options();
 
-		public delegate void OnJoinDelegate(
-			string key, MetadataContainer currentPresence, MetadataContainer newPresence);
-		public OnJoinDelegate OnJoin;
+            channel.On(options.StateEvent, message =>
+            {
+                var serializer = channel.Socket.Opts.MessageSerializer;
+                var newState = serializer.MapPayload<State>(message.Payload);
+                _joinRef = channel.JoinRef;
+                State = SyncState(State, newState, OnJoin, OnLeave);
 
-		public delegate void OnLeaveDelegate(
-			string key, MetadataContainer currentPresence, MetadataContainer newPresence);
-		public OnLeaveDelegate OnLeave;
+                State = _pendingDiffs.Aggregate(
+                    State,
+                    (state, diff) => SyncDiff(new State(state), diff, OnJoin, OnLeave)
+                );
 
-		public delegate void OnSyncDelegate();
-		public OnSyncDelegate OnSync;
+                _pendingDiffs.Clear();
 
-		#endregion
+                OnSync?.Invoke();
+            });
 
-		public State state = new State();
-		private readonly DiffList pendingDiffs = new DiffList();
-		private readonly Channel channel;
-		private string joinRef = null;
+            channel.On(options.DiffEvent, message =>
+            {
+                var diff = channel.Socket.Opts.MessageSerializer.MapPayload<Diff>(message.Payload);
+                if (InPendingSyncState())
+                {
+                    _pendingDiffs.Add(diff);
+                }
+                else
+                {
+                    State = SyncDiff(new State(State), diff, OnJoin, OnLeave);
+                    OnSync?.Invoke();
+                }
+            });
+        }
 
-		public Presence(Channel channel, Options opts = null) {
-			this.channel = channel;
+        public IEnumerable<object> List(
+            Func<KeyValuePair<string, MetadataContainer>, object> by
+        )
+        {
+            return List(State, by);
+        }
 
-			var options = opts ?? new Options();
+        internal bool InPendingSyncState()
+        {
+            return _joinRef == null || _joinRef != _channel.JoinRef;
+        }
 
-			channel.On(options.stateEvent, message => {
-				var serializer = channel.socket.opts.messageSerializer;
-				var newState = serializer.MapPayload<State>(message.payload);
-				joinRef = channel.joinRef;
-				state = SyncState(state, newState, OnJoin, OnLeave);
+        // lower-level public static API
 
-				state = pendingDiffs.Aggregate(
-					state,
-					(state, diff) => SyncDiff(new State(state), diff, OnJoin, OnLeave)
-				);
+        /**
+         * Used to sync the list of presences on the server
+         * with the client's state. An optional `onJoin` and `onLeave` callback can
+         * be provided to react to changes in the client's local presences across
+         * disconnects and reconnects with the server.
+         */
+        public static State SyncState(
+            State currentState,
+            State newState,
+            OnJoinDelegate onJoin = null,
+            OnLeaveDelegate onLeave = null
+        )
+        {
+            var joins = new State();
+            var leaves = new State();
 
-				pendingDiffs.Clear();
+            foreach (var key in currentState.Keys.Where(key => !newState.ContainsKey(key)))
+            {
+                leaves[key] = currentState[key];
+            }
 
-				OnSync?.Invoke();
-			});
+            foreach (var key in newState.Keys)
+            {
+                var newPresence = newState[key];
+                var found = currentState.TryGetValue(key, out var currentPresence);
+                if (found)
+                {
+                    var newRefs = newPresence.Metas.Select(m => m["phx_ref"]).ToHashSet();
+                    var curRefs = currentPresence.Metas.Select(m => m["phx_ref"]).ToList();
+                    var joinedMetas = newPresence.Metas.Where(m => curRefs.IndexOf(m["phx_ref"]) < 0).ToList();
+                    var leftMetas = currentPresence.Metas.Where(m => !newRefs.Contains(m["phx_ref"])).ToList();
+                    if (joinedMetas.Count > 0)
+                    {
+                        joins[key] = new MetadataContainer {Metas = joinedMetas};
+                    }
 
-			channel.On(options.diffEvent, message => {
-				var diff = channel.socket.opts.messageSerializer.MapPayload<Diff>(message.payload);
-				if (InPendingSyncState()) {
-					pendingDiffs.Add(diff);
-				} else {
-					state = SyncDiff(new State(state), diff, OnJoin, OnLeave);
-					OnSync?.Invoke();
-				}
-			});
-		}
+                    if (leftMetas.Count > 0)
+                    {
+                        leaves[key] = new MetadataContainer {Metas = leftMetas};
+                    }
+                }
+                else
+                {
+                    joins[key] = newPresence;
+                }
+            }
 
-		public List<object> List(
-			Func<KeyValuePair<string, MetadataContainer>, object> by
-		) => List(state, by);
+            var diff = new Diff {Joins = joins, Leaves = leaves};
+            return SyncDiff(new State(currentState), diff, onJoin, onLeave);
+        }
 
-		public bool InPendingSyncState() => joinRef == null || joinRef != channel.joinRef;
+        /**
+         * Used to sync a diff of presence join and leave
+         * events from the server, as they happen. Like `syncState`, `syncDiff`
+         * accepts optional `onJoin` and `onLeave` callbacks to react to a user
+         * joining or leaving from a device.
+         */
+        private static State SyncDiff(
+            State state,
+            Diff diff,
+            OnJoinDelegate onJoin,
+            OnLeaveDelegate onLeave
+        )
+        {
+            foreach (var key in diff.Joins.Keys)
+            {
+                var newPresence = diff.Joins[key];
+                var found = state.TryGetValue(key, out var currentPresence);
+                state[key] = newPresence;
+                if (found)
+                {
+                    var joinedRefs = state[key].Metas.Select(m => m["phx_ref"]).ToList();
+                    var curMetas = currentPresence.Metas.Where(m => joinedRefs.IndexOf(m["phx_ref"]) < 0).ToList();
+                    state[key].Metas.InsertRange(0, curMetas);
+                }
 
-		// lower-level public static API
+                onJoin?.Invoke(key, currentPresence, newPresence);
+            }
 
-		/**
-		* Used to sync the list of presences on the server
-		* with the client's state. An optional `onJoin` and `onLeave` callback can
-		* be provided to react to changes in the client's local presences across
-		* disconnects and reconnects with the server.
-		*/
-		public static State SyncState(
-			State currentState,
-			State newState,
-			OnJoinDelegate onJoin = null,
-			OnLeaveDelegate onLeave = null
-		) {
-			var state = currentState;
-			var joins = new State();
-			var leaves = new State();
+            foreach (var key in diff.Leaves.Keys)
+            {
+                var leftPresence = diff.Leaves[key];
+                var found = state.TryGetValue(key, out var currentPresence);
+                if (!found)
+                {
+                    continue;
+                }
 
-			foreach (var key in state.Keys) {
-				if (!newState.ContainsKey(key)) {
-					leaves[key] = state[key];
-				}
-			}
+                var refsToRemove = leftPresence.Metas.Select(m => m["phx_ref"]).ToList();
+                var filteredMetas = currentPresence.Metas.Where(
+                    m => refsToRemove.IndexOf(m["phx_ref"]) < 0).ToList();
 
-			foreach (var key in newState.Keys) {
-				var newPresence = newState[key];
-				var found = state.TryGetValue(key, out var currentPresence);
-				if (found) {
-					var newRefs = newPresence.metas.Select(m => m["phx_ref"]).ToList();
-					var curRefs = currentPresence.metas.Select(m => m["phx_ref"]).ToList();
-					var joinedMetas = newPresence.metas.Where(m => curRefs.IndexOf(m["phx_ref"]) < 0).ToList();
-					var leftMetas = currentPresence.metas.Where(m => newRefs.IndexOf(m["phx_ref"]) < 0).ToList();
-					if (joinedMetas.Count > 0) {
-						joins[key] = new MetadataContainer { metas = joinedMetas };
-					}
-					if (leftMetas.Count > 0) {
-						leaves[key] = new MetadataContainer { metas = leftMetas };
-					}
-				} else {
-					joins[key] = newPresence;
-				}
-			}
+                var newPresence = new MetadataContainer {Metas = filteredMetas};
+                onLeave?.Invoke(key, newPresence, leftPresence);
+                if (newPresence.Metas.Count == 0)
+                {
+                    state.Remove(key);
+                }
+                else
+                {
+                    state[key] = newPresence;
+                }
+            }
 
-			Diff diff = new Diff() { joins = joins, leaves = leaves };
-			return SyncDiff(new State(state), diff, onJoin, onLeave);
-		}
+            return state;
+        }
 
-		/**
-		* Used to sync a diff of presence join and leave
-		* events from the server, as they happen. Like `syncState`, `syncDiff`
-		* accepts optional `onJoin` and `onLeave` callbacks to react to a user
-		* joining or leaving from a device.
-		*/
-		public static State SyncDiff(
-			State state,
-			Diff diff,
-			OnJoinDelegate onJoin,
-			OnLeaveDelegate onLeave
-		) {
-			foreach (var key in diff.joins.Keys) {
-				var newPresence = diff.joins[key];
-				var found = state.TryGetValue(key, out var currentPresence);
-				state[key] = newPresence;
-				if (found) {
-					var joinedRefs = state[key].metas.Select(m => m["phx_ref"]).ToList();
-					var curMetas = currentPresence.metas.Where(m => joinedRefs.IndexOf(m["phx_ref"]) < 0).ToList();
-					state[key].metas.InsertRange(0, curMetas);
-				}
-				onJoin?.Invoke(key, currentPresence, newPresence);
-			}
+        /**
+         * Returns the array of presences, with selected metadata.
+         */
+        public static IEnumerable<object> List(
+            State presences,
+            Func<KeyValuePair<string, MetadataContainer>, object> chooser = null
+        )
+        {
+            chooser ??= keyPresenceTuple => keyPresenceTuple.Value;
 
-			foreach (var key in diff.leaves.Keys) {
-				var leftPresence = diff.leaves[key];
-				var found = state.TryGetValue(key, out var currentPresence);
-				if (!found) {
-					continue;
-				}
-				var refsToRemove = leftPresence.metas.Select(m => m["phx_ref"]).ToList();
-				var filteredMetas = currentPresence.metas.Where(
-					m => refsToRemove.IndexOf(m["phx_ref"]) < 0).ToList();
+            return presences.ToList().Select(chooser);
+        }
 
-				var newPresence = new MetadataContainer { metas = filteredMetas };
-				onLeave?.Invoke(key, newPresence, leftPresence);
-				if (newPresence.metas.Count == 0) {
-					state.Remove(key);
-				} else {
-					state[key] = newPresence;
-				}
-			}
+        public sealed class Options
+        {
+            public string DiffEvent = "presence_diff";
+            public string StateEvent = "presence_state";
+        }
 
-			return state;
-		}
+        /**
+         * MetadataContainer
+         * avoiding structs since it's stored in a collection
+         */
+        public sealed class MetadataContainer
+        {
+            public MetadataList Metas;
+        }
 
-		/**
-		* Returns the array of presences, with selected metadata.
-		*/
-		public static List<object> List(
-			State presences,
-			Func<KeyValuePair<string, MetadataContainer>, object> chooser = null
-		) {
-			if (chooser == null) {
-				chooser = keyPresenceTuple => keyPresenceTuple.Value;
-			}
-
-			return presences.ToList().Select(chooser).ToList();
-		}
-	}
+        /**
+         * Diff
+         * avoiding structs since it's stored in a collection
+         */
+        public sealed class Diff
+        {
+            public State Joins;
+            public State Leaves;
+        }
+    }
 }

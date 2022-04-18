@@ -1,45 +1,54 @@
-using Phoenix;
 using System.Collections.Generic;
+using Phoenix;
 
-namespace PhoenixTests {
-	public sealed class MockWebsocketAdapter : IWebsocket {
+namespace PhoenixTests.WebSocketImpl
+{
+    public sealed class MockWebsocketAdapter : IWebsocket
+    {
+        private readonly WebsocketConfiguration _config;
 
-		public WebsocketState mockState = WebsocketState.Closed;
-		public readonly WebsocketConfiguration config;
+        public readonly List<string> CallSend = new();
 
-		public MockWebsocketAdapter(WebsocketConfiguration config) {
-			this.config = config;
-		}
+        public int CallCloseCount;
 
-		#region IWebsocket methods
+        public int CallConnectCount;
 
-		public WebsocketState state => mockState;
+        public WebsocketState MockState = WebsocketState.Closed;
 
-		public int callConnectCount = 0;
-		public void Connect() {
-			callConnectCount += 1;
+        public MockWebsocketAdapter(WebsocketConfiguration config)
+        {
+            _config = config;
+        }
 
-			mockState = WebsocketState.Open;
-			config.onOpenCallback?.Invoke(this);
-		}
 
-		public List<string> callSend = new();
-		public void Send(string message) {
-			callSend.Add(message);
-		}
+        public WebsocketState State => MockState;
 
-		public int callCloseCount = 0;
-		public void Close(ushort? code = null, string message = null) {
-			callCloseCount += 1;
+        public void Connect()
+        {
+            CallConnectCount += 1;
 
-			config.onCloseCallback?.Invoke(this, code ?? 0, message);
-		}
+            MockState = WebsocketState.Open;
+            _config.onOpenCallback?.Invoke(this);
+        }
 
-		#endregion
-	}
+        public void Send(string message)
+        {
+            CallSend.Add(message);
+        }
 
-	public sealed class MockWebsocketFactory : IWebsocketFactory {
+        public void Close(ushort? code = null, string message = null)
+        {
+            CallCloseCount += 1;
 
-		public IWebsocket Build(WebsocketConfiguration config) => new MockWebsocketAdapter(config);
-	}
+            _config.onCloseCallback?.Invoke(this, code ?? 0, message);
+        }
+    }
+
+    public sealed class MockWebsocketFactory : IWebsocketFactory
+    {
+        public IWebsocket Build(WebsocketConfiguration config)
+        {
+            return new MockWebsocketAdapter(config);
+        }
+    }
 }
