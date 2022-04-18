@@ -1,7 +1,7 @@
 
 ![Imgur](http://i.imgur.com/B8ClrWe.png)
 
-A C# Phoenix Channels client. Unity Compatible. Proudly powering [Dama King](http://level3.io).
+A C# Phoenix Channels client. Unity Compatible. Proudly powering [Dama King][level3-website].
 
 > Graphic is a shameless mix between unity, phoenix logos. Please don't sue me. Thanks.
 
@@ -113,6 +113,16 @@ roomChannel
   );
 ```
 
+#### Presence Tracking
+
+Presence is also supported by the library.
+
+```cs
+var presence = new Presence(channel);
+presence.OnJoin += onJoinCallback;
+presence.OnLeave += onLeaveCallback;
+```
+
 ## PhoenixJS
 
 The difference between PhoenixJS and PhoenixSharp can be observed in the following areas:
@@ -187,6 +197,7 @@ Whether you open new issues or send in some PRs .. It's all welcome here!
 
 Maz (Mazyad Alabduljaleel)
 
+[level3-website]: http://level3.io
 [newtonsoft-website]: https://www.newtonsoft.com/json
 [microsoft-docs-unity]: https://docs.microsoft.com/en-us/visualstudio/gamedev/unity/unity-scripting-upgrade
 [unitask-repo]: https://github.com/Cysharp/UniTask

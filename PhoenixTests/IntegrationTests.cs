@@ -312,11 +312,7 @@ namespace PhoenixTests
             // SetUp
 
             var onOpenCount = 0;
-
-            void OnOpenCallback()
-            {
-                onOpenCount++;
-            }
+            void OnOpenCallback() => onOpenCount++;
 
             // connecting is synchronous as implemented above
             var socketAddress = $"ws://{Host}/socket";
@@ -344,8 +340,8 @@ namespace PhoenixTests
             var presence = new Presence(channel);
 
             var joinCalls = new List<(string, Presence.MetadataContainer, Presence.MetadataContainer)>();
-            presence.OnJoin += (channel, joinMetadata, oldMetadata)
-                => joinCalls.Add((channel, joinMetadata, oldMetadata));
+            presence.OnJoin += (user, prevState, nextState)
+                => joinCalls.Add((user, prevState, nextState));
 
             Reply? joinOkReply = null;
             channel.Join()
@@ -367,8 +363,7 @@ namespace PhoenixTests
 
             Assert.IsNotEmpty(newState.Metas[0]["phx_ref"] as string);
             Assert.IsNotEmpty(newState.Metas[0]["online_at"] as string);
-
-
+            
             // TearDown
 
             socket.Disconnect();
