@@ -95,15 +95,16 @@ roomChannel.On(
   (CustomPayload payload) => Handle(payload)
 );
 
-// join the channel, handling the reply as needed
+// join the channel, handling the reply response as needed
+// here, we assume JoinResponse and ChannelError are defined
 roomChannel.Join()
   .Receive(
     ReplyStatus.Ok, 
-    reply => joinOkReply = reply
+    reply => okResponse = reply.JsonResponse<JoinResponse>()
   )
   .Receive(
     ReplyStatus.Error,
-    reply => joinErrorReply = reply
+    reply => errorResponse = reply.JsonResponse<ChannelError>()
   );
 
 // push a message to the channel

@@ -39,7 +39,7 @@ Instead of returning `uint`, `DelayedExecutor` now returns `IDelayedExecution` i
 }
 ```
 
-### Message Event Enums
+#### Message Event Enums
 
 Enum values are now standardized as per the C# naming convention.
 
@@ -48,6 +48,13 @@ Avoiding to use the enum names as the corresponding event names also has the adv
 ```diff
 -Message.InBoundEvent.phx_error.ToString()
 +Message.InBoundEvent.Error.Serialized()
+```
+
+Also, `Reply.Status` changed to `ReplyStatus`, allowing `reply.Status` to hold the status value.
+
+```diff
+-.Receive(Reply.Status.Ok, _ => callback(true))
++.Receive(ReplyStatus.Ok, _ => callback(true))
 ```
 
 #### Socket / Channel Initialization
@@ -86,7 +93,7 @@ Now, you can simply pass any object that you know the serializer can handle. The
 +channel.Push("chat", chat);
 ```
 
-#### Channel / Push Callbacks
+#### Channel & Push Callbacks
 
 If you're interested in the `Message.payload` property of a channel event, you can use the new generic `On` method to get the payload mapped directly.
 
