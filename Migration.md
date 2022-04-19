@@ -14,7 +14,7 @@ Here is a best-effort guide to the changes made in the latest release. Please fe
 `IWebSocket` interface now requires the underlying socket to report its state.
 
 ```cs
-public WebsocketState state {
+public WebsocketState State {
   get {
     return ws.State switch {
       WebSocketStates.Connecting => WebsocketState.Connecting,
@@ -62,7 +62,7 @@ Avoiding to use the enum names as the corresponding event names also has the adv
 +  @params,
    new BestHTTPWebsocketFactory(),
 -  new()
-+  new(new JSONMessageSerializer())
++  new(new JsonMessageSerializer())
  );
 
 -socket.Connect(url, @params);

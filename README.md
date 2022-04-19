@@ -44,7 +44,7 @@ Under the PhoenixTests/WebSocketImpl folder, you'll find a few sample implementa
 
 `IMessageSerializer` is the interface that allows you to customize the serialization of your Phoenix messages.
 
-The library ships with a default implementation: `JSONMessageSerializer`. It relies on [Newtonsoft.Json][newtonsoft-website] to provide JSON serialization based on [Phoenix V2 format][phoenix-v2-serialization-format]. The implementation is self-contained in a single file. This means, by removing that one file, you can decouple your code from Newtonsoft.Json if you like.
+The library ships with a default implementation: `JsonMessageSerializer`. It relies on [Newtonsoft.Json][newtonsoft-website] to provide JSON serialization based on [Phoenix V2 format][phoenix-v2-serialization-format]. The implementation is self-contained in a single file. This means, by removing that one file, you can decouple your code from Newtonsoft.Json if you like.
 
 ### Establishing a Connection
 
@@ -55,7 +55,7 @@ Once you have your websocket and serializer implementation ready, you can procee
 In order to ensure that socket connections are self-contained, we pass the socket parameters on initialization. Trying to connect with different parameters requires a new socket instance.
 
 ```cs
-var socketOptions = new Socket.Options(new JSONMessageSerializer());
+var socketOptions = new Socket.Options(new JsonMessageSerializer());
 var socketAddress = "ws://my-awesome-app.com/socket";
 var socketFactory = new WebsocketSharpFactory();
 var socket = new Socket(socketAddress, null, socketFactory, socketOptions);
@@ -98,11 +98,11 @@ roomChannel.On(
 // join the channel, handling the reply as needed
 roomChannel.Join()
   .Receive(
-    Reply.Status.Ok, 
+    ReplyStatus.Ok, 
     reply => joinOkReply = reply
   )
   .Receive(
-    Reply.Status.Error,
+    ReplyStatus.Error,
     reply => joinErrorReply = reply
   );
 
@@ -110,7 +110,7 @@ roomChannel.Join()
 roomChannel
   .Push("reply_test", payload)
   .Receive(
-    Reply.Status.Ok, 
+    ReplyStatus.Ok, 
     reply => testOkReply = reply
   );
 ```
