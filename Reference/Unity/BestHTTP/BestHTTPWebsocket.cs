@@ -3,7 +3,7 @@ using Phoenix;
 using BestHTTP.WebSocket;
 
 
-namespace Networking {
+namespace Phoenix {
 
     public sealed class BestHTTPWebsocketFactory : IWebsocketFactory {
 
@@ -27,7 +27,7 @@ namespace Networking {
 
         public WebSocket ws { get; private set; }
 
-        public WebsocketState state {
+        public WebsocketState State {
             get {
                 return ws.State switch {
                     WebSocketStates.Connecting => WebsocketState.Connecting,
