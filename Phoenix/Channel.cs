@@ -223,25 +223,12 @@ namespace Phoenix
                 .Remove(subscription) ?? false;
         }
 
-        public bool Off(Message.InBoundEvent @event)
-        {
-            return Off(@event.Serialized());
-        }
+        public bool Off(Message.InBoundEvent @event) => Off(@event.Serialized());
+        public bool Off(Message.OutBoundEvent @event) => Off(@event.Serialized());
 
-        public bool Off(Message.OutBoundEvent @event)
-        {
-            return Off(@event.Serialized());
-        }
+        public bool Off(string anyEvent) => _bindings.Remove(anyEvent);
 
-        public bool Off(string anyEvent)
-        {
-            return _bindings.Remove(anyEvent);
-        }
-
-        internal bool CanPush()
-        {
-            return Socket.IsConnected() && IsJoined();
-        }
+        internal bool CanPush() => Socket.IsConnected() && IsJoined();
 
         public Push Push(string @event, object payload = null, TimeSpan? timeout = null)
         {

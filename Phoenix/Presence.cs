@@ -58,9 +58,7 @@ namespace Phoenix
         private string _joinRef;
 
         public OnJoinDelegate OnJoin;
-
         public OnLeaveDelegate OnLeave;
-
         public OnSyncDelegate OnSync;
 
         public State State = new State();
