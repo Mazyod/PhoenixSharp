@@ -61,9 +61,12 @@ namespace Phoenix
                 callback(_receivedResp.Value);
             }
 
-            var callbacks = _recHooks.GetValueOrDefault(status) ?? (
-                _recHooks[status] = new List<Action<Reply>>()
-            );
+            if (!_recHooks.TryGetValue(status, out var callbacks))
+            {
+                callbacks = new List<Action<Reply>>();
+                _recHooks[status] = callbacks;
+            }
+
             callbacks.Add(callback);
 
             return this;
@@ -80,14 +83,12 @@ namespace Phoenix
 
         private void MatchReceive(Reply? reply)
         {
-            if (!reply.HasValue)
+            if (!reply.HasValue || !_recHooks.TryGetValue(reply.Value.ReplyStatus, out var callbacks))
             {
                 return;
             }
 
-            _recHooks
-                .GetValueOrDefault(reply.Value.ReplyStatus)?
-                .ForEach(callback => callback(reply.Value));
+            callbacks.ForEach(callback => callback(reply.Value));
         }
 
         private void CancelRefEvent()

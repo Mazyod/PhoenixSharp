@@ -199,8 +199,11 @@ namespace Phoenix
                 Callback = callback
             };
 
-            var subscriptions = _bindings.GetValueOrDefault(anyEvent)
-                                ?? (_bindings[anyEvent] = new List<ChannelSubscription>());
+            if (!_bindings.TryGetValue(anyEvent, out var subscriptions))
+            {
+                subscriptions = new List<ChannelSubscription>();
+                _bindings[anyEvent] = subscriptions;
+            }
 
             subscriptions.Add(subscription);
 
@@ -218,9 +221,8 @@ namespace Phoenix
 
         public bool Off(ChannelSubscription subscription)
         {
-            return _bindings
-                .GetValueOrDefault(subscription.Event)?
-                .Remove(subscription) ?? false;
+            return _bindings.TryGetValue(subscription.Event, out var subscriptions) &&
+                   subscriptions.Remove(subscription);
         }
 
         public bool Off(Message.InBoundEvent @event) => Off(@event.Serialized());
@@ -342,7 +344,10 @@ namespace Phoenix
                 throw new Exception("channel onMessage callbacks must return payload, modified or unmodified");
             }
 
-            var eventBindings = _bindings.GetValueOrDefault(message.Event);
+            if (!_bindings.TryGetValue(message.Event, out var eventBindings))
+            {
+                return;
+            }
 
             eventBindings?.ForEach(subscription =>
             {

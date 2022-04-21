@@ -142,7 +142,7 @@ namespace Phoenix
                 var found = currentState.TryGetValue(key, out var currentPresence);
                 if (found)
                 {
-                    var newRefs = newPresence.Metas.Select(m => m["phx_ref"]).ToHashSet();
+                    var newRefs = newPresence.Metas.Select(m => m["phx_ref"]).ToList();
                     var curRefs = currentPresence.Metas.Select(m => m["phx_ref"]).ToList();
                     var joinedMetas = newPresence.Metas.Where(m => curRefs.IndexOf(m["phx_ref"]) < 0).ToList();
                     var leftMetas = currentPresence.Metas.Where(m => !newRefs.Contains(m["phx_ref"])).ToList();
