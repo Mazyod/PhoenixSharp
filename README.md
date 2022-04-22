@@ -1,7 +1,7 @@
 
 ![Imgur](http://i.imgur.com/B8ClrWe.png)
 
-[![.NET](https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml/badge.svg)](https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml)
+[![.NET](https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml/badge.svg)](https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml) &nbsp; ![net](https://img.shields.io/badge/version-netstandard%202.0-blue)
 
 A C# Phoenix Channels client. Unity Compatible. Proudly powering [Dama King][level3-website].
 
