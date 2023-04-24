@@ -355,7 +355,7 @@ namespace Phoenix
         private void SendHeartbeat()
         {
             if (!Opts.HeartbeatInterval.HasValue
-                || _pendingHeartbeatRef != null && !IsConnected())
+                || (_pendingHeartbeatRef != null && !IsConnected()))
             {
                 return;
             }

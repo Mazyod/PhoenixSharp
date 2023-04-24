@@ -313,7 +313,11 @@ namespace PhoenixTests
             // SetUp
 
             var onOpenCount = 0;
-            void OnOpenCallback() => onOpenCount++;
+
+            void OnOpenCallback()
+            {
+                onOpenCount++;
+            }
 
             // connecting is synchronous as implemented above
             var socketAddress = $"ws://{Host}/socket";

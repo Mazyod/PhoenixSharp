@@ -50,7 +50,7 @@ namespace Phoenix
         {
             Topic = topic;
             Socket = socket;
-            
+
             _timeout = socket.Opts.Timeout;
             _joinPush = new Push(
                 this,
@@ -223,12 +223,25 @@ namespace Phoenix
                    subscriptions.Remove(subscription);
         }
 
-        public bool Off(Message.InBoundEvent @event) => Off(@event.Serialized());
-        public bool Off(Message.OutBoundEvent @event) => Off(@event.Serialized());
+        public bool Off(Message.InBoundEvent @event)
+        {
+            return Off(@event.Serialized());
+        }
 
-        public bool Off(string anyEvent) => _bindings.Remove(anyEvent);
+        public bool Off(Message.OutBoundEvent @event)
+        {
+            return Off(@event.Serialized());
+        }
 
-        internal bool CanPush() => Socket.IsConnected() && IsJoined();
+        public bool Off(string anyEvent)
+        {
+            return _bindings.Remove(anyEvent);
+        }
+
+        internal bool CanPush()
+        {
+            return Socket.IsConnected() && IsJoined();
+        }
 
         public Push Push(string @event, object payload = null, TimeSpan? timeout = null)
         {
@@ -239,7 +252,7 @@ namespace Phoenix
                     + " Use channel.join() before pushing events"
                 );
             }
-            
+
             var pushEvent = new Push(
                 this,
                 @event,

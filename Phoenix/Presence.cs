@@ -42,8 +42,8 @@ namespace Phoenix
 
     public sealed class PresenceMeta
     {
-        public string PhxRef;
         public JsonBox Payload;
+        public string PhxRef;
     }
 
     /**
@@ -89,7 +89,7 @@ namespace Phoenix
 
                 State = _pendingDiffs.Aggregate(
                     State,
-                    (state, diff) 
+                    (state, diff)
                         => SyncDiff(new State(state), diff, OnJoin, OnLeave)
                 );
 
