@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using Phoenix;
 using PhoenixTests.WebSocketImpl;
@@ -9,68 +10,63 @@ namespace PhoenixTests
     [TestFixture]
     public class PresenceTests
     {
-        private static object ListByFirst(
-            KeyValuePair<string, Presence.MetadataContainer> container
+        private static PresenceMeta ListByFirst(
+            KeyValuePair<string, PresencePayload> container
         )
         {
             return container.Value.Metas.First();
         }
 
-        private static Dictionary<string, object> SampleState =>
-            new()
+        private static Dictionary<string, PresencePayload> SampleState()
+        {
+            var root = new JObject
             {
-                {
-                    "u1",
-                    new Dictionary<string, object>
-                    {
-                        {
-                            "metas", new List<Dictionary<string, object>>
-                            {
-                                new()
-                                {
-                                    {"id", 1},
-                                    {"phx_ref", "1"}
-                                }
-                            }
-                        }
-                    }
-                }
+                ["u1"] = JObject.FromObject(
+                    SamplePresencePayload(1),
+                    JsonMessageSerializer.Serializer
+                )
             };
 
-        private static Dictionary<string, object> SampleDiff(
-            Dictionary<string, object> joins = null,
-            Dictionary<string, object> leaves = null
-        )
-        {
-            return new Dictionary<string, object>
-            {
-                {
-                    "joins",
-                    joins ?? new Dictionary<string, object>()
-                },
-                {
-                    "leaves",
-                    leaves ?? new Dictionary<string, object>()
-                }
-            };
+            return root.ToObject<Dictionary<string, PresencePayload>>(
+                JsonMessageSerializer.Serializer
+            );
         }
 
-        private static Dictionary<string, List<Dictionary<string, object>>> SampleMetaContainer(uint id)
+        private static Presence.Diff SampleDiff(
+            Dictionary<string, PresencePayload> joins = null,
+            Dictionary<string, PresencePayload> leaves = null
+        )
         {
-            return new Dictionary<string, List<Dictionary<string, object>>>
+            var root = new JObject
             {
+                ["joins"] = joins == null
+                    ? new JObject()
+                    : JObject.FromObject(joins, JsonMessageSerializer.Serializer),
+                ["leaves"] = leaves == null
+                    ? new JObject()
+                    : JObject.FromObject(leaves, JsonMessageSerializer.Serializer)
+            };
+
+            return root.ToObject<Presence.Diff>(JsonMessageSerializer.Serializer);
+        }
+
+        private static PresencePayload SamplePresencePayload(uint id)
+        {
+            var root = new JObject
+            {
+                ["metas"] = new JArray
                 {
-                    "metas",
-                    new List<Dictionary<string, object>>
+                    new JObject
                     {
-                        new()
-                        {
-                            {"id", id},
-                            {"phx_ref", $"{id}"}
-                        }
+                        ["phx_ref"] = $"{id}",
+                        ["id"] = id
                     }
                 }
             };
+
+            return root.ToObject<PresencePayload>(
+                JsonMessageSerializer.Serializer
+            );
         }
 
         /**
@@ -79,15 +75,12 @@ namespace PhoenixTests
         [Test]
         public void SyncsEmptyStateTest()
         {
-            var serializer = new JsonMessageSerializer();
-            var newState = serializer.MapPayload<
-                Dictionary<string, Presence.MetadataContainer>
-            >(SampleState);
+            var newState = SampleState();
             // sanity check the serializer works
             Assert.AreEqual(1, newState["u1"].Metas.Count);
 
-            var state = new Dictionary<string, Presence.MetadataContainer>();
-            var stateBefore = new Dictionary<string, Presence.MetadataContainer>(state);
+            var state = new Dictionary<string, PresencePayload>();
+            var stateBefore = new Dictionary<string, PresencePayload>(state);
             Presence.SyncState(state, newState);
             CollectionAssert.AreEqual(stateBefore, state);
 
@@ -104,8 +97,8 @@ namespace PhoenixTests
 
             var presence = new Presence(channel);
 
-            var user1 = SampleMetaContainer(1);
-            var user2 = SampleMetaContainer(2);
+            var user1 = SamplePresencePayload(1);
+            var user2 = SamplePresencePayload(2);
 
             var newState = new Dictionary<string, object>
             {
@@ -115,23 +108,23 @@ namespace PhoenixTests
 
             var stateMessage = new Message(
                 @event: "presence_state",
-                payload: newState
+                payload: JsonBox.Serialize(newState)
             );
             channel.Trigger(stateMessage);
 
-            var presenceList = presence.List(ListByFirst)
-                .Select(o => o as Dictionary<string, object>)
+            var presenceList = presence.State
+                .Select(ListByFirst)
                 .ToList();
 
             Assert.AreEqual(2, presenceList.Count);
-            Assert.AreEqual(1, presenceList[0]["id"]);
-            Assert.AreEqual("1", presenceList[0]["phx_ref"]);
-            Assert.AreEqual(2, presenceList[1]["id"]);
-            Assert.AreEqual("2", presenceList[1]["phx_ref"]);
+            Assert.AreEqual(1, presenceList[0].Payload.Element.Value<int>("id"));
+            Assert.AreEqual("1", presenceList[0].PhxRef);
+            Assert.AreEqual(2, presenceList[1].Payload.Element.Value<int>("id"));
+            Assert.AreEqual("2", presenceList[1].PhxRef);
 
             var diffMessage = new Message(
                 @event: "presence_diff",
-                payload: new Dictionary<string, object>
+                payload: JsonBox.Serialize(new Dictionary<string, object>
                 {
                     {"joins", new Dictionary<string, object>()},
                     {
@@ -140,16 +133,16 @@ namespace PhoenixTests
                             {"u1", user1}
                         }
                     }
-                }
+                })
             );
             channel.Trigger(diffMessage);
-            presenceList = presence.List(ListByFirst)
-                .Select(o => o as Dictionary<string, object>)
+            presenceList = presence.State
+                .Select(ListByFirst)
                 .ToList();
 
             Assert.AreEqual(1, presenceList.Count);
-            Assert.AreEqual(2, presenceList[0]["id"]);
-            Assert.AreEqual("2", presenceList[0]["phx_ref"]);
+            Assert.AreEqual(2, presenceList[0].Payload.Element.Value<int>("id"));
+            Assert.AreEqual("2", presenceList[0].PhxRef);
         }
 
         [Test]
@@ -169,17 +162,17 @@ namespace PhoenixTests
             presence.OnLeave += (userId, _, _) => usersLeft.Add(userId);
 
             // new connection
-            var user1 = SampleMetaContainer(1);
-            var user2 = SampleMetaContainer(2);
-            var user3 = SampleMetaContainer(3);
+            var user1 = SamplePresencePayload(1);
+            var user2 = SamplePresencePayload(2);
+            var user3 = SamplePresencePayload(3);
 
-            var newState = new Dictionary<string, object>
+            var newState = new Dictionary<string, PresencePayload>
             {
                 {"u1", user1},
                 {"u2", user2}
             };
 
-            var leaves = new Dictionary<string, object>
+            var leaves = new Dictionary<string, PresencePayload>
             {
                 {"u2", user2}
             };
@@ -190,24 +183,24 @@ namespace PhoenixTests
 
             var diffMessage = new Message(
                 @event: "presence_diff",
-                payload: presenceDiff
+                payload: JsonBox.Serialize(presenceDiff)
             );
             channel.Trigger(diffMessage);
 
-            CollectionAssert.IsEmpty(presence.List(ListByFirst));
+            CollectionAssert.IsEmpty(presence.State.Select(ListByFirst));
             // pendingDiffs is private, can't assert on it
 
             var stateMessage = new Message(
                 @event: "presence_state",
-                payload: newState
+                payload: JsonBox.Serialize(newState)
             );
             channel.Trigger(stateMessage);
 
             CollectionAssert.AreEqual(new[] {"u2"}, usersLeft.ToArray());
 
-            var presenceList = presence.List(ListByFirst).ToArray();
+            var presenceList = presence.State.Select(ListByFirst).ToArray();
             Assert.AreEqual(1, presenceList.Length);
-            Assert.AreEqual(1, (presenceList[0] as Dictionary<string, object>)!["id"]);
+            Assert.AreEqual(1, presenceList[0].Payload.Element.Value<int>("id"));
             // pendingDiffs is private, can't assert on it
             CollectionAssert.AreEqual(new[] {"u1", "u2"}, usersJoined.ToArray());
 
@@ -219,7 +212,7 @@ namespace PhoenixTests
             Assert.AreEqual(true, presence.InPendingSyncState());
 
             presenceDiff = SampleDiff(
-                leaves: new Dictionary<string, object>
+                leaves: new Dictionary<string, PresencePayload>
                 {
                     {"u1", user1}
                 }
@@ -227,27 +220,27 @@ namespace PhoenixTests
 
             diffMessage = new Message(
                 @event: "presence_diff",
-                payload: presenceDiff
+                payload: JsonBox.Serialize(presenceDiff)
             );
             channel.Trigger(diffMessage);
 
-            presenceList = presence.List(ListByFirst).ToArray();
+            presenceList = presence.State.Select(ListByFirst).ToArray();
             Assert.AreEqual(1, presenceList.Length);
-            Assert.AreEqual(1, (presenceList[0] as Dictionary<string, object>)!["id"]);
+            Assert.AreEqual(1, presenceList[0].Payload.Element.Value<int>("id"));
 
             stateMessage = new Message(
                 @event: "presence_state",
-                payload: new Dictionary<string, object>
+                payload: JsonBox.Serialize(new Dictionary<string, object>
                 {
                     {"u1", user1},
                     {"u3", user3}
-                }
+                })
             );
             channel.Trigger(stateMessage);
 
-            presenceList = presence.List(ListByFirst).ToArray();
+            presenceList = presence.State.Select(ListByFirst).ToArray();
             Assert.AreEqual(1, presenceList.Length);
-            Assert.AreEqual(3, (presenceList[0] as Dictionary<string, object>)!["id"]);
+            Assert.AreEqual(3, presenceList[0].Payload.Element.Value<int>("id"));
         }
 
         /**
@@ -257,7 +250,7 @@ namespace PhoenixTests
         public void SerializationTest()
         {
             var message = MessageSerializationTests.SampleMessage;
-            message.Payload = SampleState;
+            message.Payload = JsonBox.Serialize(SampleState());
 
             // serialize
             var serializer = new JsonMessageSerializer();
@@ -265,14 +258,12 @@ namespace PhoenixTests
             Assert.IsTrue(serialized.Contains("u1"));
 
             // deserialize
-            var deserialized = serializer.Deserialize(serialized);
-            var payload = serializer.MapPayload<
-                Dictionary<string, Presence.MetadataContainer>
-            >(deserialized.Payload);
-            var userState = (SampleState["u1"] as Dictionary<string, object>)!;
-            var rawMetas = userState["metas"] as List<Dictionary<string, object>>;
+            var deserialized = serializer.Deserialize<Message>(serialized);
+            var payload = deserialized.Payload.Deserialize<Dictionary<string, PresencePayload>>();
 
-            CollectionAssert.AreEqual(rawMetas, payload["u1"].Metas);
+            Assert.IsNotEmpty(payload["u1"].Metas);
+            Assert.AreEqual(1, payload["u1"].Metas[0].Payload.Element.Value<int>("id"));
+            Assert.AreEqual("1", payload["u1"].Metas[0].PhxRef);
         }
     }
 }

@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using ParamsType = System.Collections.Generic.Dictionary<string, object>;
 using SubscriptionTable = System.Collections.Generic.Dictionary<
     string, System.Collections.Generic.List<Phoenix.ChannelSubscription>>;
 
@@ -47,16 +46,16 @@ namespace Phoenix
         public ChannelState State = ChannelState.Closed;
 
         // TODO: possibly support lazy instantiation of payload (same as Phoenix js)
-        public Channel(string topic, ParamsType @params, Socket socket)
+        public Channel(string topic, Dictionary<string, object> @params, Socket socket)
         {
             Topic = topic;
             Socket = socket;
-
+            
             _timeout = socket.Opts.Timeout;
             _joinPush = new Push(
                 this,
                 Message.OutBoundEvent.Join.Serialized(),
-                () => @params,
+                () => JsonBox.Serialize(@params),
                 _timeout
             );
 
@@ -212,11 +211,10 @@ namespace Phoenix
 
         public ChannelSubscription On<T>(string anyEvent, Action<T> callback)
         {
-            return On(anyEvent, message =>
-            {
-                var serializer = Socket.Opts.MessageSerializer;
-                callback(serializer.MapPayload<T>(message.Payload));
-            });
+            return On(
+                anyEvent,
+                message => callback(message.Payload.Deserialize<T>())
+            );
         }
 
         public bool Off(ChannelSubscription subscription)
@@ -241,8 +239,14 @@ namespace Phoenix
                     + " Use channel.join() before pushing events"
                 );
             }
+            
+            var pushEvent = new Push(
+                this,
+                @event,
+                () => JsonBox.Serialize(payload),
+                timeout ?? _timeout
+            );
 
-            var pushEvent = new Push(this, @event, () => payload, timeout ?? _timeout);
             if (CanPush())
             {
                 pushEvent.Send();
@@ -289,7 +293,7 @@ namespace Phoenix
         }
 
         // overrideable message hook
-        public virtual object OnMessage(Message message)
+        public virtual JsonBox OnMessage(Message message)
         {
             return message.Payload;
         }

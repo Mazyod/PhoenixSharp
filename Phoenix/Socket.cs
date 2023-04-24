@@ -395,7 +395,7 @@ namespace Phoenix
 
         private void OnConnMessage(IWebsocket websocket, string rawMessage)
         {
-            var message = Opts.MessageSerializer.Deserialize(rawMessage);
+            var message = Opts.MessageSerializer.Deserialize<Message>(rawMessage);
 
             if (message.Ref != null && message.Ref == _pendingHeartbeatRef && Opts.HeartbeatInterval.HasValue)
             {
