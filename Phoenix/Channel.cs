@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using ParamsType = System.Collections.Generic.Dictionary<string, object>;
 using SubscriptionTable = System.Collections.Generic.Dictionary<
     string, System.Collections.Generic.List<Phoenix.ChannelSubscription>>;
 
@@ -47,7 +46,7 @@ namespace Phoenix
         public ChannelState State = ChannelState.Closed;
 
         // TODO: possibly support lazy instantiation of payload (same as Phoenix js)
-        public Channel(string topic, ParamsType @params, Socket socket)
+        public Channel(string topic, Dictionary<string, object> @params, Socket socket)
         {
             Topic = topic;
             Socket = socket;
@@ -56,7 +55,7 @@ namespace Phoenix
             _joinPush = new Push(
                 this,
                 Message.OutBoundEvent.Join.Serialized(),
-                () => @params,
+                () => socket.Opts.MessageSerializer.Box(@params),
                 _timeout
             );
 
@@ -212,11 +211,10 @@ namespace Phoenix
 
         public ChannelSubscription On<T>(string anyEvent, Action<T> callback)
         {
-            return On(anyEvent, message =>
-            {
-                var serializer = Socket.Opts.MessageSerializer;
-                callback(serializer.MapPayload<T>(message.Payload));
-            });
+            return On(
+                anyEvent,
+                message => callback(message.Payload.Unbox<T>())
+            );
         }
 
         public bool Off(ChannelSubscription subscription)
@@ -225,12 +223,25 @@ namespace Phoenix
                    subscriptions.Remove(subscription);
         }
 
-        public bool Off(Message.InBoundEvent @event) => Off(@event.Serialized());
-        public bool Off(Message.OutBoundEvent @event) => Off(@event.Serialized());
+        public bool Off(Message.InBoundEvent @event)
+        {
+            return Off(@event.Serialized());
+        }
 
-        public bool Off(string anyEvent) => _bindings.Remove(anyEvent);
+        public bool Off(Message.OutBoundEvent @event)
+        {
+            return Off(@event.Serialized());
+        }
 
-        internal bool CanPush() => Socket.IsConnected() && IsJoined();
+        public bool Off(string anyEvent)
+        {
+            return _bindings.Remove(anyEvent);
+        }
+
+        internal bool CanPush()
+        {
+            return Socket.IsConnected() && IsJoined();
+        }
 
         public Push Push(string @event, object payload = null, TimeSpan? timeout = null)
         {
@@ -242,7 +253,14 @@ namespace Phoenix
                 );
             }
 
-            var pushEvent = new Push(this, @event, () => payload, timeout ?? _timeout);
+            var serializer = Socket.Opts.MessageSerializer;
+            var pushEvent = new Push(
+                this,
+                @event,
+                () => serializer.Box(payload),
+                timeout ?? _timeout
+            );
+
             if (CanPush())
             {
                 pushEvent.Send();
@@ -289,7 +307,7 @@ namespace Phoenix
         }
 
         // overrideable message hook
-        public virtual object OnMessage(Message message)
+        public virtual IJsonBox OnMessage(Message message)
         {
             return message.Payload;
         }

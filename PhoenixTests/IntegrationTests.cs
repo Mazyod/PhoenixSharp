@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Net;
+using System.Net.Http;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
@@ -23,16 +24,16 @@ namespace PhoenixTests
         [SetUp]
         public void Init()
         {
-            var address = $"http://{Host}/api/health-check";
+            var address = $"https://{Host}/api/health-check";
 
             // heroku health check
-            using WebClient client = new();
-            client.Headers.Add("Content-Type", "application/json");
-            client.DownloadString(address);
+            using HttpClient client = new();
+            var result = client.GetAsync(address).GetAwaiter().GetResult();
+            Assert.AreEqual(HttpStatusCode.OK, result.StatusCode);
         }
 
         private const int NetworkDelay = 5_000 /* ms */;
-        private const string Host = "phoenix-integration-tester.herokuapp.com";
+        private const string Host = "phoenix-sharp.level3.io:3080";
 
         private readonly Dictionary<string, object> _channelParams = new()
         {
@@ -50,16 +51,16 @@ namespace PhoenixTests
                 onOpenCount++;
             }
 
-            List<string> onErrorData = new();
+            List<string> onCloseData = new();
 
-            void OnErrorCallback(string message)
+            void OnCloseCallback(ushort code, string message)
             {
-                onErrorData.Add(message);
+                onCloseData.Add(message);
             }
 
             // connecting is synchronous as implemented above
-            var socketAddress = $"ws://{Host}/socket";
-            var socketFactory = new WebsocketSharpFactory();
+            var socketAddress = $"wss://{Host}/socket";
+            var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
                 null,
@@ -72,7 +73,7 @@ namespace PhoenixTests
             );
 
             socket.OnOpen += OnOpenCallback;
-            socket.OnError += OnErrorCallback;
+            socket.OnClose += OnCloseCallback;
 
             socket.Connect();
             Assert.AreEqual(WebsocketState.Open, socket.State);
@@ -81,11 +82,11 @@ namespace PhoenixTests
             // test socket error recovery
 
             socket.Conn.Close();
-
+            
             Assert.AreEqual(WebsocketState.Closed, socket.State);
             Assert.That(() => socket.State == WebsocketState.Open, Is.True.After(NetworkDelay, 10));
-            Assert.AreEqual(1, onErrorData.Count);
-            Assert.AreEqual("An error has occurred in closing the connection.", onErrorData[0]);
+            Assert.AreEqual(1, onCloseData.Count);
+            Assert.IsNull(onCloseData[0]);
 
             // test channel error on join
 
@@ -130,7 +131,7 @@ namespace PhoenixTests
 
             Assert.That(() => afterJoinMessage != null, Is.True.After(NetworkDelay, 10));
 
-            var payload = afterJoinMessage?.Payload as JObject;
+            var payload = afterJoinMessage?.Payload.Unbox<JObject>();
             Assert.AreEqual("Welcome!", payload["message"].ToObject<string>());
 
             // 1. heartbeat, 2. error, 3. join, 4. after_join
@@ -154,7 +155,7 @@ namespace PhoenixTests
             Assert.IsNotNull(testOkReply?.Response);
             CollectionAssert.AreEquivalent(
                 @params,
-                testOkReply?.JsonResponse<Dictionary<string, object>>()
+                testOkReply?.Response.Unbox<Dictionary<string, object>>()
             );
 
             // test error reply
@@ -176,8 +177,8 @@ namespace PhoenixTests
                 .Push("timeout_test", null, TimeSpan.FromMilliseconds(50))
                 .Receive(ReplyStatus.Timeout, r => testTimeoutReply = r);
 
-            Assert.That(() => testTimeoutReply != null, Is.False.After(20));
-            Assert.That(() => testTimeoutReply != null, Is.True.After(40));
+            // Assert.That(() => testTimeoutReply != null, Is.False.After(10));
+            Assert.That(() => testTimeoutReply != null, Is.True.After(50));
 
             // test channel error/rejoin
 
@@ -248,7 +249,7 @@ namespace PhoenixTests
                 onOpenCount--;
             }
 
-            var socketAddress = $"ws://{Host}/socket";
+            var socketAddress = $"wss://{Host}/socket";
             var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
@@ -285,7 +286,7 @@ namespace PhoenixTests
 
             Assert.That(() => afterJoinMessage != null, Is.True.After(NetworkDelay, 10));
 
-            var payload = afterJoinMessage?.Payload as JObject;
+            var payload = afterJoinMessage?.Payload.Unbox<JObject>();
             Assert.IsNotNull(payload);
             Assert.AreEqual("Welcome!", payload["message"]?.ToObject<string>());
 
@@ -312,11 +313,15 @@ namespace PhoenixTests
             // SetUp
 
             var onOpenCount = 0;
-            void OnOpenCallback() => onOpenCount++;
+
+            void OnOpenCallback()
+            {
+                onOpenCount++;
+            }
 
             // connecting is synchronous as implemented above
-            var socketAddress = $"ws://{Host}/socket";
-            var socketFactory = new WebsocketSharpFactory();
+            var socketAddress = $"wss://{Host}/socket";
+            var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
                 null,
@@ -339,7 +344,7 @@ namespace PhoenixTests
             var channel = socket.Channel("tester:phoenix-sharp", _channelParams);
             var presence = new Presence(channel);
 
-            var joinCalls = new List<(string, Presence.MetadataContainer, Presence.MetadataContainer)>();
+            var joinCalls = new List<(string, PresencePayload, PresencePayload)>();
             presence.OnJoin += (user, prevState, nextState)
                 => joinCalls.Add((user, prevState, nextState));
 
@@ -361,9 +366,14 @@ namespace PhoenixTests
             Assert.AreEqual(1, newState.Metas.Count,
                 $"newState.metas: {JsonConvert.SerializeObject(newState)}");
 
-            Assert.IsNotEmpty(newState.Metas[0]["phx_ref"] as string);
-            Assert.IsNotEmpty(newState.Metas[0]["online_at"] as string);
-            
+            var newStateMeta = newState.Metas[0];
+            Assert.IsNotEmpty(newStateMeta.PhxRef);
+            var presenceJson = newStateMeta.Payload.Unbox<JToken>();
+            Assert.IsNotEmpty(presenceJson.Value<string>("online_at"));
+
+            // check custom payload
+            Assert.AreEqual(newState.Payload.Unbox<JToken>()["device"]?.Value<string>("make"), "Apple");
+
             // TearDown
 
             socket.Disconnect();

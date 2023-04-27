@@ -199,8 +199,9 @@ namespace Phoenix
 
         private void Teardown(Action callback = null, ushort? code = null, string reason = null)
         {
-            if (Conn == null)
+            if (Conn == null || Conn.State == WebsocketState.Closed)
             {
+                Conn = null;
                 callback?.Invoke();
                 return;
             }
@@ -221,10 +222,10 @@ namespace Phoenix
 
             WaitForSocketClosed(() =>
             {
-                if (Conn != null) // TODO: not sure if this is important at all?
-                    // this.conn.onclose = function (){ } // noop
-
+                if (Conn != null)
                 {
+                    // TODO: not sure if this is important at all?
+                    // this.conn.onclose = function (){ } // noop
                     Conn = null;
                 }
 
@@ -355,7 +356,7 @@ namespace Phoenix
         private void SendHeartbeat()
         {
             if (!Opts.HeartbeatInterval.HasValue
-                || _pendingHeartbeatRef != null && !IsConnected())
+                || (_pendingHeartbeatRef != null && !IsConnected()))
             {
                 return;
             }
@@ -373,7 +374,7 @@ namespace Phoenix
             );
         }
 
-        private void AbnormalClose(string reason)
+        internal void AbnormalClose(string reason)
         {
             _closeWasClean = false;
             if (IsConnected())
@@ -395,7 +396,7 @@ namespace Phoenix
 
         private void OnConnMessage(IWebsocket websocket, string rawMessage)
         {
-            var message = Opts.MessageSerializer.Deserialize(rawMessage);
+            var message = Opts.MessageSerializer.Deserialize<Message>(rawMessage);
 
             if (message.Ref != null && message.Ref == _pendingHeartbeatRef && Opts.HeartbeatInterval.HasValue)
             {

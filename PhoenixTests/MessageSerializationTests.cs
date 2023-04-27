@@ -13,7 +13,7 @@ namespace PhoenixTests
                 "phoenix-test",
                 Message.OutBoundEvent.Join.Serialized(),
                 @ref: "123",
-                payload: new Dictionary<string, object>
+                payload: JsonBox.Serialize(new Dictionary<string, object>
                 {
                     {"some key", 12},
                     {
@@ -22,7 +22,7 @@ namespace PhoenixTests
                             {"nested", "value"}
                         }
                     }
-                },
+                }),
                 joinRef: "456"
             );
 
@@ -31,7 +31,7 @@ namespace PhoenixTests
                 "phoenix-test",
                 Message.InBoundEvent.Reply.Serialized(),
                 @ref: "123",
-                payload: new Dictionary<string, object>
+                payload: JsonBox.Serialize(new Dictionary<string, object>
                 {
                     {"status", "ok"},
                     {
@@ -40,7 +40,7 @@ namespace PhoenixTests
                             {"some_key", 42}
                         }
                     }
-                },
+                }),
                 joinRef: "456"
             );
 
@@ -74,7 +74,7 @@ namespace PhoenixTests
         {
             var serializer = new JsonMessageSerializer();
             var serialized = serializer.Serialize(SampleMessage);
-            var deserialized = serializer.Deserialize(serialized);
+            var deserialized = serializer.Deserialize<Message>(serialized);
             // comparing payloads is tricky
             var deserializedNoPayload = deserialized;
             deserializedNoPayload.Payload = null;
@@ -84,19 +84,19 @@ namespace PhoenixTests
 
             Assert.AreEqual(message, deserializedNoPayload);
 
-            var payloadObject = deserialized.JsonPayload<JObject>();
+            var payloadObject = deserialized.Payload.Unbox<JObject>();
             Assert.IsNotNull(payloadObject);
             Assert.IsNotNull(payloadObject["another key"]);
             Assert.IsNotNull(payloadObject["another key"]["nested"]);
             Assert.AreEqual("value", payloadObject["another key"]["nested"].ToObject<string>());
-            Assert.IsNull(serializer.MapPayload<Reply>(deserialized.Payload).Status);
+            Assert.IsNull(deserialized.Payload.Unbox<Reply>().Status);
         }
 
         [Test]
         public void NullJoinRefTest()
         {
             var serializer = new JsonMessageSerializer();
-            var message = serializer.Deserialize(@"[null, null, null, null, null]");
+            var message = serializer.Deserialize<Message>(@"[null, null, null, null, null]");
             Assert.IsNull(message.JoinRef);
         }
 
@@ -120,7 +120,7 @@ namespace PhoenixTests
         {
             var serializer = new JsonMessageSerializer();
             var serialized = serializer.Serialize(ReplyMessage);
-            var deserialized = serializer.Deserialize(serialized);
+            var deserialized = serializer.Deserialize<Message>(serialized);
             // comparing payloads is tricky
             var deserializedNoPayload = deserialized;
             deserializedNoPayload.Payload = null;
@@ -129,13 +129,13 @@ namespace PhoenixTests
             message.Payload = null;
 
             Assert.AreEqual(message, deserializedNoPayload);
-            Assert.IsInstanceOf(typeof(JObject), deserialized.Payload);
+            Assert.IsInstanceOf(typeof(JObject), deserialized.Payload.Unbox<JObject>());
 
-            var reply = serializer.MapReply(deserialized.Payload);
+            var reply = deserialized.Payload.Unbox<Reply?>();
             Assert.IsNotNull(reply);
             Assert.AreEqual("ok", reply.Value.Status);
 
-            var response = reply.Value.JsonResponse<JObject>();
+            var response = reply.Value.Response.Unbox<JObject>();
             Assert.AreEqual(42, response.Value<int>("some_key"));
         }
     }
