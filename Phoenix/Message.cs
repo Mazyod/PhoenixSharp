@@ -3,10 +3,17 @@ using System.Runtime.Serialization;
 
 namespace Phoenix
 {
+    public interface IJsonBox
+    {
+        T Unbox<T>();
+    }
+
     public interface IMessageSerializer
     {
         string Serialize(object element);
         T Deserialize<T>(string message);
+
+        IJsonBox Box(object element);
     }
 
     /**
@@ -18,7 +25,7 @@ namespace Phoenix
         public const string ReplyEventPrefix = "chan_reply_";
 
         public readonly string Status;
-        public readonly JsonBox Response;
+        public readonly IJsonBox Response;
 
         [IgnoreDataMember]
         public ReplyStatus ReplyStatus
@@ -40,7 +47,7 @@ namespace Phoenix
             }
         }
 
-        public Reply(string status, JsonBox response)
+        public Reply(string status, IJsonBox response)
         {
             Status = status;
             Response = response;
@@ -82,13 +89,13 @@ namespace Phoenix
         // unfortunate mutation of the original message
         public string Event;
         public readonly string Ref;
-        public JsonBox Payload;
+        public IJsonBox Payload;
         public string JoinRef;
 
         public Message(
             string topic = null,
             string @event = null,
-            JsonBox payload = null,
+            IJsonBox payload = null,
             string @ref = null,
             string joinRef = null
         )

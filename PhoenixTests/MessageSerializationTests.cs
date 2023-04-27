@@ -84,12 +84,12 @@ namespace PhoenixTests
 
             Assert.AreEqual(message, deserializedNoPayload);
 
-            var payloadObject = deserialized.Payload.Deserialize<JObject>();
+            var payloadObject = deserialized.Payload.Unbox<JObject>();
             Assert.IsNotNull(payloadObject);
             Assert.IsNotNull(payloadObject["another key"]);
             Assert.IsNotNull(payloadObject["another key"]["nested"]);
             Assert.AreEqual("value", payloadObject["another key"]["nested"].ToObject<string>());
-            Assert.IsNull(deserialized.Payload.Deserialize<Reply>().Status);
+            Assert.IsNull(deserialized.Payload.Unbox<Reply>().Status);
         }
 
         [Test]
@@ -129,13 +129,13 @@ namespace PhoenixTests
             message.Payload = null;
 
             Assert.AreEqual(message, deserializedNoPayload);
-            Assert.IsInstanceOf(typeof(JObject), deserialized.Payload.Element);
+            Assert.IsInstanceOf(typeof(JObject), deserialized.Payload.Unbox<JObject>());
 
-            var reply = deserialized.Payload.Deserialize<Reply?>();
+            var reply = deserialized.Payload.Unbox<Reply?>();
             Assert.IsNotNull(reply);
             Assert.AreEqual("ok", reply.Value.Status);
 
-            var response = reply.Value.Response.Deserialize<JObject>();
+            var response = reply.Value.Response.Unbox<JObject>();
             Assert.AreEqual(42, response.Value<int>("some_key"));
         }
     }

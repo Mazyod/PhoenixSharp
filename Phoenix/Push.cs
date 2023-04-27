@@ -9,7 +9,7 @@ namespace Phoenix
     {
         private readonly Channel _channel;
         private readonly string _event;
-        private readonly Func<JsonBox> _payload;
+        private readonly Func<IJsonBox> _payload;
 
         private readonly StatusHookTable _recHooks = new StatusHookTable();
         private IDelayedExecution _delayedExecution;
@@ -21,7 +21,7 @@ namespace Phoenix
         internal string Ref;
 
         // define a constructor that takes a channel, event, payload, and timeout
-        public Push(Channel channel, string @event, Func<JsonBox> payload, TimeSpan timeout)
+        public Push(Channel channel, string @event, Func<IJsonBox> payload, TimeSpan timeout)
         {
             _channel = channel;
             _event = @event;
@@ -117,7 +117,7 @@ namespace Phoenix
             {
                 CancelRefEvent();
                 CancelTimeout();
-                _receivedResp = message.Payload.Deserialize<Reply?>();
+                _receivedResp = message.Payload.Unbox<Reply?>();
                 MatchReceive(_receivedResp);
             });
 
@@ -132,9 +132,11 @@ namespace Phoenix
 
         internal void Trigger(ReplyStatus status)
         {
+            var serializer = _channel.Socket.Opts.MessageSerializer;
+
             _channel.Trigger(new Message(
                 @event: _refEvent,
-                payload: JsonBox.Serialize(new Dictionary<string, object>
+                payload: serializer.Box(new Dictionary<string, object>
                     {
                         {"status", status.Serialized()}
                     }

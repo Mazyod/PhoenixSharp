@@ -131,7 +131,7 @@ namespace PhoenixTests
 
             Assert.That(() => afterJoinMessage != null, Is.True.After(NetworkDelay, 10));
 
-            var payload = afterJoinMessage?.Payload.Element;
+            var payload = afterJoinMessage?.Payload.Unbox<JObject>();
             Assert.AreEqual("Welcome!", payload["message"].ToObject<string>());
 
             // 1. heartbeat, 2. error, 3. join, 4. after_join
@@ -155,7 +155,7 @@ namespace PhoenixTests
             Assert.IsNotNull(testOkReply?.Response);
             CollectionAssert.AreEquivalent(
                 @params,
-                testOkReply?.Response.Deserialize<Dictionary<string, object>>()
+                testOkReply?.Response.Unbox<Dictionary<string, object>>()
             );
 
             // test error reply
@@ -286,7 +286,7 @@ namespace PhoenixTests
 
             Assert.That(() => afterJoinMessage != null, Is.True.After(NetworkDelay, 10));
 
-            var payload = afterJoinMessage?.Payload.Deserialize<JObject>();
+            var payload = afterJoinMessage?.Payload.Unbox<JObject>();
             Assert.IsNotNull(payload);
             Assert.AreEqual("Welcome!", payload["message"]?.ToObject<string>());
 

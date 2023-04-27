@@ -249,17 +249,17 @@ namespace PhoenixTests
         [Test]
         public void SerializationTest()
         {
+            var serializer = new JsonMessageSerializer();
             var message = MessageSerializationTests.SampleMessage;
-            message.Payload = JsonBox.Serialize(SampleState());
+            message.Payload = serializer.Box(SampleState());
 
             // serialize
-            var serializer = new JsonMessageSerializer();
             var serialized = serializer.Serialize(message);
             Assert.IsTrue(serialized.Contains("u1"));
 
             // deserialize
             var deserialized = serializer.Deserialize<Message>(serialized);
-            var payload = deserialized.Payload.Deserialize<Dictionary<string, PresencePayload>>();
+            var payload = deserialized.Payload.Unbox<Dictionary<string, PresencePayload>>();
 
             Assert.IsNotEmpty(payload["u1"].Metas);
             Assert.AreEqual(1, payload["u1"].Metas[0].Payload.Element.Value<int>("id"));

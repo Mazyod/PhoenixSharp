@@ -9,7 +9,7 @@ namespace Phoenix
     /**
      * An adapter for abstracting over the JSON library used.
      */
-    public sealed class JsonBox
+    public sealed class JsonBox : IJsonBox
     {
         public readonly JToken Element;
 
@@ -27,7 +27,7 @@ namespace Phoenix
             return new JsonBox(token);
         }
 
-        public T Deserialize<T>()
+        public T Unbox<T>()
         {
             return Element.ToObject<T>(JsonMessageSerializer.Serializer);
         }
@@ -59,13 +59,18 @@ namespace Phoenix
         {
             return JsonConvert.DeserializeObject<T>(json, Settings);
         }
+
+        public IJsonBox Box(object element)
+        {
+            return JsonBox.Serialize(element);
+        }
     }
 
-    internal sealed class JsonBoxConverter : JsonConverter<JsonBox>
+    internal sealed class JsonBoxConverter : JsonConverter<IJsonBox>
     {
-        public override void WriteJson(JsonWriter writer, JsonBox value, JsonSerializer serializer)
+        public override void WriteJson(JsonWriter writer, IJsonBox value, JsonSerializer serializer)
         {
-            var element = value?.Element;
+            var element = value?.Unbox<JToken>();
             if (serializer.NullValueHandling != NullValueHandling.Ignore)
             {
                 element ??= JValue.CreateNull();
@@ -74,7 +79,7 @@ namespace Phoenix
             element?.WriteTo(writer);
         }
 
-        public override JsonBox ReadJson(JsonReader reader, Type objectType, JsonBox existingValue,
+        public override IJsonBox ReadJson(JsonReader reader, Type objectType, IJsonBox existingValue,
             bool hasExistingValue, JsonSerializer serializer)
         {
             return new JsonBox(JToken.Load(reader));
@@ -87,7 +92,7 @@ namespace Phoenix
         {
             // phoenix.js: consistent with phoenix, also backwards compatible
             // e.g. if the backend has handle_in(event, {}, socket)
-            var payload = value.Payload?.Element;
+            var payload = value.Payload?.Unbox<JToken>();
             if (payload == null || payload.Type == JTokenType.Null || payload.Type == JTokenType.Undefined)
             {
                 payload = new JObject();

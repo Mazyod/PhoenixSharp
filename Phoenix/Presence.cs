@@ -83,7 +83,7 @@ namespace Phoenix
 
             channel.On(options.StateEvent, message =>
             {
-                var newState = message.Payload.Deserialize<State>();
+                var newState = message.Payload.Unbox<State>();
                 _joinRef = channel.JoinRef;
                 State = SyncState(State, newState, OnJoin, OnLeave);
 
@@ -100,7 +100,7 @@ namespace Phoenix
 
             channel.On(options.DiffEvent, message =>
             {
-                var diff = message.Payload.Deserialize<Diff>();
+                var diff = message.Payload.Unbox<Diff>();
                 if (InPendingSyncState())
                 {
                     _pendingDiffs.Add(diff);

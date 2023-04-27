@@ -55,7 +55,7 @@ namespace Phoenix
             _joinPush = new Push(
                 this,
                 Message.OutBoundEvent.Join.Serialized(),
-                () => JsonBox.Serialize(@params),
+                () => socket.Opts.MessageSerializer.Box(@params),
                 _timeout
             );
 
@@ -213,7 +213,7 @@ namespace Phoenix
         {
             return On(
                 anyEvent,
-                message => callback(message.Payload.Deserialize<T>())
+                message => callback(message.Payload.Unbox<T>())
             );
         }
 
@@ -253,10 +253,11 @@ namespace Phoenix
                 );
             }
 
+            var serializer = Socket.Opts.MessageSerializer;
             var pushEvent = new Push(
                 this,
                 @event,
-                () => JsonBox.Serialize(payload),
+                () => serializer.Box(payload),
                 timeout ?? _timeout
             );
 
@@ -306,7 +307,7 @@ namespace Phoenix
         }
 
         // overrideable message hook
-        public virtual JsonBox OnMessage(Message message)
+        public virtual IJsonBox OnMessage(Message message)
         {
             return message.Payload;
         }
