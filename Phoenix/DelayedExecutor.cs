@@ -72,7 +72,6 @@ namespace Phoenix
         public IDelayedExecution Execute(Action action, TimeSpan delay)
         {
             var execution = new TaskExecution();
-            // NOTE: using GetAwaiter() will allow callbacks to be called on the same thread.
             Task.Delay(delay).GetAwaiter().OnCompleted(() =>
             {
                 if (!execution.Cancelled)
