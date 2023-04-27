@@ -117,9 +117,9 @@ namespace PhoenixTests
                 .ToList();
 
             Assert.AreEqual(2, presenceList.Count);
-            Assert.AreEqual(1, presenceList[0].Payload.Element.Value<int>("id"));
+            Assert.AreEqual(1, presenceList[0].Payload.Unbox<JToken>().Value<int>("id"));
             Assert.AreEqual("1", presenceList[0].PhxRef);
-            Assert.AreEqual(2, presenceList[1].Payload.Element.Value<int>("id"));
+            Assert.AreEqual(2, presenceList[1].Payload.Unbox<JToken>().Value<int>("id"));
             Assert.AreEqual("2", presenceList[1].PhxRef);
 
             var diffMessage = new Message(
@@ -141,7 +141,7 @@ namespace PhoenixTests
                 .ToList();
 
             Assert.AreEqual(1, presenceList.Count);
-            Assert.AreEqual(2, presenceList[0].Payload.Element.Value<int>("id"));
+            Assert.AreEqual(2, presenceList[0].Payload.Unbox<JToken>().Value<int>("id"));
             Assert.AreEqual("2", presenceList[0].PhxRef);
         }
 
@@ -200,7 +200,7 @@ namespace PhoenixTests
 
             var presenceList = presence.State.Select(ListByFirst).ToArray();
             Assert.AreEqual(1, presenceList.Length);
-            Assert.AreEqual(1, presenceList[0].Payload.Element.Value<int>("id"));
+            Assert.AreEqual(1, presenceList[0].Payload.Unbox<JToken>().Value<int>("id"));
             // pendingDiffs is private, can't assert on it
             CollectionAssert.AreEqual(new[] {"u1", "u2"}, usersJoined.ToArray());
 
@@ -226,7 +226,7 @@ namespace PhoenixTests
 
             presenceList = presence.State.Select(ListByFirst).ToArray();
             Assert.AreEqual(1, presenceList.Length);
-            Assert.AreEqual(1, presenceList[0].Payload.Element.Value<int>("id"));
+            Assert.AreEqual(1, presenceList[0].Payload.Unbox<JToken>().Value<int>("id"));
 
             stateMessage = new Message(
                 @event: "presence_state",
@@ -240,7 +240,7 @@ namespace PhoenixTests
 
             presenceList = presence.State.Select(ListByFirst).ToArray();
             Assert.AreEqual(1, presenceList.Length);
-            Assert.AreEqual(3, presenceList[0].Payload.Element.Value<int>("id"));
+            Assert.AreEqual(3, presenceList[0].Payload.Unbox<JToken>().Value<int>("id"));
         }
 
         /**
@@ -262,7 +262,7 @@ namespace PhoenixTests
             var payload = deserialized.Payload.Unbox<Dictionary<string, PresencePayload>>();
 
             Assert.IsNotEmpty(payload["u1"].Metas);
-            Assert.AreEqual(1, payload["u1"].Metas[0].Payload.Element.Value<int>("id"));
+            Assert.AreEqual(1, payload["u1"].Metas[0].Payload.Unbox<JToken>().Value<int>("id"));
             Assert.AreEqual("1", payload["u1"].Metas[0].PhxRef);
         }
     }

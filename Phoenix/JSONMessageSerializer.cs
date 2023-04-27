@@ -125,7 +125,7 @@ namespace Phoenix
     {
         public override void WriteJson(JsonWriter writer, PresencePayload value, JsonSerializer serializer)
         {
-            value.Payload.Element.WriteTo(writer);
+            value.Payload.Unbox<JToken>().WriteTo(writer);
         }
 
         public override PresencePayload ReadJson(JsonReader reader, Type objectType, PresencePayload existingValue,
@@ -144,7 +144,7 @@ namespace Phoenix
     {
         public override void WriteJson(JsonWriter writer, PresenceMeta value, JsonSerializer serializer)
         {
-            value.Payload.Element.WriteTo(writer);
+            value.Payload.Unbox<JToken>().WriteTo(writer);
         }
 
         public override PresenceMeta ReadJson(JsonReader reader, Type objectType, PresenceMeta existingValue,

@@ -37,12 +37,12 @@ namespace Phoenix
     public sealed class PresencePayload
     {
         public List<PresenceMeta> Metas;
-        public JsonBox Payload;
+        public IJsonBox Payload;
     }
 
     public sealed class PresenceMeta
     {
-        public JsonBox Payload;
+        public IJsonBox Payload;
         public string PhxRef;
     }
 

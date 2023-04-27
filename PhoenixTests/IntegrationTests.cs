@@ -368,11 +368,11 @@ namespace PhoenixTests
 
             var newStateMeta = newState.Metas[0];
             Assert.IsNotEmpty(newStateMeta.PhxRef);
-            var presenceJson = newStateMeta.Payload.Element;
+            var presenceJson = newStateMeta.Payload.Unbox<JToken>();
             Assert.IsNotEmpty(presenceJson.Value<string>("online_at"));
 
             // check custom payload
-            Assert.AreEqual(newState.Payload.Element["device"]?.Value<string>("make"), "Apple");
+            Assert.AreEqual(newState.Payload.Unbox<JToken>()["device"]?.Value<string>("make"), "Apple");
 
             // TearDown
 
