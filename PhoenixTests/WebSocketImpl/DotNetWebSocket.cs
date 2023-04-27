@@ -79,21 +79,18 @@ namespace PhoenixTests.WebSocketImpl
 
         public void Close(ushort? code = null, string message = null)
         {
-            Task closeTask;
-
-            _config.onCloseCallback(this, code ?? 0, message);
-
-            if (code.HasValue && Enum.TryParse(code.ToString(), out WebSocketCloseStatus status))
-            {
-                closeTask = _ws.CloseAsync(status, message, CancellationToken.None);
-            }
-            else
-            {
-                closeTask = _ws.CloseAsync(WebSocketCloseStatus.Empty, message, CancellationToken.None);
-            }
-
             try
             {
+                Task closeTask;
+                if (code.HasValue && Enum.TryParse(code.ToString(), out WebSocketCloseStatus status))
+                {
+                    closeTask = _ws.CloseAsync(status, message, CancellationToken.None);
+                }
+                else
+                {
+                    closeTask = _ws.CloseAsync(WebSocketCloseStatus.Empty, message, CancellationToken.None);
+                }
+
                 closeTask.Wait();
             }
             catch (Exception ex)
@@ -103,6 +100,7 @@ namespace PhoenixTests.WebSocketImpl
             finally
             {
                 _ws.Dispose();
+                _config.onCloseCallback(this, code ?? 0, message);
             }
         }
 
@@ -112,7 +110,7 @@ namespace PhoenixTests.WebSocketImpl
             var result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
             if (result.MessageType == WebSocketMessageType.Close)
             {
-                await _ws.CloseAsync(
+                await _ws.CloseOutputAsync(
                     WebSocketCloseStatus.NormalClosure,
                     string.Empty,
                     CancellationToken.None
