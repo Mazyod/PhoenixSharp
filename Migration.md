@@ -1,7 +1,27 @@
 
 # Migration Guide
 
-## From pre-release
+## Json Refactoring Effort (May 2023)
+
+The library was missing the ability to expose the full JSON response from the presence payload. This limitation exposed a major weakness in the library's design, which was the lack of a unified JSON response interface.
+Also previously, the library abstracted the underlying JSON object type using an opaque `object` type. This caused a lot of frustration due to the lack of type safety and the need to cast the object to the correct type.
+
+Now, `IJsonBox` interface is introduced to abstract the underlying JSON object type. It also lead to a unified interface for interacting with any JSON response.
+More nice side-effects of this change were better performance and less memory usage.
+
+In order to migrate to the new version, you need to make sure you are using the new `IJsonBox` interface instead of the `object` type. 
+Also, the JsonResponse and JsonPayload extension methods are now removed in favor of the new `IJsonBox` interface.
+(The type system should detect all these issues.)
+
+```diff
+-reply.JsonResponse<ChannelError>()
++reply.Response.Unbox<ChannelError>()
+
+-message.JsonPayload<PresenceEvent>()
++message.Payload.Unbox<PresenceEvent>()
+```
+
+## From pre-release (before 2022)
 
 The library underwent a major overhaul since the pre-release version, so it will be very difficult to document every change.
 
@@ -28,7 +48,7 @@ public WebsocketState State {
 
 #### DelayedExecutor Changes
 
-Instead of returning `uint`, `DelayedExecutor` now returns `IDelayedExecution` instance. It is a simple object that "knows" how to cancel the delayed exection.
+Instead of returning `uint`, `DelayedExecutor` now returns `IDelayedExecution` instance. It is a simple object that "knows" how to cancel the delayed execution.
 
 ```diff
 -public uint Execute(Action action, TimeSpan delay) {

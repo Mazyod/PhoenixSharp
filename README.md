@@ -21,12 +21,12 @@ PhoenixSharp has the following main goals:
 - Portable enough to work out of the box in Unity and other C# environments.
 
 In order to achieve the goals stated, it is necessary to:
-- Maintain a close resemblence to the Phoenix.js implementation.
+- Maintain a close resemblance to the Phoenix.js implementation.
 - Engage the community to accommodate different requirements based on various environments.
 
 ## Getting Started
 
-**Migrating from the pre-release version of PhoenixSharp? [See our migration guide][migration-guide]**
+**Migrating from older versions? [See our migration guide][migration-guide]**
 
 For now, you can use git submodules or simply download the sources and drop them in your project.
 
@@ -40,9 +40,11 @@ The library requires you to implement `IWebsocketFactory` and `IWebsocket` in or
 
 Under the PhoenixTests/WebSocketImpl folder, you'll find a few sample implementations of these interfaces which you could simply copy to your project as needed.
 
-#### Implementing IMessageSerializer
+#### Implementing `IMessageSerializer` and `IJsonBox`
 
 `IMessageSerializer` is the interface that allows you to customize the serialization of your Phoenix messages.
+
+`IJsonBox` wraps the underlying mutable JSON object, such as JToken in NewtonSoft.Json and JsonElement/JsonObject in System.Text.Json/System.Text.Json.Nodes.
 
 The library ships with a default implementation: `JsonMessageSerializer`. It relies on [Newtonsoft.Json][newtonsoft-website] to provide JSON serialization based on [Phoenix V2 format][phoenix-v2-serialization-format]. The implementation is self-contained in a single file. This means, by removing that one file, you can decouple your code from Newtonsoft.Json if you like.
 
