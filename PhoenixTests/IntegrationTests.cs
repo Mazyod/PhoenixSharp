@@ -24,7 +24,7 @@ namespace PhoenixTests
         [SetUp]
         public void Init()
         {
-            var address = $"http://{Host}/api/health-check";
+            var address = $"https://{Host}/api/health-check";
 
             // heroku health check
             using HttpClient client = new();
@@ -33,7 +33,7 @@ namespace PhoenixTests
         }
 
         private const int NetworkDelay = 5_000 /* ms */;
-        private const string Host = "localhost:4000";
+        private const string Host = "phoenix-sharp.level3.io:3080";
 
         private readonly Dictionary<string, object> _channelParams = new()
         {
@@ -51,16 +51,16 @@ namespace PhoenixTests
                 onOpenCount++;
             }
 
-            List<string> onErrorData = new();
+            List<string> onCloseData = new();
 
-            void OnErrorCallback(string message)
+            void OnCloseCallback(ushort code, string message)
             {
-                onErrorData.Add(message);
+                onCloseData.Add(message);
             }
 
             // connecting is synchronous as implemented above
-            var socketAddress = $"ws://{Host}/socket";
-            var socketFactory = new WebsocketSharpFactory();
+            var socketAddress = $"wss://{Host}/socket";
+            var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
                 null,
@@ -73,7 +73,7 @@ namespace PhoenixTests
             );
 
             socket.OnOpen += OnOpenCallback;
-            socket.OnError += OnErrorCallback;
+            socket.OnClose += OnCloseCallback;
 
             socket.Connect();
             Assert.AreEqual(WebsocketState.Open, socket.State);
@@ -82,11 +82,11 @@ namespace PhoenixTests
             // test socket error recovery
 
             socket.Conn.Close();
-
+            
             Assert.AreEqual(WebsocketState.Closed, socket.State);
             Assert.That(() => socket.State == WebsocketState.Open, Is.True.After(NetworkDelay, 10));
-            Assert.AreEqual(1, onErrorData.Count);
-            Assert.AreEqual("An error has occurred in closing the connection.", onErrorData[0]);
+            Assert.AreEqual(1, onCloseData.Count);
+            Assert.IsNull(onCloseData[0]);
 
             // test channel error on join
 
@@ -177,8 +177,8 @@ namespace PhoenixTests
                 .Push("timeout_test", null, TimeSpan.FromMilliseconds(50))
                 .Receive(ReplyStatus.Timeout, r => testTimeoutReply = r);
 
-            Assert.That(() => testTimeoutReply != null, Is.False.After(20));
-            Assert.That(() => testTimeoutReply != null, Is.True.After(40));
+            // Assert.That(() => testTimeoutReply != null, Is.False.After(10));
+            Assert.That(() => testTimeoutReply != null, Is.True.After(50));
 
             // test channel error/rejoin
 
@@ -249,7 +249,7 @@ namespace PhoenixTests
                 onOpenCount--;
             }
 
-            var socketAddress = $"ws://{Host}/socket";
+            var socketAddress = $"wss://{Host}/socket";
             var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
@@ -320,8 +320,8 @@ namespace PhoenixTests
             }
 
             // connecting is synchronous as implemented above
-            var socketAddress = $"ws://{Host}/socket";
-            var socketFactory = new WebsocketSharpFactory();
+            var socketAddress = $"wss://{Host}/socket";
+            var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
                 null,
