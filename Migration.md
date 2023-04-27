@@ -9,6 +9,9 @@ Also previously, the library abstracted the underlying JSON object type using an
 Now, `IJsonBox` interface is introduced to abstract the underlying JSON object type. It also lead to a unified interface for interacting with any JSON response.
 More nice side-effects of this change were better performance and less memory usage.
 
+If you are implementing your own IMessageSerializer, you may need to update your implementation to support the new `IJsonBox` interface.
+The new interface should be simpler, allowing you to easily migrate to the new version.
+
 In order to migrate to the new version, you need to make sure you are using the new `IJsonBox` interface instead of the `object` type. 
 Also, the JsonResponse and JsonPayload extension methods are now removed in favor of the new `IJsonBox` interface.
 (The type system should detect all these issues.)
