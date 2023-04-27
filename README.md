@@ -102,11 +102,11 @@ roomChannel.On(
 roomChannel.Join()
   .Receive(
     ReplyStatus.Ok, 
-    reply => okResponse = reply.JsonResponse<JoinResponse>()
+    reply => okResponse = reply.Response.Unbox<JoinResponse>()
   )
   .Receive(
     ReplyStatus.Error,
-    reply => errorResponse = reply.JsonResponse<ChannelError>()
+    reply => errorResponse = reply.Response.Unbox<ChannelError>()
   );
 
 // push a message to the channel
