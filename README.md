@@ -40,6 +40,9 @@ The library requires you to implement `IWebsocketFactory` and `IWebsocket` in or
 
 Under the PhoenixTests/WebSocketImpl folder, you'll find a few sample implementations of these interfaces which you could simply copy to your project as needed.
 
+> [!WARNING]\
+> DotNetWebSocket may be unstable. Please consider using BestHTTP, WebSocketSharp, or contributing fixes, or adding new implementations 🤌
+
 #### Implementing `IMessageSerializer` and `IJsonBox`
 
 `IMessageSerializer` is the interface that allows you to customize the serialization of your Phoenix messages.
