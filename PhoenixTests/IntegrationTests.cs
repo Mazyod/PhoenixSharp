@@ -24,7 +24,7 @@ namespace PhoenixTests
         [SetUp]
         public void Init()
         {
-            var address = $"https://{Host}/api/health-check";
+            var address = $"http://{Host}/api/health-check";
 
             // heroku health check
             using HttpClient client = new();
@@ -59,7 +59,7 @@ namespace PhoenixTests
             }
 
             // connecting is synchronous as implemented above
-            var socketAddress = $"wss://{Host}/socket";
+            var socketAddress = $"ws://{Host}/socket";
             var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
@@ -249,7 +249,7 @@ namespace PhoenixTests
                 onOpenCount--;
             }
 
-            var socketAddress = $"wss://{Host}/socket";
+            var socketAddress = $"ws://{Host}/socket";
             var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
@@ -320,7 +320,7 @@ namespace PhoenixTests
             }
 
             // connecting is synchronous as implemented above
-            var socketAddress = $"wss://{Host}/socket";
+            var socketAddress = $"ws://{Host}/socket";
             var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
