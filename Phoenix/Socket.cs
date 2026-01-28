@@ -4,8 +4,9 @@ using System.Linq;
 
 namespace Phoenix
 {
-    public sealed class Socket
+    public sealed class Socket : IDisposable
     {
+        private bool _disposed;
         public delegate void OnClosedDelegate(ushort code, string message);
 
         public delegate void OnErrorDelegate(string message);
@@ -111,6 +112,7 @@ namespace Phoenix
 
         public void Connect()
         {
+            if (_disposed) return;
             // connectClock++;
             if (Conn != null)
             {
@@ -320,6 +322,10 @@ namespace Phoenix
 
         public Channel Channel(string topic, Dictionary<string, object> chanParams = null)
         {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(Socket), "Cannot create channel on disposed socket");
+            }
             var chan = new Channel(topic, chanParams, this);
             _channels.Add(chan);
             return chan;
@@ -355,6 +361,7 @@ namespace Phoenix
 
         private void SendHeartbeat()
         {
+            if (_disposed) return;
             if (!Opts.HeartbeatInterval.HasValue
                 || (_pendingHeartbeatRef != null && !IsConnected()))
             {
@@ -439,6 +446,51 @@ namespace Phoenix
             }
 
             dupChannel.Leave();
+        }
+
+        /// <summary>
+        /// Disposes the socket and all associated resources.
+        /// Cleans up all channels, cancels timers, and closes the connection.
+        /// </summary>
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+
+            // Cancel all timers
+            _heartbeatTimer?.Cancel();
+            _heartbeatTimer = null;
+            _reconnectTimer?.Reset();
+
+            // Cleanup all channels (unsubscribes their event handlers)
+            foreach (var channel in _channels.ToList())
+            {
+                ((IChannelCleanup)channel).Cleanup();
+            }
+            _channels.Clear();
+
+            // Clear send buffer
+            SendBuffer.Clear();
+
+            // Clear delegates to prevent any lingering references
+            OnOpen = null;
+            OnClose = null;
+            OnError = null;
+            OnMessage = null;
+
+            // Close the connection if open
+            if (Conn != null && Conn.State != WebsocketState.Closed)
+            {
+                try
+                {
+                    Conn.Close(1000, "Socket disposed");
+                }
+                catch
+                {
+                    // Ignore errors during disposal
+                }
+            }
+            Conn = null;
         }
 
 
