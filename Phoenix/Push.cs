@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using StatusHookTable = System.Collections.Generic.Dictionary<
@@ -9,19 +10,19 @@ namespace Phoenix
     {
         private readonly Channel _channel;
         private readonly string _event;
-        private readonly Func<IJsonBox> _payload;
+        private readonly Func<IJsonBox?>? _payload;
 
         private readonly StatusHookTable _recHooks = new StatusHookTable();
-        private IDelayedExecution _delayedExecution;
+        private IDelayedExecution? _delayedExecution;
         private Reply? _receivedResp;
-        private string _refEvent;
+        private string? _refEvent;
         private TimeSpan _timeout;
 
         // internal state
-        internal string Ref;
+        internal string? Ref;
 
         // define a constructor that takes a channel, event, payload, and timeout
-        public Push(Channel channel, string @event, Func<IJsonBox> payload, TimeSpan timeout)
+        public Push(Channel channel, string @event, Func<IJsonBox?>? payload, TimeSpan timeout)
         {
             if (channel == null)
                 throw new ArgumentNullException(nameof(channel));
@@ -127,7 +128,7 @@ namespace Phoenix
             {
                 CancelRefEvent();
                 CancelTimeout();
-                _receivedResp = message.Payload.Unbox<Reply?>();
+                _receivedResp = message.Payload?.Unbox<Reply?>();
                 MatchReceive(_receivedResp);
             });
 

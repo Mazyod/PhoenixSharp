@@ -1,4 +1,5 @@
-﻿namespace Phoenix
+#nullable enable
+namespace Phoenix
 {
     public enum LogLevel
     {

@@ -1,5 +1,7 @@
-﻿using System;
+#nullable enable
+using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using Newtonsoft.Json.Linq;
@@ -18,7 +20,7 @@ namespace Phoenix
             Element = element;
         }
 
-        public static JsonBox Serialize(object obj)
+        public static JsonBox Serialize(object? obj)
         {
             var token = obj == null
                 ? JValue.CreateNull()
@@ -27,6 +29,7 @@ namespace Phoenix
             return new JsonBox(token);
         }
 
+        [return: MaybeNull]
         public T Unbox<T>()
         {
             return Element.ToObject<T>(JsonMessageSerializer.Serializer);
@@ -50,25 +53,26 @@ namespace Phoenix
 
         internal static readonly JsonSerializer Serializer = JsonSerializer.Create(Settings);
 
-        public string Serialize(object element)
+        public string Serialize(object? element)
         {
             return JsonConvert.SerializeObject(element, Formatting.None, Settings);
         }
 
+        [return: MaybeNull]
         public T Deserialize<T>(string json)
         {
             return JsonConvert.DeserializeObject<T>(json, Settings);
         }
 
-        public IJsonBox Box(object element)
+        public IJsonBox Box(object? element)
         {
             return JsonBox.Serialize(element);
         }
     }
 
-    internal sealed class JsonBoxConverter : JsonConverter<IJsonBox>
+    internal sealed class JsonBoxConverter : JsonConverter<IJsonBox?>
     {
-        public override void WriteJson(JsonWriter writer, IJsonBox value, JsonSerializer serializer)
+        public override void WriteJson(JsonWriter writer, IJsonBox? value, JsonSerializer serializer)
         {
             var element = value?.Unbox<JToken>();
             if (serializer.NullValueHandling != NullValueHandling.Ignore)
@@ -79,7 +83,7 @@ namespace Phoenix
             element?.WriteTo(writer);
         }
 
-        public override IJsonBox ReadJson(JsonReader reader, Type objectType, IJsonBox existingValue,
+        public override IJsonBox ReadJson(JsonReader reader, Type objectType, IJsonBox? existingValue,
             bool hasExistingValue, JsonSerializer serializer)
         {
             return new JsonBox(JToken.Load(reader));
@@ -112,48 +116,48 @@ namespace Phoenix
         {
             var array = JArray.Load(reader);
             return new Message(
-                joinRef: array[0].ToObject<string>(),
-                @ref: array[1].ToObject<string>(),
-                topic: array[2].ToObject<string>(),
-                @event: array[3].ToObject<string>(),
+                joinRef: array[0].ToObject<string?>(),
+                @ref: array[1].ToObject<string?>(),
+                topic: array[2].ToObject<string?>(),
+                @event: array[3].ToObject<string?>(),
                 payload: new JsonBox(array[4])
             );
         }
     }
 
-    internal sealed class PresencePayloadConverter : JsonConverter<PresencePayload>
+    internal sealed class PresencePayloadConverter : JsonConverter<PresencePayload?>
     {
-        public override void WriteJson(JsonWriter writer, PresencePayload value, JsonSerializer serializer)
+        public override void WriteJson(JsonWriter writer, PresencePayload? value, JsonSerializer serializer)
         {
-            value.Payload.Unbox<JToken>().WriteTo(writer);
+            value?.Payload?.Unbox<JToken>()?.WriteTo(writer);
         }
 
-        public override PresencePayload ReadJson(JsonReader reader, Type objectType, PresencePayload existingValue,
+        public override PresencePayload ReadJson(JsonReader reader, Type objectType, PresencePayload? existingValue,
             bool hasExistingValue, JsonSerializer serializer)
         {
             var obj = JObject.Load(reader);
             return new PresencePayload
             {
-                Metas = obj["metas"]?.ToObject<List<PresenceMeta>>(serializer),
+                Metas = obj["metas"]?.ToObject<List<PresenceMeta>>(serializer) ?? new List<PresenceMeta>(),
                 Payload = new JsonBox(obj)
             };
         }
     }
 
-    internal sealed class PresenceMetaConverter : JsonConverter<PresenceMeta>
+    internal sealed class PresenceMetaConverter : JsonConverter<PresenceMeta?>
     {
-        public override void WriteJson(JsonWriter writer, PresenceMeta value, JsonSerializer serializer)
+        public override void WriteJson(JsonWriter writer, PresenceMeta? value, JsonSerializer serializer)
         {
-            value.Payload.Unbox<JToken>().WriteTo(writer);
+            value?.Payload?.Unbox<JToken>()?.WriteTo(writer);
         }
 
-        public override PresenceMeta ReadJson(JsonReader reader, Type objectType, PresenceMeta existingValue,
+        public override PresenceMeta ReadJson(JsonReader reader, Type objectType, PresenceMeta? existingValue,
             bool hasExistingValue, JsonSerializer serializer)
         {
             var meta = JObject.Load(reader);
             return new PresenceMeta
             {
-                PhxRef = meta.Value<string>("phx_ref"),
+                PhxRef = meta.Value<string>("phx_ref") ?? string.Empty,
                 Payload = new JsonBox(meta)
             };
         }

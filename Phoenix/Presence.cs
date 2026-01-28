@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -37,14 +38,14 @@ namespace Phoenix
      */
     public sealed class PresencePayload
     {
-        public List<PresenceMeta> Metas;
-        public IJsonBox Payload;
+        public List<PresenceMeta> Metas = new List<PresenceMeta>();
+        public IJsonBox Payload = null!;
     }
 
     public sealed class PresenceMeta
     {
-        public IJsonBox Payload;
-        public string PhxRef;
+        public IJsonBox Payload = null!;
+        public string PhxRef = string.Empty;
     }
 
     /**
@@ -52,31 +53,31 @@ namespace Phoenix
      * @param {Channel} channel - The Channel
      * @param {Object} opts - The options,
      * for example `{events: {state: "state", diff: "diff"}}`
-     * 
+     *
      * TODO: We are using immutable types since the PhoenixJS implementation uses deep clone.
      * TODO: Immutable types generate a lot of garbage, so we should consider using a different approach.
      */
     public sealed class Presence
     {
         public delegate void OnJoinDelegate(
-            string key, PresencePayload currentPresence, PresencePayload newPresence);
+            string key, PresencePayload? currentPresence, PresencePayload newPresence);
 
         public delegate void OnLeaveDelegate(
-            string key, PresencePayload currentPresence, PresencePayload newPresence);
+            string key, PresencePayload? currentPresence, PresencePayload newPresence);
 
         public delegate void OnSyncDelegate();
 
         private readonly Channel _channel;
         private readonly DiffList _pendingDiffs = new DiffList();
-        private string _joinRef;
+        private string? _joinRef;
 
-        public OnJoinDelegate OnJoin;
-        public OnLeaveDelegate OnLeave;
-        public OnSyncDelegate OnSync;
+        public OnJoinDelegate? OnJoin;
+        public OnLeaveDelegate? OnLeave;
+        public OnSyncDelegate? OnSync;
 
         public State State = new State();
 
-        public Presence(Channel channel, Options opts = null)
+        public Presence(Channel channel, Options? opts = null)
         {
             if (channel == null)
                 throw new ArgumentNullException(nameof(channel));
@@ -87,7 +88,7 @@ namespace Phoenix
 
             channel.On(options.StateEvent, message =>
             {
-                var newState = message.Payload.Unbox<State>();
+                var newState = message.Payload?.Unbox<State>() ?? new State();
                 _joinRef = channel.JoinRef;
                 State = SyncState(State, newState, OnJoin, OnLeave);
 
@@ -104,7 +105,9 @@ namespace Phoenix
 
             channel.On(options.DiffEvent, message =>
             {
-                var diff = message.Payload.Unbox<Diff>();
+                var diff = message.Payload?.Unbox<Diff>();
+                if (diff == null) return;
+
                 if (InPendingSyncState())
                 {
                     _pendingDiffs.Add(diff);
@@ -133,8 +136,8 @@ namespace Phoenix
         public static State SyncState(
             State currentState,
             State newState,
-            OnJoinDelegate onJoin = null,
-            OnLeaveDelegate onLeave = null
+            OnJoinDelegate? onJoin = null,
+            OnLeaveDelegate? onLeave = null
         )
         {
             var joins = new State();
@@ -149,7 +152,7 @@ namespace Phoenix
             {
                 var newPresence = newState[key];
                 var found = currentState.TryGetValue(key, out var currentPresence);
-                if (found)
+                if (found && currentPresence != null)
                 {
                     var newRefs = newPresence.Metas.Select(m => m.PhxRef).ToList();
                     var curRefs = currentPresence.Metas.Select(m => m.PhxRef).ToList();
@@ -184,8 +187,8 @@ namespace Phoenix
         private static State SyncDiff(
             State state,
             Diff diff,
-            OnJoinDelegate onJoin,
-            OnLeaveDelegate onLeave
+            OnJoinDelegate? onJoin,
+            OnLeaveDelegate? onLeave
         )
         {
             foreach (var key in diff.Joins.Keys)
@@ -193,7 +196,7 @@ namespace Phoenix
                 var newPresence = diff.Joins[key];
                 var found = state.TryGetValue(key, out var currentPresence);
                 state[key] = newPresence;
-                if (found)
+                if (found && currentPresence != null)
                 {
                     var joinedRefs = state[key].Metas.Select(m => m.PhxRef).ToList();
                     var curMetas = currentPresence.Metas.Where(m => joinedRefs.IndexOf(m.PhxRef) < 0).ToList();
@@ -207,7 +210,7 @@ namespace Phoenix
             {
                 var leftPresence = diff.Leaves[key];
                 var found = state.TryGetValue(key, out var currentPresence);
-                if (!found)
+                if (!found || currentPresence == null)
                 {
                     continue;
                 }
@@ -243,8 +246,8 @@ namespace Phoenix
          */
         public sealed class Diff
         {
-            public State Joins;
-            public State Leaves;
+            public State Joins = new State();
+            public State Leaves = new State();
         }
     }
 }

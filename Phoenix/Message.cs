@@ -1,19 +1,23 @@
-﻿using System;
+#nullable enable
+using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Serialization;
 
 namespace Phoenix
 {
     public interface IJsonBox
     {
+        [return: MaybeNull]
         T Unbox<T>();
     }
 
     public interface IMessageSerializer
     {
-        string Serialize(object element);
+        string Serialize(object? element);
+        [return: MaybeNull]
         T Deserialize<T>(string message);
 
-        IJsonBox Box(object element);
+        IJsonBox Box(object? element);
     }
 
     /**
@@ -24,8 +28,8 @@ namespace Phoenix
         // PhoenixJS maps incoming phx_reply to chan_reply_{ref} when broadcasting the event
         public const string ReplyEventPrefix = "chan_reply_";
 
-        public readonly string Status;
-        public readonly IJsonBox Response;
+        public readonly string? Status;
+        public readonly IJsonBox? Response;
 
         [IgnoreDataMember]
         public ReplyStatus ReplyStatus
@@ -47,7 +51,7 @@ namespace Phoenix
             }
         }
 
-        public Reply(string status, IJsonBox response)
+        public Reply(string? status, IJsonBox? response)
         {
             Status = status;
             Response = response;
@@ -84,18 +88,18 @@ namespace Phoenix
         }
 
 
-        public string Topic { get; init; }
-        public string Event { get; init; }
-        public string Ref { get; init; }
-        public IJsonBox Payload { get; init; }
-        public string JoinRef { get; init; }
+        public string? Topic { get; init; }
+        public string? Event { get; init; }
+        public string? Ref { get; init; }
+        public IJsonBox? Payload { get; init; }
+        public string? JoinRef { get; init; }
 
         public Message(
-            string topic = null,
-            string @event = null,
-            IJsonBox payload = null,
-            string @ref = null,
-            string joinRef = null
+            string? topic = null,
+            string? @event = null,
+            IJsonBox? payload = null,
+            string? @ref = null,
+            string? joinRef = null
         )
         {
             Topic = topic;

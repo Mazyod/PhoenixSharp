@@ -1,4 +1,5 @@
-﻿using System;
+#nullable enable
+using System;
 using System.Threading.Tasks;
 
 namespace Phoenix
@@ -17,7 +18,7 @@ namespace Phoenix
         IDelayedExecution Execute(Action action, TimeSpan delay);
     }
 
-    /** 
+    /**
      * Scheduler
      * This class is equivalent to the Timer class in the Phoenix JS library.
      */
@@ -26,7 +27,7 @@ namespace Phoenix
         private readonly Action _callback;
         private readonly IDelayedExecutor _delayedExecutor;
         private readonly Func<int, TimeSpan> _timerCalc;
-        private IDelayedExecution _execution;
+        private IDelayedExecution? _execution;
         private int _tries;
 
         public Scheduler(Action callback, Func<int, TimeSpan> timerCalc, IDelayedExecutor delayedExecutor)
