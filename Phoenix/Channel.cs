@@ -371,7 +371,17 @@ namespace Phoenix
             {
                 message.Payload = handledPayload;
                 message.JoinRef ??= JoinRef;
-                subscription.Callback(message);
+                try
+                {
+                    subscription.Callback(message);
+                }
+                catch (Exception ex)
+                {
+                    if (Socket.HasLogger())
+                    {
+                        Socket.Log(LogLevel.Error, "channel", $"Event callback threw exception for '{message.Event}': {ex.Message}");
+                    }
+                }
             });
         }
 
