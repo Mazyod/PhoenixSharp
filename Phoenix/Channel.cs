@@ -169,8 +169,8 @@ namespace Phoenix
             // on phx_reply, also trigger a message for the push using replyEventName
             On(Message.InBoundEvent.Reply.Serialized(), message =>
             {
-                message.Event = ReplyEventName(message.Ref);
-                Trigger(message);
+                var replyMessage = message with { Event = ReplyEventName(message.Ref) };
+                Trigger(replyMessage);
             });
         }
 
@@ -401,19 +401,22 @@ namespace Phoenix
                 eventBindingsCopy = eventBindings != null ? new List<ChannelSubscription>(eventBindings) : null;
             }
 
+            var callbackMessage = message with
+            {
+                Payload = handledPayload,
+                JoinRef = message.JoinRef ?? JoinRef
+            };
             eventBindingsCopy?.ForEach(subscription =>
             {
-                message.Payload = handledPayload;
-                message.JoinRef ??= JoinRef;
                 try
                 {
-                    subscription.Callback(message);
+                    subscription.Callback(callbackMessage);
                 }
                 catch (Exception ex)
                 {
                     if (Socket.HasLogger())
                     {
-                        Socket.Log(LogLevel.Error, "channel", $"Event callback threw exception for '{message.Event}': {ex.Message}");
+                        Socket.Log(LogLevel.Error, "channel", $"Event callback threw exception for '{callbackMessage.Event}': {ex.Message}");
                     }
                 }
             });

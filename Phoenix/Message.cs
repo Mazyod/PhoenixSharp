@@ -64,7 +64,7 @@ namespace Phoenix
     }
 
 
-    public struct Message
+    public record Message
     {
         public enum InBoundEvent
         {
@@ -84,13 +84,11 @@ namespace Phoenix
         }
 
 
-        public readonly string Topic;
-
-        // unfortunate mutation of the original message
-        public string Event;
-        public readonly string Ref;
-        public IJsonBox Payload;
-        public string JoinRef;
+        public string Topic { get; init; }
+        public string Event { get; init; }
+        public string Ref { get; init; }
+        public IJsonBox Payload { get; init; }
+        public string JoinRef { get; init; }
 
         public Message(
             string topic = null,
