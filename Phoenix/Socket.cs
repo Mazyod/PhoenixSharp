@@ -132,7 +132,20 @@ namespace Phoenix
 
             Conn = _websocketFactory.Build(config);
 
-            Conn.Connect();
+            try
+            {
+                Conn.Connect();
+            }
+            catch (Exception ex)
+            {
+                if (HasLogger())
+                {
+                    Log(LogLevel.Error, "transport", $"WebSocket connect failed: {ex.Message}");
+                }
+
+                Conn = null;
+                _reconnectTimer?.ScheduleTimeout();
+            }
         }
 
         internal void Log(LogLevel level, string source, string message)
@@ -165,7 +178,17 @@ namespace Phoenix
             _reconnectTimer?.Reset();
             ResetHeartbeat();
 
-            OnOpen?.Invoke();
+            try
+            {
+                OnOpen?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                if (HasLogger())
+                {
+                    Log(LogLevel.Error, "socket", $"OnOpen callback threw exception: {ex.Message}");
+                }
+            }
         }
 
         private void HeartbeatTimeout()
@@ -280,7 +303,17 @@ namespace Phoenix
                 _reconnectTimer?.ScheduleTimeout();
             }
 
-            OnClose?.Invoke(code, reason);
+            try
+            {
+                OnClose?.Invoke(code, reason);
+            }
+            catch (Exception ex)
+            {
+                if (HasLogger())
+                {
+                    Log(LogLevel.Error, "socket", $"OnClose callback threw exception: {ex.Message}");
+                }
+            }
         }
 
         private void OnConnError(IWebsocket websocket, string error)
@@ -290,7 +323,17 @@ namespace Phoenix
                 Log(LogLevel.Debug, "transport", $"Error {error}");
             }
 
-            OnError?.Invoke(error);
+            try
+            {
+                OnError?.Invoke(error);
+            }
+            catch (Exception ex)
+            {
+                if (HasLogger())
+                {
+                    Log(LogLevel.Error, "socket", $"OnError callback threw exception: {ex.Message}");
+                }
+            }
 
             TriggerChanError();
         }
@@ -420,7 +463,20 @@ namespace Phoenix
 
         private void OnConnMessage(IWebsocket websocket, string rawMessage)
         {
-            var message = Opts.MessageSerializer.Deserialize<Message>(rawMessage);
+            Message message;
+            try
+            {
+                message = Opts.MessageSerializer.Deserialize<Message>(rawMessage);
+            }
+            catch (Exception ex)
+            {
+                if (HasLogger())
+                {
+                    Log(LogLevel.Error, "socket", $"Failed to deserialize message: {ex.Message}");
+                }
+
+                return;
+            }
 
             if (message.Ref != null && message.Ref == _pendingHeartbeatRef && Opts.HeartbeatInterval.HasValue)
             {
@@ -450,7 +506,17 @@ namespace Phoenix
                 }
             });
 
-            OnMessage?.Invoke(message);
+            try
+            {
+                OnMessage?.Invoke(message);
+            }
+            catch (Exception ex)
+            {
+                if (HasLogger())
+                {
+                    Log(LogLevel.Error, "socket", $"OnMessage callback threw exception: {ex.Message}");
+                }
+            }
         }
 
         internal void LeaveOpenTopic(string topic)
