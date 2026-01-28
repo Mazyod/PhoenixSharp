@@ -28,8 +28,10 @@ namespace Phoenix
     public class Channel
     {
         private readonly SubscriptionTable _bindings = new SubscriptionTable();
+        private readonly object _bindingsLock = new object();
         private readonly Push _joinPush;
         private readonly List<Push> _pushBuffer = new List<Push>();
+        private readonly object _pushBufferLock = new object();
 
         /**
          * See the stateChangeRefs comment in Socket.cs
@@ -81,8 +83,14 @@ namespace Phoenix
             {
                 State = ChannelState.Joined;
                 _rejoinTimer?.Reset();
-                _pushBuffer.ForEach(push => push.Send());
-                _pushBuffer.Clear();
+                List<Push> bufferCopy;
+                lock (_pushBufferLock)
+                {
+                    bufferCopy = new List<Push>(_pushBuffer);
+                    _pushBuffer.Clear();
+                }
+
+                bufferCopy.ForEach(push => push.Send());
             });
 
             _joinPush.Receive(ReplyStatus.Error, message =>
@@ -198,13 +206,16 @@ namespace Phoenix
                 Callback = callback
             };
 
-            if (!_bindings.TryGetValue(anyEvent, out var subscriptions))
+            lock (_bindingsLock)
             {
-                subscriptions = new List<ChannelSubscription>();
-                _bindings[anyEvent] = subscriptions;
-            }
+                if (!_bindings.TryGetValue(anyEvent, out var subscriptions))
+                {
+                    subscriptions = new List<ChannelSubscription>();
+                    _bindings[anyEvent] = subscriptions;
+                }
 
-            subscriptions.Add(subscription);
+                subscriptions.Add(subscription);
+            }
 
             return subscription;
         }
@@ -219,8 +230,11 @@ namespace Phoenix
 
         public bool Off(ChannelSubscription subscription)
         {
-            return _bindings.TryGetValue(subscription.Event, out var subscriptions) &&
-                   subscriptions.Remove(subscription);
+            lock (_bindingsLock)
+            {
+                return _bindings.TryGetValue(subscription.Event, out var subscriptions) &&
+                       subscriptions.Remove(subscription);
+            }
         }
 
         public bool Off(Message.InBoundEvent @event)
@@ -235,7 +249,10 @@ namespace Phoenix
 
         public bool Off(string anyEvent)
         {
-            return _bindings.Remove(anyEvent);
+            lock (_bindingsLock)
+            {
+                return _bindings.Remove(anyEvent);
+            }
         }
 
         internal bool CanPush()
@@ -268,7 +285,10 @@ namespace Phoenix
             else
             {
                 pushEvent.StartTimeout();
-                _pushBuffer.Add(pushEvent);
+                lock (_pushBufferLock)
+                {
+                    _pushBuffer.Add(pushEvent);
+                }
             }
 
             return pushEvent;
@@ -362,12 +382,18 @@ namespace Phoenix
                 throw new Exception("channel onMessage callbacks must return payload, modified or unmodified");
             }
 
-            if (!_bindings.TryGetValue(message.Event, out var eventBindings))
+            List<ChannelSubscription> eventBindingsCopy;
+            lock (_bindingsLock)
             {
-                return;
+                if (!_bindings.TryGetValue(message.Event, out var eventBindings))
+                {
+                    return;
+                }
+
+                eventBindingsCopy = eventBindings != null ? new List<ChannelSubscription>(eventBindings) : null;
             }
 
-            eventBindings?.ForEach(subscription =>
+            eventBindingsCopy?.ForEach(subscription =>
             {
                 message.Payload = handledPayload;
                 message.JoinRef ??= JoinRef;

@@ -19,12 +19,13 @@ namespace Phoenix
         /**
          * In PhoenixJS, listening to socket events is done by passing a callback and
          * holding the returned reference string in order to unsubscribe later.
-         * 
+         *
          * In C#, delegates are much more convenient and fit the paradigm better. Hence,
          * we simple use delegate +=, -= to subscribe and unsubscribe.
          */
         // private readonly Dictionary<Event, List<Subscription>> stateChangeCallbacks = new();
         private readonly List<Channel> _channels = new List<Channel>();
+        private readonly object _channelsLock = new object();
 
         // TODO: binaryType?
 
@@ -37,6 +38,7 @@ namespace Phoenix
         internal readonly Options Opts;
 
         internal readonly List<Action> SendBuffer = new List<Action>();
+        private readonly object _sendBufferLock = new object();
 
         private bool _closeWasClean;
 
@@ -295,7 +297,13 @@ namespace Phoenix
 
         private void TriggerChanError()
         {
-            _channels.ForEach(channel =>
+            List<Channel> channelsCopy;
+            lock (_channelsLock)
+            {
+                channelsCopy = new List<Channel>(_channels);
+            }
+
+            channelsCopy.ForEach(channel =>
             {
                 if (!(channel.IsErrored() || channel.IsLeaving() || channel.IsClosed()))
                 {
@@ -313,7 +321,10 @@ namespace Phoenix
         {
             // PhoenixJS: see the note above regarding stateChangeCallbacks
             // this.off(channel.stateChangeRefs)
-            _channels.Remove(channel);
+            lock (_channelsLock)
+            {
+                _channels.Remove(channel);
+            }
         }
 
         // private void Off(List<string> refs)
@@ -321,7 +332,11 @@ namespace Phoenix
         public Channel Channel(string topic, Dictionary<string, object> chanParams = null)
         {
             var chan = new Channel(topic, chanParams, this);
-            _channels.Add(chan);
+            lock (_channelsLock)
+            {
+                _channels.Add(chan);
+            }
+
             return chan;
         }
 
@@ -343,7 +358,10 @@ namespace Phoenix
             }
             else
             {
-                SendBuffer.Add(EncodeThenSend);
+                lock (_sendBufferLock)
+                {
+                    SendBuffer.Add(EncodeThenSend);
+                }
             }
         }
 
@@ -385,13 +403,19 @@ namespace Phoenix
 
         internal void FlushSendBuffer()
         {
-            if (!IsConnected() || SendBuffer.Count <= 0)
+            List<Action> bufferCopy;
+            lock (_sendBufferLock)
             {
-                return;
+                if (!IsConnected() || SendBuffer.Count <= 0)
+                {
+                    return;
+                }
+
+                bufferCopy = new List<Action>(SendBuffer);
+                SendBuffer.Clear();
             }
 
-            SendBuffer.ForEach(callback => callback());
-            SendBuffer.Clear();
+            bufferCopy.ForEach(callback => callback());
         }
 
         private void OnConnMessage(IWebsocket websocket, string rawMessage)
@@ -411,7 +435,13 @@ namespace Phoenix
             }
 
             // copy channels before triggering callbacks, since they might modify the channels list
-            _channels.ToList().ForEach(channel =>
+            List<Channel> channelsCopy;
+            lock (_channelsLock)
+            {
+                channelsCopy = new List<Channel>(_channels);
+            }
+
+            channelsCopy.ForEach(channel =>
             {
                 // violates tell don't ask, but that's how Phoenix JS is implemented
                 if (channel.IsMember(message))
@@ -425,8 +455,12 @@ namespace Phoenix
 
         internal void LeaveOpenTopic(string topic)
         {
-            var dupChannel = _channels.Find(channel =>
-                channel.Topic == topic && (channel.IsJoined() || channel.IsJoining()));
+            Channel dupChannel;
+            lock (_channelsLock)
+            {
+                dupChannel = _channels.Find(channel =>
+                    channel.Topic == topic && (channel.IsJoined() || channel.IsJoining()));
+            }
 
             if (dupChannel == null)
             {
