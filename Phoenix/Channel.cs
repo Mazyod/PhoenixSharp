@@ -5,6 +5,13 @@ using SubscriptionTable = System.Collections.Generic.Dictionary<
 
 namespace Phoenix
 {
+    /// <summary>
+    /// Internal interface for cleanup that doesn't require IDisposable in public API.
+    /// </summary>
+    internal interface IChannelCleanup
+    {
+        void Cleanup();
+    }
     /**
      * Subscription
      * Represents a subscription to a channel event.
@@ -25,7 +32,7 @@ namespace Phoenix
         Errored // errored channels are rejoined automatically
     }
 
-    public class Channel
+    public class Channel : IChannelCleanup
     {
         private readonly SubscriptionTable _bindings = new SubscriptionTable();
         private readonly object _bindingsLock = new object();
@@ -43,6 +50,7 @@ namespace Phoenix
         public readonly string Topic;
         private bool _joinedOnce;
         private TimeSpan _timeout;
+        private bool _disposed;
 
 
         public ChannelState State = ChannelState.Closed;
@@ -358,7 +366,7 @@ namespace Phoenix
 
         private void Rejoin(TimeSpan? timeout = null)
         {
-            if (IsLeaving())
+            if (_disposed || IsLeaving())
             {
                 return;
             }
@@ -444,16 +452,42 @@ namespace Phoenix
 
         private void SocketOnError(string message)
         {
+            if (_disposed) return;
             _rejoinTimer?.Reset();
         }
 
         private void SocketOnOpen()
         {
+            if (_disposed) return;
             _rejoinTimer?.Reset();
             if (IsErrored())
             {
                 Rejoin();
             }
+        }
+
+        /// <summary>
+        /// Internal cleanup method to release all resources and unsubscribe from events.
+        /// Called by Socket when it is disposed, or can be called directly if needed.
+        /// </summary>
+        void IChannelCleanup.Cleanup()
+        {
+            if (_disposed) return;
+            _disposed = true;
+
+            // Cancel all timers
+            _rejoinTimer?.Reset();
+            _joinPush.CancelTimeout();
+
+            // Unsubscribe from socket events to prevent memory leaks
+            Socket.OnError -= SocketOnError;
+            Socket.OnOpen -= SocketOnOpen;
+
+            // Clear all bindings
+            _bindings.Clear();
+            _pushBuffer.Clear();
+
+            State = ChannelState.Closed;
         }
     }
 }
