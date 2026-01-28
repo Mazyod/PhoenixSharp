@@ -58,6 +58,13 @@ namespace Phoenix
         // TODO: possibly support lazy instantiation of payload (same as Phoenix js)
         public Channel(string topic, Dictionary<string, object> @params, Socket socket)
         {
+            if (topic == null)
+                throw new ArgumentNullException(nameof(topic));
+            if (string.IsNullOrWhiteSpace(topic))
+                throw new ArgumentException("Topic cannot be empty or whitespace.", nameof(topic));
+            if (socket == null)
+                throw new ArgumentNullException(nameof(socket));
+
             Topic = topic;
             Socket = socket;
 
@@ -208,6 +215,13 @@ namespace Phoenix
 
         public ChannelSubscription On(string anyEvent, Action<Message> callback)
         {
+            if (anyEvent == null)
+                throw new ArgumentNullException(nameof(anyEvent));
+            if (string.IsNullOrWhiteSpace(anyEvent))
+                throw new ArgumentException("Event name cannot be empty or whitespace.", nameof(anyEvent));
+            if (callback == null)
+                throw new ArgumentNullException(nameof(callback));
+
             var subscription = new ChannelSubscription
             {
                 Event = anyEvent,
@@ -238,6 +252,9 @@ namespace Phoenix
 
         public bool Off(ChannelSubscription subscription)
         {
+            if (subscription == null)
+                throw new ArgumentNullException(nameof(subscription));
+
             lock (_bindingsLock)
             {
                 return _bindings.TryGetValue(subscription.Event, out var subscriptions) &&
@@ -257,6 +274,11 @@ namespace Phoenix
 
         public bool Off(string anyEvent)
         {
+            if (anyEvent == null)
+                throw new ArgumentNullException(nameof(anyEvent));
+            if (string.IsNullOrWhiteSpace(anyEvent))
+                throw new ArgumentException("Event name cannot be empty or whitespace.", nameof(anyEvent));
+
             lock (_bindingsLock)
             {
                 return _bindings.Remove(anyEvent);
@@ -270,6 +292,11 @@ namespace Phoenix
 
         public Push Push(string @event, object payload = null, TimeSpan? timeout = null)
         {
+            if (@event == null)
+                throw new ArgumentNullException(nameof(@event));
+            if (string.IsNullOrWhiteSpace(@event))
+                throw new ArgumentException("Event name cannot be empty or whitespace.", nameof(@event));
+
             if (!_joinedOnce)
             {
                 throw new Exception(

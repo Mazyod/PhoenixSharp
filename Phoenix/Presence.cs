@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 // ReSharper disable once InvalidXmlDocComment
@@ -77,6 +78,9 @@ namespace Phoenix
 
         public Presence(Channel channel, Options opts = null)
         {
+            if (channel == null)
+                throw new ArgumentNullException(nameof(channel));
+
             _channel = channel;
 
             var options = opts ?? new Options();

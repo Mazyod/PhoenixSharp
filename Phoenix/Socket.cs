@@ -62,10 +62,19 @@ namespace Phoenix
             Options opts
         )
         {
+            if (endPoint == null)
+                throw new ArgumentNullException(nameof(endPoint));
+            if (string.IsNullOrWhiteSpace(endPoint))
+                throw new ArgumentException("Endpoint URL cannot be empty or whitespace.", nameof(endPoint));
+            if (websocketFactory == null)
+                throw new ArgumentNullException(nameof(websocketFactory));
+            if (opts == null)
+                throw new ArgumentNullException(nameof(opts));
+
             _endPoint = endPoint;
             _params = @params;
             _websocketFactory = websocketFactory;
-            Opts = opts ?? throw new NullReferenceException("Socket options required");
+            Opts = opts;
 
             if (Opts.ReconnectAfter != null)
             {
@@ -380,6 +389,11 @@ namespace Phoenix
             {
                 throw new ObjectDisposedException(nameof(Socket), "Cannot create channel on disposed socket");
             }
+            if (topic == null)
+                throw new ArgumentNullException(nameof(topic));
+            if (string.IsNullOrWhiteSpace(topic))
+                throw new ArgumentException("Topic cannot be empty or whitespace.", nameof(topic));
+
             var chan = new Channel(topic, chanParams, this);
             lock (_channelsLock)
             {
@@ -639,7 +653,7 @@ namespace Phoenix
             // required parameters
             public Options(IMessageSerializer messageSerializer)
             {
-                MessageSerializer = messageSerializer;
+                MessageSerializer = messageSerializer ?? throw new ArgumentNullException(nameof(messageSerializer));
             }
         }
     }

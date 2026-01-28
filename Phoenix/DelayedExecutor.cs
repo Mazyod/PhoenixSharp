@@ -31,9 +31,9 @@ namespace Phoenix
 
         public Scheduler(Action callback, Func<int, TimeSpan> timerCalc, IDelayedExecutor delayedExecutor)
         {
-            _callback = callback;
-            _timerCalc = timerCalc;
-            _delayedExecutor = delayedExecutor;
+            _callback = callback ?? throw new ArgumentNullException(nameof(callback));
+            _timerCalc = timerCalc ?? throw new ArgumentNullException(nameof(timerCalc));
+            _delayedExecutor = delayedExecutor ?? throw new ArgumentNullException(nameof(delayedExecutor));
         }
 
         public void Reset()
@@ -71,6 +71,9 @@ namespace Phoenix
     {
         public IDelayedExecution Execute(Action action, TimeSpan delay)
         {
+            if (action == null)
+                throw new ArgumentNullException(nameof(action));
+
             var execution = new TaskExecution();
             Task.Delay(delay).GetAwaiter().OnCompleted(() =>
             {

@@ -23,6 +23,13 @@ namespace Phoenix
         // define a constructor that takes a channel, event, payload, and timeout
         public Push(Channel channel, string @event, Func<IJsonBox> payload, TimeSpan timeout)
         {
+            if (channel == null)
+                throw new ArgumentNullException(nameof(channel));
+            if (@event == null)
+                throw new ArgumentNullException(nameof(@event));
+            if (string.IsNullOrWhiteSpace(@event))
+                throw new ArgumentException("Event name cannot be empty or whitespace.", nameof(@event));
+
             _channel = channel;
             _event = @event;
             _payload = payload;
@@ -56,6 +63,9 @@ namespace Phoenix
 
         public Push Receive(ReplyStatus status, Action<Reply> callback)
         {
+            if (callback == null)
+                throw new ArgumentNullException(nameof(callback));
+
             if (HasReceived(status) && _receivedResp.HasValue)
             {
                 callback(_receivedResp.Value);
