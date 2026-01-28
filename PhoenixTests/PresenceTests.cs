@@ -250,8 +250,7 @@ namespace PhoenixTests
         public void SerializationTest()
         {
             var serializer = new JsonMessageSerializer();
-            var message = MessageSerializationTests.SampleMessage;
-            message.Payload = serializer.Box(SampleState());
+            var message = MessageSerializationTests.SampleMessage with { Payload = serializer.Box(SampleState()) };
 
             // serialize
             var serialized = serializer.Serialize(message);

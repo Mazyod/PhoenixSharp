@@ -60,8 +60,7 @@ namespace PhoenixTests
         public void SerializeNullPayloadTest()
         {
             var serializer = new JsonMessageSerializer();
-            var message = SampleMessage;
-            message.Payload = null;
+            var message = SampleMessage with { Payload = null };
             var serialized = serializer.Serialize(message);
             var expected = @"['456','123','phoenix-test','phx_join',{}]"
                 .Replace("'", "\"");
@@ -76,11 +75,8 @@ namespace PhoenixTests
             var serialized = serializer.Serialize(SampleMessage);
             var deserialized = serializer.Deserialize<Message>(serialized);
             // comparing payloads is tricky
-            var deserializedNoPayload = deserialized;
-            deserializedNoPayload.Payload = null;
-
-            var message = SampleMessage;
-            message.Payload = null;
+            var deserializedNoPayload = deserialized with { Payload = null };
+            var message = SampleMessage with { Payload = null };
 
             Assert.AreEqual(message, deserializedNoPayload);
 
@@ -122,11 +118,8 @@ namespace PhoenixTests
             var serialized = serializer.Serialize(ReplyMessage);
             var deserialized = serializer.Deserialize<Message>(serialized);
             // comparing payloads is tricky
-            var deserializedNoPayload = deserialized;
-            deserializedNoPayload.Payload = null;
-
-            var message = ReplyMessage;
-            message.Payload = null;
+            var deserializedNoPayload = deserialized with { Payload = null };
+            var message = ReplyMessage with { Payload = null };
 
             Assert.AreEqual(message, deserializedNoPayload);
             Assert.IsInstanceOf(typeof(JObject), deserialized.Payload.Unbox<JObject>());
