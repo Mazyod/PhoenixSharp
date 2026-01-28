@@ -26,16 +26,5 @@ using System.Runtime.InteropServices;
 
 [assembly: Guid("4F7CF33A-97AF-4618-8391-303091FAF3D7")]
 
-// Version information for an assembly consists of the following four values:
-//
-//      Major Version
-//      Minor Version 
-//      Build Number
-//      Revision
-//
-// You can specify all the values or you can default the Build and Revision Numbers 
-// by using the '*' as shown below:
-// [assembly: AssemblyVersion("1.0.*")]
-
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+// Version is managed via Phoenix.csproj <Version> property
+// and overridden by CI during releases via /p:Version

@@ -1,10 +1,32 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
         <TargetFramework>netstandard2.0</TargetFramework>
-        <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+        <!-- Disable attributes defined in AssemblyInfo.cs, but generate version attributes -->
+        <GenerateAssemblyTitleAttribute>false</GenerateAssemblyTitleAttribute>
+        <GenerateAssemblyDescriptionAttribute>false</GenerateAssemblyDescriptionAttribute>
+        <GenerateAssemblyConfigurationAttribute>false</GenerateAssemblyConfigurationAttribute>
+        <GenerateAssemblyCompanyAttribute>false</GenerateAssemblyCompanyAttribute>
+        <GenerateAssemblyProductAttribute>false</GenerateAssemblyProductAttribute>
+        <GenerateAssemblyCopyrightAttribute>false</GenerateAssemblyCopyrightAttribute>
         <LangVersion>9.0</LangVersion>
         <Nullable>enable</Nullable>
+
+        <!-- NuGet Package Metadata -->
+        <PackageId>PhoenixSharp</PackageId>
+        <Version>1.0.0</Version>
+        <Authors>Mazyad Alabduljaleel</Authors>
+        <Description>A C# Phoenix Channels client for real-time communication with Phoenix (Elixir) servers. Unity compatible. Supports automatic reconnection, presence tracking, and pluggable websocket/serializer implementations.</Description>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <PackageProjectUrl>https://github.com/Mazyod/PhoenixSharp</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/Mazyod/PhoenixSharp</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageTags>phoenix;channels;websocket;unity;realtime;elixir;socket</PackageTags>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
     </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="../README.md" Pack="true" PackagePath="/" />
+    </ItemGroup>
 
     <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
         <WarningLevel>4</WarningLevel>
