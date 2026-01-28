@@ -1,4 +1,5 @@
-﻿using System;
+#nullable enable
+using System;
 
 namespace Phoenix
 {
@@ -31,6 +32,6 @@ namespace Phoenix
 
         void Connect();
         void Send(string data);
-        void Close(ushort? code = null, string reason = null);
+        void Close(ushort? code = null, string? reason = null);
     }
 }

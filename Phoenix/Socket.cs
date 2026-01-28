@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -32,8 +33,8 @@ namespace Phoenix
 
         // private uint connectClock = 1;
         private readonly string _endPoint;
-        private readonly Dictionary<string, string> _params;
-        private readonly Scheduler _reconnectTimer;
+        private readonly Dictionary<string, string>? _params;
+        private readonly Scheduler? _reconnectTimer;
 
         private readonly IWebsocketFactory _websocketFactory;
         internal readonly Options Opts;
@@ -43,21 +44,21 @@ namespace Phoenix
 
         private bool _closeWasClean;
 
-        private IDelayedExecution _heartbeatTimer;
-        private string _pendingHeartbeatRef;
+        private IDelayedExecution? _heartbeatTimer;
+        private string? _pendingHeartbeatRef;
         private uint _ref;
 
-        public OnClosedDelegate OnClose;
+        public OnClosedDelegate? OnClose;
 
-        public OnErrorDelegate OnError;
+        public OnErrorDelegate? OnError;
 
-        public OnMessageDelegate OnMessage;
+        public OnMessageDelegate? OnMessage;
 
-        public OnOpenDelegate OnOpen;
+        public OnOpenDelegate? OnOpen;
 
         public Socket(
             string endPoint,
-            Dictionary<string, string> @params,
+            Dictionary<string, string>? @params,
             IWebsocketFactory websocketFactory,
             Options opts
         )
@@ -65,7 +66,7 @@ namespace Phoenix
             _endPoint = endPoint;
             _params = @params;
             _websocketFactory = websocketFactory;
-            Opts = opts ?? throw new NullReferenceException("Socket options required");
+            Opts = opts ?? throw new ArgumentNullException(nameof(opts), "Socket options required");
 
             if (Opts.ReconnectAfter != null)
             {
@@ -77,7 +78,7 @@ namespace Phoenix
             }
         }
 
-        public IWebsocket Conn { get; private set; }
+        public IWebsocket? Conn { get; private set; }
 
         // convenience
         public WebsocketState? State => Conn?.State;
@@ -104,7 +105,7 @@ namespace Phoenix
             return builder.Uri;
         }
 
-        public void Disconnect(Action callback = null, ushort? code = null, string reason = null)
+        public void Disconnect(Action? callback = null, ushort? code = null, string? reason = null)
         {
             // connectClock++;
             _closeWasClean = true;
@@ -152,7 +153,7 @@ namespace Phoenix
 
         internal void Log(LogLevel level, string source, string message)
         {
-            Opts.Logger.Log(level, source, message);
+            Opts.Logger!.Log(level, source, message);
         }
 
         internal bool HasLogger()
@@ -224,7 +225,7 @@ namespace Phoenix
             Opts.DelayedExecutor.Execute(SendHeartbeat, Opts.HeartbeatInterval.Value);
         }
 
-        private void Teardown(Action callback = null, ushort? code = null, string reason = null)
+        private void Teardown(Action? callback = null, ushort? code = null, string? reason = null)
         {
             if (Conn == null || Conn.State == WebsocketState.Closed)
             {
@@ -374,7 +375,7 @@ namespace Phoenix
 
         // private void Off(List<string> refs)
 
-        public Channel Channel(string topic, Dictionary<string, object> chanParams = null)
+        public Channel Channel(string topic, Dictionary<string, object>? chanParams = null)
         {
             if (_disposed)
             {
@@ -398,7 +399,7 @@ namespace Phoenix
 
             void EncodeThenSend()
             {
-                Conn.Send(Opts.MessageSerializer.Serialize(message));
+                Conn!.Send(Opts.MessageSerializer.Serialize(message));
             }
 
             if (IsConnected())
@@ -447,7 +448,7 @@ namespace Phoenix
             _closeWasClean = false;
             if (IsConnected())
             {
-                Conn.Close(1_000, reason);
+                Conn!.Close(1_000, reason);
             }
         }
 
@@ -528,7 +529,7 @@ namespace Phoenix
 
         internal void LeaveOpenTopic(string topic)
         {
-            Channel dupChannel;
+            Channel? dupChannel;
             lock (_channelsLock)
             {
                 dupChannel = _channels.Find(channel =>
@@ -616,16 +617,16 @@ namespace Phoenix
             public TimeSpan? HeartbeatInterval = TimeSpan.FromSeconds(30);
 
             // The optional function for specialized logging
-            public ILogger Logger = null;
+            public ILogger? Logger = null;
 
             // The interval for reconnecting in the event of a connection error. Null means none.
-            public Func<int, TimeSpan> ReconnectAfter = tries =>
+            public Func<int, TimeSpan>? ReconnectAfter = tries =>
                 tries > ConnectIntervals.Length
                     ? TimeSpan.FromSeconds(5)
                     : TimeSpan.FromMilliseconds(ConnectIntervals[tries - 1]);
 
             // The interval for rejoining an errored channel. Null means none.
-            public Func<int, TimeSpan> RejoinAfter = tries =>
+            public Func<int, TimeSpan>? RejoinAfter = tries =>
                 tries > JoinIntervals.Length
                     ? TimeSpan.FromSeconds(10)
                     : TimeSpan.FromMilliseconds(JoinIntervals[tries - 1]);

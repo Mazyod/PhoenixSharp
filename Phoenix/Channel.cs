@@ -1,4 +1,5 @@
-﻿using System;
+#nullable enable
+using System;
 using System.Collections.Generic;
 using SubscriptionTable = System.Collections.Generic.Dictionary<
     string, System.Collections.Generic.List<Phoenix.ChannelSubscription>>;
@@ -19,8 +20,8 @@ namespace Phoenix
      */
     public sealed class ChannelSubscription
     {
-        public Action<Message> Callback;
-        public string Event;
+        public Action<Message> Callback = null!;
+        public string Event = null!;
     }
 
     public enum ChannelState
@@ -44,7 +45,7 @@ namespace Phoenix
          * See the stateChangeRefs comment in Socket.cs
          */
         // internal List<object> stateChangeRefs = new();
-        private readonly Scheduler _rejoinTimer;
+        private readonly Scheduler? _rejoinTimer;
 
         public readonly Socket Socket;
         public readonly string Topic;
@@ -56,7 +57,7 @@ namespace Phoenix
         public ChannelState State = ChannelState.Closed;
 
         // TODO: possibly support lazy instantiation of payload (same as Phoenix js)
-        public Channel(string topic, Dictionary<string, object> @params, Socket socket)
+        public Channel(string topic, Dictionary<string, object>? @params, Socket socket)
         {
             Topic = topic;
             Socket = socket;
@@ -87,7 +88,7 @@ namespace Phoenix
             socket.OnError += SocketOnError;
             socket.OnOpen += SocketOnOpen;
 
-            _joinPush.Receive(ReplyStatus.Ok, message =>
+            _joinPush.Receive(ReplyStatus.Ok, _ =>
             {
                 State = ChannelState.Joined;
                 _rejoinTimer?.Reset();
@@ -101,7 +102,7 @@ namespace Phoenix
                 bufferCopy.ForEach(push => push.Send());
             });
 
-            _joinPush.Receive(ReplyStatus.Error, message =>
+            _joinPush.Receive(ReplyStatus.Error, _ =>
             {
                 State = ChannelState.Errored;
                 if (socket.IsConnected())
@@ -110,7 +111,7 @@ namespace Phoenix
                 }
             });
 
-            OnClose(message =>
+            OnClose(_ =>
             {
                 _rejoinTimer?.Reset();
                 if (socket.HasLogger())
@@ -127,7 +128,7 @@ namespace Phoenix
                 socket.Remove(this);
             });
 
-            OnError(message =>
+            OnError(_ =>
             {
                 if (socket.HasLogger())
                 {
@@ -146,7 +147,7 @@ namespace Phoenix
                 }
             });
 
-            _joinPush.Receive(ReplyStatus.Timeout, message =>
+            _joinPush.Receive(ReplyStatus.Timeout, _ =>
             {
                 if (socket.HasLogger())
                 {
@@ -174,7 +175,7 @@ namespace Phoenix
             });
         }
 
-        internal string JoinRef => _joinPush.Ref;
+        internal string? JoinRef => _joinPush.Ref;
 
 
         public Push Join(TimeSpan? timeout = null)
@@ -232,7 +233,7 @@ namespace Phoenix
         {
             return On(
                 anyEvent,
-                message => callback(message.Payload.Unbox<T>())
+                message => callback(message.Payload!.Unbox<T>()!)
             );
         }
 
@@ -268,7 +269,7 @@ namespace Phoenix
             return Socket.IsConnected() && IsJoined();
         }
 
-        public Push Push(string @event, object payload = null, TimeSpan? timeout = null)
+        public Push Push(string @event, object? payload = null, TimeSpan? timeout = null)
         {
             if (!_joinedOnce)
             {
@@ -335,7 +336,7 @@ namespace Phoenix
         }
 
         // overrideable message hook
-        public virtual IJsonBox OnMessage(Message message)
+        public virtual IJsonBox? OnMessage(Message message)
         {
             return message.Payload;
         }
@@ -390,7 +391,12 @@ namespace Phoenix
                 throw new Exception("channel onMessage callbacks must return payload, modified or unmodified");
             }
 
-            List<ChannelSubscription> eventBindingsCopy;
+            if (message.Event == null)
+            {
+                return;
+            }
+
+            List<ChannelSubscription>? eventBindingsCopy;
             lock (_bindingsLock)
             {
                 if (!_bindings.TryGetValue(message.Event, out var eventBindings))
@@ -419,7 +425,7 @@ namespace Phoenix
             });
         }
 
-        internal static string ReplyEventName(string @ref)
+        internal static string ReplyEventName(string? @ref)
         {
             return $"{Reply.ReplyEventPrefix}{@ref}";
         }
