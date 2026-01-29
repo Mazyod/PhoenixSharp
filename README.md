@@ -1,5 +1,7 @@
 
-![Imgur](http://i.imgur.com/B8ClrWe.png)
+<p align="center">
+  <img width="340" height="271" alt="phoenix-sharp-splash" src="https://github.com/user-attachments/assets/3977a485-02cb-49a4-b484-b3320d21355a" />
+</p>
 
 [![.NET](https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml/badge.svg)](https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml) &nbsp; ![net](https://img.shields.io/badge/version-netstandard%202.0-blue)
 
