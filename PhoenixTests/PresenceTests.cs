@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
@@ -196,13 +196,13 @@ namespace PhoenixTests
             );
             channel.Trigger(stateMessage);
 
-            CollectionAssert.AreEqual(new[] {"u2"}, usersLeft.ToArray());
+            CollectionAssert.AreEqual(new[] { "u2" }, usersLeft.ToArray());
 
             var presenceList = presence.State.Select(ListByFirst).ToArray();
             Assert.AreEqual(1, presenceList.Length);
             Assert.AreEqual(1, presenceList[0].Payload.Unbox<JToken>().Value<int>("id"));
             // pendingDiffs is private, can't assert on it
-            CollectionAssert.AreEqual(new[] {"u1", "u2"}, usersJoined.ToArray());
+            CollectionAssert.AreEqual(new[] { "u1", "u2" }, usersJoined.ToArray());
 
             // disconnect and reconnect
             Assert.AreEqual(false, presence.InPendingSyncState());

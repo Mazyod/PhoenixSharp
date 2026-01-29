@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using DiffList = System.Collections.Generic.List<Phoenix.Presence.Diff>;
 // ReSharper disable once InvalidXmlDocComment
 /**
     ## Presence data structure
@@ -28,7 +29,6 @@ using System.Linq;
     `:phx_ref` value.
  */
 using State = System.Collections.Generic.Dictionary<string, Phoenix.PresencePayload>;
-using DiffList = System.Collections.Generic.List<Phoenix.Presence.Diff>;
 
 namespace Phoenix
 {
@@ -160,12 +160,12 @@ namespace Phoenix
                     var leftMetas = currentPresence.Metas.Where(m => !newRefs.Contains(m.PhxRef)).ToList();
                     if (joinedMetas.Count > 0)
                     {
-                        joins[key] = new PresencePayload {Metas = joinedMetas};
+                        joins[key] = new PresencePayload { Metas = joinedMetas };
                     }
 
                     if (leftMetas.Count > 0)
                     {
-                        leaves[key] = new PresencePayload {Metas = leftMetas};
+                        leaves[key] = new PresencePayload { Metas = leftMetas };
                     }
                 }
                 else
@@ -174,7 +174,7 @@ namespace Phoenix
                 }
             }
 
-            var diff = new Diff {Joins = joins, Leaves = leaves};
+            var diff = new Diff { Joins = joins, Leaves = leaves };
             return SyncDiff(new State(currentState), diff, onJoin, onLeave);
         }
 
@@ -219,7 +219,7 @@ namespace Phoenix
                 var filteredMetas = currentPresence.Metas.Where(
                     m => refsToRemove.IndexOf(m.PhxRef) < 0).ToList();
 
-                var newPresence = new PresencePayload {Metas = filteredMetas};
+                var newPresence = new PresencePayload { Metas = filteredMetas };
                 onLeave?.Invoke(key, newPresence, leftPresence);
                 if (newPresence.Metas.Count == 0)
                 {

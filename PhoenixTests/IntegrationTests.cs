@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
@@ -82,7 +82,7 @@ namespace PhoenixTests
             // test socket error recovery
 
             socket.Conn.Close();
-            
+
             Assert.AreEqual(WebsocketState.Closed, socket.State);
             Assert.That(() => socket.State == WebsocketState.Open, Is.True.After(NetworkDelay, 10));
             Assert.AreEqual(1, onCloseData.Count);

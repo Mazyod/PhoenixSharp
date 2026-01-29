@@ -28,7 +28,7 @@ namespace PhoenixTests
 
             // it "triggers socket push with channel params"
             CollectionAssert.AreEqual(
-                new[] {@"[""1"",""1"",""phoenix-test"",""phx_join"",{}]"},
+                new[] { @"[""1"",""1"",""phoenix-test"",""phx_join"",{}]" },
                 websocket.CallSend
             );
         }
@@ -67,7 +67,7 @@ namespace PhoenixTests
             // once we get join acknowledgement, it should send the event
             joinPush.Trigger(ReplyStatus.Ok);
             CollectionAssert.AreEqual(
-                new[] {@"[""1"",""3"",""phoenix-test"",""event"",{}]"},
+                new[] { @"[""1"",""3"",""phoenix-test"",""event"",{}]" },
                 websocket.CallSend
             );
         }

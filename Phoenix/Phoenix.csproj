@@ -10,6 +10,9 @@
         <GenerateAssemblyCopyrightAttribute>false</GenerateAssemblyCopyrightAttribute>
         <LangVersion>9.0</LangVersion>
         <Nullable>enable</Nullable>
+        <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+        <EnableNETAnalyzers>true</EnableNETAnalyzers>
+        <AnalysisLevel>latest</AnalysisLevel>
 
         <!-- NuGet Package Metadata -->
         <PackageId>PhoenixSharp</PackageId>
