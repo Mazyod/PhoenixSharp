@@ -19,13 +19,37 @@ dotnet test --filter "FullyQualifiedName~IntegrationTests.GeneralIntegrationTest
 
 # Run tests with verbose output
 dotnet test --verbosity normal
+
+# Check formatting (CI uses this)
+dotnet format --verify-no-changes
+
+# Auto-fix formatting issues
+dotnet format
 ```
 
 ## Project Structure
 
-- **Phoenix/** - Main library (netstandard2.0, C# 8.0)
-- **PhoenixTests/** - NUnit tests (net6.0, C# 9.0)
+- **Phoenix/** - Main library (netstandard2.0, C# 9.0, nullable enabled)
+- **PhoenixTests/** - NUnit tests (net9.0)
 - **Reference/** - Reference implementations for Unity (BestHTTP websocket, coroutine-based delayed executor)
+
+## NuGet Package
+
+The library is published to NuGet.org as `PhoenixSharp`.
+
+**Publishing:** Handled automatically via GitHub Actions trusted publishing. To release:
+1. Create a GitHub release with a version tag (e.g., `v1.0.3`)
+2. The `publish.yml` workflow builds and pushes to NuGet.org
+
+**Version management:** Version is set via git tag at release time. The `<Version>` in `Phoenix.csproj` is a fallback for local builds.
+
+## Code Style
+
+Code style is enforced via `.editorconfig` and checked in CI. Key conventions:
+- 4-space indentation
+- Allman-style braces (on new line)
+- Private fields use `_camelCase`
+- Final newline required
 
 ## Architecture
 
