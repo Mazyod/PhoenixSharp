@@ -29,12 +29,12 @@ namespace PhoenixTests
 
             return root.ToObject<Dictionary<string, PresencePayload>>(
                 JsonMessageSerializer.Serializer
-            );
+            )!;
         }
 
         private static Presence.Diff SampleDiff(
-            Dictionary<string, PresencePayload> joins = null,
-            Dictionary<string, PresencePayload> leaves = null
+            Dictionary<string, PresencePayload>? joins = null,
+            Dictionary<string, PresencePayload>? leaves = null
         )
         {
             var root = new JObject
@@ -47,7 +47,7 @@ namespace PhoenixTests
                     : JObject.FromObject(leaves, JsonMessageSerializer.Serializer)
             };
 
-            return root.ToObject<Presence.Diff>(JsonMessageSerializer.Serializer);
+            return root.ToObject<Presence.Diff>(JsonMessageSerializer.Serializer)!;
         }
 
         private static PresencePayload SamplePresencePayload(uint id)
@@ -66,7 +66,7 @@ namespace PhoenixTests
 
             return root.ToObject<PresencePayload>(
                 JsonMessageSerializer.Serializer
-            );
+            )!;
         }
 
         /**

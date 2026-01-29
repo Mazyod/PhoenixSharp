@@ -42,28 +42,28 @@ namespace PhoenixTests.WebSocketImpl
             _ws.Send(message);
         }
 
-        public void Close(ushort? code = null, string message = null)
+        public void Close(ushort? code = null, string? message = null)
         {
             _ws.Close();
         }
 
 
-        private void OnWebsocketOpen(object sender, EventArgs args)
+        private void OnWebsocketOpen(object? sender, EventArgs args)
         {
             _config.onOpenCallback(this);
         }
 
-        private void OnWebsocketClose(object sender, CloseEventArgs args)
+        private void OnWebsocketClose(object? sender, CloseEventArgs args)
         {
             _config.onCloseCallback(this, args.Code, args.Reason);
         }
 
-        private void OnWebsocketError(object sender, ErrorEventArgs args)
+        private void OnWebsocketError(object? sender, ErrorEventArgs args)
         {
             _config.onErrorCallback(this, args.Message);
         }
 
-        private void OnWebsocketMessage(object sender, MessageEventArgs args)
+        private void OnWebsocketMessage(object? sender, MessageEventArgs args)
         {
             _config.onMessageCallback(this, args.Data);
         }

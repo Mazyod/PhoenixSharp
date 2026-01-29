@@ -15,7 +15,7 @@ namespace PhoenixTests.WebSocketImpl
         private readonly UTF8Encoding _encoder = new();
 
         private readonly ClientWebSocket _ws;
-        private Task<WebSocketReceiveResult> _receiveTask;
+        private Task<WebSocketReceiveResult>? _receiveTask;
 
         public DotNetWebSocketAdapter(
             ClientWebSocket ws,
@@ -77,7 +77,7 @@ namespace PhoenixTests.WebSocketImpl
             }
         }
 
-        public void Close(ushort? code = null, string message = null)
+        public void Close(ushort? code = null, string? message = null)
         {
             try
             {

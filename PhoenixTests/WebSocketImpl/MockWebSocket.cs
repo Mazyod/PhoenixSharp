@@ -36,7 +36,7 @@ namespace PhoenixTests.WebSocketImpl
             CallSend.Add(message);
         }
 
-        public void Close(ushort? code = null, string message = null)
+        public void Close(ushort? code = null, string? message = null)
         {
             CallCloseCount += 1;
 
