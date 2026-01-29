@@ -6,7 +6,7 @@ using PhoenixTests.WebSocketImpl;
 
 namespace PhoenixTests
 {
-    [TestFixture]
+    [TestFixture, Category("Unit")]
     public class ChannelTests
     {
         public static Channel TestChannel => new("phoenix-test", null, SocketTests.Socket);

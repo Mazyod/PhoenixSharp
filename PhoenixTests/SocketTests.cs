@@ -100,7 +100,7 @@ namespace PhoenixTests
     #endregion
 
 
-    [TestFixture]
+    [TestFixture, Category("Unit")]
     public class SocketTests
     {
         public static Socket Socket =>

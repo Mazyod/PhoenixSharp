@@ -6,7 +6,7 @@ using Phoenix;
 
 namespace PhoenixTests
 {
-    [TestFixture]
+    [TestFixture, Category("Unit")]
     public class DelayedExecutorTests
     {
         #region TaskDelayedExecutor Tests

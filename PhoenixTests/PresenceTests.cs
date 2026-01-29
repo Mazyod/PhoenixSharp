@@ -7,7 +7,7 @@ using PhoenixTests.WebSocketImpl;
 
 namespace PhoenixTests
 {
-    [TestFixture]
+    [TestFixture, Category("Unit")]
     public class PresenceTests
     {
         private static PresenceMeta ListByFirst(

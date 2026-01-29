@@ -3,7 +3,7 @@
   <img width="340" height="271" alt="phoenix-sharp-splash" src="https://github.com/user-attachments/assets/3977a485-02cb-49a4-b484-b3320d21355a" />
 </p>
 
-[![.NET](https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml/badge.svg)](https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml) &nbsp; [![NuGet](https://img.shields.io/nuget/v/PhoenixSharp)](https://www.nuget.org/packages/PhoenixSharp) &nbsp; ![net](https://img.shields.io/badge/version-netstandard%202.0-blue)
+[![.NET](https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml/badge.svg)](https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml) &nbsp; [![codecov](https://codecov.io/gh/Mazyod/PhoenixSharp/branch/master/graph/badge.svg)](https://codecov.io/gh/Mazyod/PhoenixSharp) &nbsp; [![NuGet](https://img.shields.io/nuget/v/PhoenixSharp)](https://www.nuget.org/packages/PhoenixSharp) &nbsp; ![net](https://img.shields.io/badge/version-netstandard%202.0-blue)
 
 A C# Phoenix Channels client. Unity Compatible. Proudly powering [Dama King][level3-website].
 

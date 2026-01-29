@@ -18,7 +18,7 @@ namespace PhoenixTests
         }
     }
 
-    [TestFixture]
+    [TestFixture, Category("Integration")]
     public class IntegrationTests
     {
         [SetUp]

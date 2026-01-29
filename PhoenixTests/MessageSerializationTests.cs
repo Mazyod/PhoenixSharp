@@ -5,7 +5,7 @@ using Phoenix;
 
 namespace PhoenixTests
 {
-    [TestFixture]
+    [TestFixture, Category("Unit")]
     public class MessageSerializationTests
     {
         internal static Message SampleMessage =>
