@@ -92,8 +92,14 @@ namespace Phoenix
 
     internal sealed class MessageConverter : JsonConverter<Message>
     {
-        public override void WriteJson(JsonWriter writer, Message value, JsonSerializer serializer)
+        public override void WriteJson(JsonWriter writer, Message? value, JsonSerializer serializer)
         {
+            if (value == null)
+            {
+                writer.WriteNull();
+                return;
+            }
+
             // phoenix.js: consistent with phoenix, also backwards compatible
             // e.g. if the backend has handle_in(event, {}, socket)
             var payload = value.Payload?.Unbox<JToken>();
@@ -111,7 +117,7 @@ namespace Phoenix
             writer.WriteEndArray();
         }
 
-        public override Message ReadJson(JsonReader reader, Type objectType, Message existingValue,
+        public override Message ReadJson(JsonReader reader, Type objectType, Message? existingValue,
             bool hasExistingValue, JsonSerializer serializer)
         {
             var array = JArray.Load(reader);

@@ -485,7 +485,7 @@ namespace Phoenix
 
         private void OnConnMessage(IWebsocket websocket, string rawMessage)
         {
-            Message message;
+            Message? message;
             try
             {
                 message = Opts.MessageSerializer.Deserialize<Message>(rawMessage);
@@ -495,6 +495,16 @@ namespace Phoenix
                 if (HasLogger())
                 {
                     Log(LogLevel.Error, "socket", $"Failed to deserialize message: {ex.Message}");
+                }
+
+                return;
+            }
+
+            if (message == null)
+            {
+                if (HasLogger())
+                {
+                    Log(LogLevel.Error, "socket", "Deserialized message was null");
                 }
 
                 return;
