@@ -168,7 +168,7 @@ See [`Reference/Unity`](Reference/Unity) for a coroutine-based implementation.
 ### Recommended Libraries
 
 - **[BestHTTP](https://assetstore.unity.com/packages/tools/network/best-http-2-155981)** - Handles threading automatically
-- **[Json.NET for Unity](https://assetstore.unity.com/packages/tools/input-management/json-net-for-unity-11347)** - More reliable than raw Newtonsoft.Json on mobile
+- **[com.unity.nuget.newtonsoft-json](https://docs.unity3d.com/Packages/com.unity.nuget.newtonsoft-json@3.2/manual/index.html)** - Unity's official Newtonsoft.Json package
 
 ## API Reference
 
