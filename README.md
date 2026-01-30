@@ -1,216 +1,214 @@
-
 <p align="center">
   <img width="340" height="271" alt="phoenix-sharp-splash" src="https://github.com/user-attachments/assets/3977a485-02cb-49a4-b484-b3320d21355a" />
 </p>
 
-[![.NET](https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml/badge.svg)](https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml) &nbsp; [![codecov](https://codecov.io/gh/Mazyod/PhoenixSharp/branch/master/graph/badge.svg)](https://codecov.io/gh/Mazyod/PhoenixSharp) &nbsp; [![NuGet](https://img.shields.io/nuget/v/PhoenixSharp)](https://www.nuget.org/packages/PhoenixSharp) &nbsp; ![net](https://img.shields.io/badge/version-netstandard%202.0-blue)
+<p align="center">
+  <a href="https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml"><img src="https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml/badge.svg" alt=".NET" /></a>
+  <a href="https://codecov.io/gh/Mazyod/PhoenixSharp"><img src="https://codecov.io/gh/Mazyod/PhoenixSharp/branch/master/graph/badge.svg" alt="codecov" /></a>
+  <a href="https://www.nuget.org/packages/PhoenixSharp"><img src="https://img.shields.io/nuget/v/PhoenixSharp" alt="NuGet" /></a>
+  <img src="https://img.shields.io/badge/netstandard-2.0-blue" alt="netstandard 2.0" />
+</p>
 
-A C# Phoenix Channels client. Unity Compatible. Proudly powering [Dama King][level3-website].
+<p align="center">
+  <strong>A C# client for Phoenix Channels.</strong><br>
+  Unity compatible. Powering <a href="http://level3.io">Dama King</a>.
+</p>
 
-> Graphic is a shameless mix between unity, phoenix logos. Please don't sue me. Thanks.
+---
 
-+ [**Overview**](#overview): What this library is about.
-+ [**Getting Started**](#getting-started): A quicky guide on how to use this library.
-+ [**PhoenixJS**](#phoenixjs): How this library differs from PhoenixJs.
-+ [**Tests**](#tests): How to run the tests to make sure we're golden.
-+ [**Dependencies**](#dependencies): A rant about dependencies.
-+ [**Unity**](#unity): Important remarks for Unity developers.
+## Features
 
-## Overview
+- Full [Phoenix Channels](https://hexdocs.pm/phoenix/channels.html) protocol support
+- Modern async/await API with cancellation support
+- Automatic reconnection and channel rejoin
+- Presence tracking
+- Customizable WebSocket and JSON implementations
+- Unity and .NET Standard 2.0 compatible
 
-PhoenixSharp has the following main goals:
-- Aspires to be the defacto Phoenix C# client.
-- Portable enough to work out of the box in Unity and other C# environments.
+## Installation
 
-In order to achieve the goals stated, it is necessary to:
-- Maintain a close resemblance to the Phoenix.js implementation.
-- Engage the community to accommodate different requirements based on various environments.
+### NuGet
 
-## Getting Started
+```bash
+dotnet add package PhoenixSharp
+```
 
-**Migrating from older versions? [See our migration guide][migration-guide]**
+### Unity
 
-For now, you can use git submodules or simply download the sources and drop them in your project.
+Download the source and add it to your project, or use a Git submodule.
 
-Once you grab the source, you can look at `IntegrationTests.cs` for a full example. Otherwise, keep reading to learn more.
+## Quick Start
 
-### Required Interfaces
-
-#### Implementing `IWebsocketFactory` and `IWebsocket`
-
-The library requires you to implement `IWebsocketFactory` and `IWebsocket` in order to provide a websocket implementation of your choosing.
-
-Under the PhoenixTests/WebSocketImpl folder, you'll find a few sample implementations of these interfaces which you could simply copy to your project as needed.
-
-> [!WARNING]\
-> DotNetWebSocket may be unstable. Please consider using BestHTTP, WebSocketSharp, or contributing fixes, or adding new implementations 🤌
-
-#### Implementing `IMessageSerializer` and `IJsonBox`
-
-`IMessageSerializer` is the interface that allows you to customize the serialization of your Phoenix messages.
-
-`IJsonBox` wraps the underlying mutable JSON object, such as JToken in NewtonSoft.Json and JsonElement/JsonObject in System.Text.Json/System.Text.Json.Nodes.
-
-The library ships with a default implementation: `JsonMessageSerializer`. It relies on [Newtonsoft.Json][newtonsoft-website] to provide JSON serialization based on [Phoenix V2 format][phoenix-v2-serialization-format]. The implementation is self-contained in a single file. This means, by removing that one file, you can decouple your code from Newtonsoft.Json if you like.
-
-### Establishing a Connection
-
-#### Creating a Socket
-
-Once you have your websocket and serializer implementation ready, you can proceed to create a socket object. A `Phoenix.Socket` instance represents a connection to a Phoenix server.
-
-In order to ensure that socket connections are self-contained, we pass the socket parameters on initialization. Trying to connect with different parameters requires a new socket instance.
-
-```cs
-var socketOptions = new Socket.Options(new JsonMessageSerializer());
-var socketAddress = "ws://my-awesome-app.com/socket";
-var socketFactory = new WebsocketSharpFactory();
-var socket = new Socket(socketAddress, null, socketFactory, socketOptions);
-
-socket.OnOpen += onOpenCallback;
-socket.OnMessage += onMessageCallback;
-
+```csharp
+// Create and connect a socket
+var socket = new Socket(
+    "wss://example.com/socket",
+    new Socket.Options(new JsonMessageSerializer())
+);
 socket.Connect();
+
+// Join a channel
+var channel = socket.Channel("room:lobby", new { userId = "123" });
+channel.Join();
+
+// Listen for events
+channel.On("new_message", message => {
+    var payload = message.Payload.Unbox<ChatMessage>();
+    Console.WriteLine($"Received: {payload.Text}");
+});
+
+// Send messages
+channel.Push("send_message", new { text = "Hello!" });
 ```
 
-#### Joining a Channel
+### Async API
 
-Once the socket is created, you can now join a channel. The API is so simple, you could explore it yourself with auto-complete, but here's a quick example:
+```csharp
+await socket.ConnectAsync();
 
-```cs
-// initialize a channel with topic and parameters
-var roomChannel = socket.Channel(
-  "tester:phoenix-sharp",
-  channelParams
-);
+var result = await channel.JoinAsync();
+if (result.IsSuccess)
+{
+    var response = await channel.PushAsync<ChatMessage>("send_message", new { text = "Hello!" });
+    if (response.IsSuccess)
+        Console.WriteLine($"Sent with id: {response.Response.Id}");
+}
 
-// prepare any event callbacks
-// e.g. listen to phx_error inbound event
-roomChannel.On(
-  Message.InBoundEvent.Error,
-  message => errorMessage = message
-);
-// ... listen to a custom event
-roomChannel.On(
-  "after_join",
-  message => afterJoinMessage = message
-);
-// ... you can also use a generic event callback
-// this will parse the message payload automatically
-roomChannel.On(
-  "custom_event",
-  (CustomPayload payload) => Handle(payload)
-);
-
-// join the channel, handling the reply response as needed
-// here, we assume JoinResponse and ChannelError are defined
-roomChannel.Join()
-  .Receive(
-    ReplyStatus.Ok, 
-    reply => okResponse = reply.Response.Unbox<JoinResponse>()
-  )
-  .Receive(
-    ReplyStatus.Error,
-    reply => errorResponse = reply.Response.Unbox<ChannelError>()
-  );
-
-// push a message to the channel
-roomChannel
-  .Push("reply_test", payload)
-  .Receive(
-    ReplyStatus.Ok, 
-    reply => testOkReply = reply
-  );
+await channel.LeaveAsync();
 ```
 
-#### Presence Tracking
+## Documentation
 
-Presence is also supported by the library.
+- [Migration Guide](https://github.com/Mazyod/PhoenixSharp/blob/master/Migration.md) - Upgrading from older versions
+- [Integration Tests](PhoenixTests/IntegrationTests.cs) - Complete usage examples
 
-```cs
+### WebSocket Implementation
+
+The library requires an `IWebsocket` implementation. Sample implementations are available in [`PhoenixTests/WebSocketImpl`](PhoenixTests/WebSocketImpl).
+
+```csharp
+var factory = new MyWebSocketFactory();
+var socket = new Socket(address, null, factory, options);
+```
+
+**Recommended implementations:**
+- **BestHTTP** (Unity) - See [`Reference/Unity/BestHTTP`](Reference/Unity/BestHTTP)
+- **WebSocketSharp** - Good cross-platform option
+- **System.Net.WebSockets** - Built-in .NET option
+
+### JSON Serialization
+
+The default `JsonMessageSerializer` uses [Newtonsoft.Json](https://www.newtonsoft.com/json) with the [Phoenix V2 serialization format](https://github.com/phoenixframework/phoenix/blob/master/lib/phoenix/socket/serializers/v2_json_serializer.ex). To use a different serializer, implement `IMessageSerializer` and `IJsonBox`.
+
+```csharp
+var options = new Socket.Options(new MyCustomSerializer());
+```
+
+### Presence
+
+```csharp
 var presence = new Presence(channel);
-presence.OnJoin += onJoinCallback;
-presence.OnLeave += onLeaveCallback;
+
+presence.OnJoin += (key, current, newPresence) => {
+    Console.WriteLine($"{key} joined");
+};
+
+presence.OnLeave += (key, current, leftPresence) => {
+    Console.WriteLine($"{key} left");
+};
+
+// Wait for initial state (async)
+await presence.WaitForInitialSyncAsync();
 ```
 
-## PhoenixJS
+## Unity Notes
 
-The difference between PhoenixJS and PhoenixSharp can be observed in the following areas:
-- The static typing nature of C#, and in contrast, the dynamic nature of JavaScript.
-  + Defining types for various constructs.
-  + Adding generic callbacks to automatically extract and parse payloads.
-  + Using delegates, instead of callbacks, to handle events.
-- The flexibility required to allow PhoenixSharp to be adapted to different environments.
-  + Abstracting away the websocket implementation.
-  + Pluggable "Delayed Executor", useful for Unity developers.
-  + Ability to disable socket reconnect / channel rejoin.
-- The lack of features in PhoenixSharp due to lesser popularity and contributions.
+For background on Unity's .NET support, see [Microsoft's Unity scripting documentation](https://docs.microsoft.com/en-us/visualstudio/gamedev/unity/unity-scripting-upgrade).
 
-## Tests
+### Threading
 
-In order to run the integration tests specifically, you need to make sure you have a phoenix server running and point the `host` in the integration tests to it.
+By default, callbacks use `System.Threading.Tasks` which works with Unity's `SynchronizationContext`. For more control, implement `IDelayedExecutor` (or use [UniTask](https://github.com/Cysharp/UniTask) for better performance):
 
-I've published [the code for the phoenix server I'm using to run the tests against here][phoenix-integration-tests-repo]. However, if for any reason you don't want to run the phoenix server locally, you can use the following host:
-
-```
-phoenix-integration-tester.herokuapp.com
+```csharp
+var options = new Socket.Options(serializer)
+{
+    DelayedExecutor = new CoroutineDelayedExecutor()
+};
 ```
 
-## Dependencies
+See [`Reference/Unity`](Reference/Unity) for a coroutine-based implementation.
 
-### Production Dependencies
+### Recommended Libraries
 
-1. (Optional) Newtonsoft.Json
+- **[BestHTTP](https://assetstore.unity.com/packages/tools/network/best-http-2-155981)** - Handles threading automatically
+- **[Json.NET for Unity](https://assetstore.unity.com/packages/tools/input-management/json-net-for-unity-11347)** - More reliable than raw Newtonsoft.Json on mobile
 
-### Development/Test Dependencies
+## API Reference
 
-1. NUnit
-2. WebSocketSharp
-3. Newtonsoft.Json
+### Socket
 
-#### Details about the Dependencies
+| Method | Description |
+|--------|-------------|
+| `Connect()` | Connect to the server |
+| `ConnectAsync()` | Connect asynchronously |
+| `Disconnect()` | Disconnect from the server |
+| `DisconnectAsync()` | Disconnect asynchronously |
+| `Channel(topic, params)` | Create a channel |
 
-`Newtonsoft.Json` is marked as optional because it can easily be replaced with another implementation as needed. However, this flexibility when it comes to the serialization process comes at a cost.
+### Channel
 
-Due to the decoupling of the serializer from the rest of the implementation, it left use with an unfortunate side-effect. The use of `object` as the type of `payload` and `response` properties on the `Message` and `Reply` classes, respectively.
+| Method | Description |
+|--------|-------------|
+| `Join()` | Join the channel |
+| `JoinAsync()` | Join asynchronously, returns `JoinResult` |
+| `Leave()` | Leave the channel |
+| `LeaveAsync()` | Leave asynchronously |
+| `Push(event, payload)` | Send a message |
+| `PushAsync(event, payload)` | Send asynchronously, returns `PushResult` |
+| `PushAsync<T>(event, payload)` | Send with typed response |
+| `On(event, callback)` | Subscribe to events |
+| `Off(event)` | Unsubscribe from events |
+| `WaitForEventAsync(event)` | Wait for a single event |
 
-We try to mitigate the effects of this "type loss" issue by providing higher-level APIs that abstract away the need to handle the `object` types directly.
+### Presence
 
-## Unity
+| Method | Description |
+|--------|-------------|
+| `OnJoin` | Event fired when a user joins |
+| `OnLeave` | Event fired when a user leaves |
+| `OnSync` | Event fired on state sync |
+| `WaitForInitialSyncAsync()` | Wait for initial presence state |
+| `WaitForUserAsync(key, timeout)` | Wait for a specific user |
 
-First off, it would very much be worth your while to read [Microsoft's documentation on Unity's scripting upgrade][microsoft-docs-unity]. It highlights the main opportunities and challenges, which is also an inspiration for this library to take things further with the new scripting upgrade.
+## Running Tests
 
-#### Main Thread Callbacks
+```bash
+# All tests
+dotnet test
 
-One of the core components of the library is a mechanism that mimics javascipt's `setTimeout` and `setInterval` functions. It is used to trigger timeout event in case we don't get a response back in time.
+# Unit tests only
+dotnet test --filter "Category!=Integration"
 
-By default, the library uses the `System.Threading.Task` class to schedule the callbacks. Based on our tests, this works well in Unity out-of-the-box thanks to the `SynchronizationContext`.
+# Integration tests (requires server)
+dotnet test --filter "Category=Integration"
+```
 
-If you'd rather not use the `Task` based executor, you can easily replace it with a custom implementation by implementing the `IDelayedExecutor` interface. For example, you can use the `CoroutineDelayedExecutor` available in the Reference directory of this repo. Another option is to provide a custom implementation based on [UniTask][unitask-repo] if you see it more performant and beneficial to your project.
+Integration tests run against `phoenix-sharp.level3.io:3080`. Server source: [phoenix-integration-tester](https://github.com/Mazyod/phoenix-integration-tester)
 
-#### Useful Libraries
+## Contributing
 
-I'm personally shipping this library with my Unity game, so you can rest assured it will always support Unity. Here are some important notes I learned from integrating PhoenixSharp with Unity:
+Issues and pull requests are welcome!
 
-- **BestHTTP websockets** instead of Websocket-sharp. It's much better maintained and doesn't require synchronizing callbacks from the socket to the main thread. Websocket-sharp does need that.
-- **Json.NET** instead of Newtonsoft.Json, that's what I'm using. I've experienced weird issues in the past with the opensource Newtonsoft.Json on mobile platforms.
+## License
 
-**NOTE:**
-- Many people are using BestHTTP, so I figured it would be useful to add that integration separately in the repo, for people to use. See the directory, `Reference/Unity/BestHTTP`.
-- Under `Reference/Unity` directory as well, you will find a sample implementation for `IDelayedExecutor` that can be used in Unity projects.
-
-## Contributions
-
-Whether you open new issues or send in some PRs .. It's all welcome here!
+MIT
 
 ## Author
 
 Maz (Mazyad Alabduljaleel)
 
-[level3-website]: http://level3.io
-[newtonsoft-website]: https://www.newtonsoft.com/json
-[microsoft-docs-unity]: https://docs.microsoft.com/en-us/visualstudio/gamedev/unity/unity-scripting-upgrade
-[unitask-repo]: https://github.com/Cysharp/UniTask
-[migration-guide]: https://github.com/Mazyod/PhoenixSharp/blob/master/Migration.md
-[phoenix-integration-tests-repo]: https://github.com/Mazyod/phoenix-integration-tester
-[phoenix-v2-serialization-format]: https://github.com/phoenixframework/phoenix/blob/master/lib/phoenix/socket/serializers/v2_json_serializer.ex
+---
+
+<p align="center">
+  <sub>Logo is a mix of Unity and Phoenix logos. Please don't sue me.</sub>
+</p>
