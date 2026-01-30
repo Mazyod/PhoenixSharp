@@ -340,7 +340,7 @@ namespace Phoenix
             }
         }
 
-        internal bool CanPush()
+        public bool CanPush()
         {
             return Socket.IsConnected() && IsJoined();
         }
