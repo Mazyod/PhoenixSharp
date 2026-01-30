@@ -16,12 +16,14 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: read
+      contents: write  # Required for pushing version updates
       id-token: write  # Required for NuGet trusted publishing (OIDC)
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -40,6 +42,29 @@ jobs:
           fi
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "Publishing version: $VERSION"
+
+      - name: Update Unity package version
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+
+          # Update package.json
+          jq --arg v "$VERSION" '.version = $v' \
+            src/PhoenixSharp.Unity/Assets/Plugins/PhoenixSharp/package.json > tmp.json
+          mv tmp.json src/PhoenixSharp.Unity/Assets/Plugins/PhoenixSharp/package.json
+
+          # Update README.md manifest example
+          sed -i 's/"io.level3.phoenixsharp": "[^"]*"/"io.level3.phoenixsharp": "'"$VERSION"'"/' README.md
+
+      - name: Commit and push version update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/PhoenixSharp.Unity/Assets/Plugins/PhoenixSharp/package.json README.md
+          git diff --staged --quiet || git commit -m "chore: bump version to ${{ steps.version.outputs.VERSION }}"
+          git push origin HEAD:master
+          # Re-tag to include this commit so OpenUPM sees correct version
+          git tag -f ${{ github.event.release.tag_name }}
+          git push origin ${{ github.event.release.tag_name }} --force
 
       - name: Restore dependencies
         run: dotnet restore Phoenix/Phoenix.csproj
