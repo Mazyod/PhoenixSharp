@@ -6,6 +6,7 @@
   <a href="https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml"><img src="https://github.com/Mazyod/PhoenixSharp/actions/workflows/dotnet.yml/badge.svg" alt=".NET" /></a>
   <a href="https://codecov.io/gh/Mazyod/PhoenixSharp"><img src="https://codecov.io/gh/Mazyod/PhoenixSharp/branch/master/graph/badge.svg" alt="codecov" /></a>
   <a href="https://www.nuget.org/packages/PhoenixSharp"><img src="https://img.shields.io/nuget/v/PhoenixSharp" alt="NuGet" /></a>
+  <a href="https://openupm.com/packages/io.level3.phoenixsharp/"><img src="https://img.shields.io/npm/v/io.level3.phoenixsharp?label=openupm&registry_uri=https://package.openupm.com" alt="OpenUPM" /></a>
   <img src="https://img.shields.io/badge/netstandard-2.0-blue" alt="netstandard 2.0" />
 </p>
 
@@ -33,9 +34,32 @@
 dotnet add package PhoenixSharp
 ```
 
-### Unity
+### Unity (OpenUPM)
 
-Download the source and add it to your project, or use a Git submodule.
+Install via [openupm-cli](https://github.com/openupm/openupm-cli#openupm-cli):
+
+```bash
+openupm add io.level3.phoenixsharp
+```
+
+Or add manually to `Packages/manifest.json`:
+
+```json
+{
+  "scopedRegistries": [
+    {
+      "name": "package.openupm.com",
+      "url": "https://package.openupm.com",
+      "scopes": ["io.level3"]
+    }
+  ],
+  "dependencies": {
+    "io.level3.phoenixsharp": "1.1.0"
+  }
+}
+```
+
+Alternatively, download the source and add it to your project, or use a Git submodule.
 
 ## Quick Start
 
