@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.Threading;
 using NUnit.Framework;
 using Phoenix;
+using PhoenixTests.TestDoubles;
 
 namespace PhoenixTests
 {
@@ -31,8 +31,7 @@ namespace PhoenixTests
 
             Assert.IsFalse(works);
             execution.Cancel();
-            Thread.Sleep(10);
-            Assert.IsFalse(works);
+            Assert.That(() => works, Is.False.After(10, 1));
         }
 
         [Test]
@@ -100,8 +99,7 @@ namespace PhoenixTests
                 execution.Cancel();
             });
 
-            Thread.Sleep(150);
-            Assert.IsFalse(works);
+            Assert.That(() => works, Is.False.After(150, 5));
         }
 
         [Test]
@@ -166,17 +164,16 @@ namespace PhoenixTests
                 executor
             );
 
-            // Schedule multiple timeouts
+            // Schedule multiple timeouts with waits for each to complete
             scheduler.ScheduleTimeout(); // tries = 1
-            Thread.Sleep(20);
+            Assert.That(() => callCount, Is.EqualTo(1).After(20, 1));
 
             scheduler.ScheduleTimeout(); // tries = 2
-            Thread.Sleep(20);
+            Assert.That(() => callCount, Is.EqualTo(2).After(20, 1));
 
             scheduler.ScheduleTimeout(); // tries = 3
-            Thread.Sleep(20);
+            Assert.That(() => callCount, Is.EqualTo(3).After(20, 1));
 
-            Assert.AreEqual(3, callCount);
             Assert.AreEqual(new List<int> { 1, 2, 3 }, receivedTries);
         }
 
@@ -184,9 +181,10 @@ namespace PhoenixTests
         public void SchedulerResetClearsTriesTest()
         {
             var receivedTries = new List<int>();
+            var callCount = 0;
             var executor = new TaskDelayedExecutor();
             var scheduler = new Scheduler(
-                () => { },
+                () => callCount++,
                 tries =>
                 {
                     receivedTries.Add(tries);
@@ -195,15 +193,17 @@ namespace PhoenixTests
                 executor
             );
 
+            // Schedule and wait for callback to execute
             scheduler.ScheduleTimeout(); // tries = 1
-            Thread.Sleep(20);
+            Assert.That(() => callCount, Is.EqualTo(1).After(20, 1));
+
             scheduler.ScheduleTimeout(); // tries = 2
-            Thread.Sleep(20);
+            Assert.That(() => callCount, Is.EqualTo(2).After(20, 1));
 
             scheduler.Reset();
 
             scheduler.ScheduleTimeout(); // tries = 1 again (reset)
-            Thread.Sleep(20);
+            Assert.That(() => callCount, Is.EqualTo(3).After(20, 1));
 
             Assert.AreEqual(new List<int> { 1, 2, 1 }, receivedTries);
         }
@@ -222,8 +222,7 @@ namespace PhoenixTests
             scheduler.ScheduleTimeout();
             scheduler.Reset();
 
-            Thread.Sleep(100);
-            Assert.IsFalse(callbackExecuted);
+            Assert.That(() => callbackExecuted, Is.False.After(100, 5));
         }
 
         [Test]
@@ -242,8 +241,7 @@ namespace PhoenixTests
             scheduler.ScheduleTimeout();
             scheduler.ScheduleTimeout();
 
-            Thread.Sleep(100);
-            Assert.AreEqual(1, callCount);
+            Assert.That(() => callCount, Is.EqualTo(1).After(100, 5));
         }
 
         [Test]
@@ -332,48 +330,4 @@ namespace PhoenixTests
 
         #endregion
     }
-
-    #region Mock Delayed Executor for Testing
-
-    /// <summary>
-    /// Mock delayed executor that allows synchronous execution for testing
-    /// </summary>
-    public sealed class MockDelayedExecution : IDelayedExecution
-    {
-        public bool Cancelled { get; private set; }
-        public Action? Action { get; set; }
-
-        public void Cancel()
-        {
-            Cancelled = true;
-        }
-
-        public void Execute()
-        {
-            if (!Cancelled)
-            {
-                Action?.Invoke();
-            }
-        }
-    }
-
-    public sealed class MockDelayedExecutor : IDelayedExecutor
-    {
-        public Action<TimeSpan>? OnExecute { get; set; }
-        private MockDelayedExecution? _pendingExecution;
-
-        public IDelayedExecution Execute(Action action, TimeSpan delay)
-        {
-            OnExecute?.Invoke(delay);
-            _pendingExecution = new MockDelayedExecution { Action = action };
-            return _pendingExecution;
-        }
-
-        public void ExecutePending()
-        {
-            _pendingExecution?.Execute();
-        }
-    }
-
-    #endregion
 }

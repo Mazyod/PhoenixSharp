@@ -1,60 +1,15 @@
 using System;
 using System.Collections.Generic;
-using System.Threading;
 using NUnit.Framework;
 using Phoenix;
+using PhoenixTests.TestDoubles;
 using PhoenixTests.WebSocketImpl;
 
 namespace PhoenixTests
 {
     [TestFixture, Category("Unit")]
-    public class PushTests
+    public class PushTests : PhoenixTestBase
     {
-        #region Test Helpers
-
-        private static Socket CreateConnectedSocket(MockDelayedExecutor? mockExecutor = null)
-        {
-            var factory = new MockWebsocketFactoryWithCallbackTracking();
-            var options = new Socket.Options(new JsonMessageSerializer());
-            if (mockExecutor != null)
-            {
-                options.DelayedExecutor = mockExecutor;
-            }
-
-            var socket = new Socket(
-                "ws://localhost:1234",
-                null,
-                factory,
-                options
-            );
-            socket.Connect();
-            return socket;
-        }
-
-        private static (Channel channel, MockWebsocketAdapterWithCallbacks websocket, MockDelayedExecutor executor) CreateJoinedChannel()
-        {
-            var mockExecutor = new MockDelayedExecutor();
-            var factory = new MockWebsocketFactoryWithCallbackTracking();
-            var options = new Socket.Options(new JsonMessageSerializer())
-            {
-                DelayedExecutor = mockExecutor
-            };
-
-            var socket = new Socket(
-                "ws://localhost:1234",
-                null,
-                factory,
-                options
-            );
-            socket.Connect();
-            var channel = socket.Channel("test-topic");
-            var joinPush = channel.Join();
-            joinPush.Trigger(ReplyStatus.Ok);
-
-            return (channel, factory.LastCreatedWebsocket!, mockExecutor);
-        }
-
-        #endregion
 
         #region Construction & Initialization Tests
 
@@ -421,8 +376,7 @@ namespace PhoenixTests
             // Cancel timeout before it fires
             push.CancelTimeout();
 
-            Thread.Sleep(100);
-            Assert.IsFalse(timeoutCalled);
+            Assert.That(() => timeoutCalled, Is.False.After(100, 5));
         }
 
         [Test]
@@ -473,8 +427,7 @@ namespace PhoenixTests
 
             push.Reset();
 
-            Thread.Sleep(100);
-            Assert.IsFalse(timeoutCalled);
+            Assert.That(() => timeoutCalled, Is.False.After(100, 5));
         }
 
         [Test]
@@ -591,11 +544,11 @@ namespace PhoenixTests
             // Resend with a longer timeout before the first one fires
             push.Resend(TimeSpan.FromMilliseconds(200));
 
-            Thread.Sleep(100);
-            Assert.AreEqual(0, timeoutCount); // First timeout should have been cancelled
+            // First timeout should have been cancelled (check after 100ms)
+            Assert.That(() => timeoutCount, Is.EqualTo(0).After(100, 5));
 
-            Thread.Sleep(150);
-            Assert.AreEqual(1, timeoutCount); // Only the new timeout should fire
+            // Only the new timeout should fire (check after full 200ms from Resend, plus buffer)
+            Assert.That(() => timeoutCount, Is.EqualTo(1).After(250, 5));
         }
 
         #endregion
@@ -740,10 +693,8 @@ namespace PhoenixTests
             push.StartTimeout();
             push.StartTimeout();
 
-            Thread.Sleep(200);
-
             // Only one timeout should fire
-            Assert.AreEqual(1, timeoutCount);
+            Assert.That(() => timeoutCount, Is.EqualTo(1).After(200, 5));
         }
 
         [Test]
@@ -761,10 +712,8 @@ namespace PhoenixTests
             // Trigger success immediately
             push.Trigger(ReplyStatus.Ok);
 
-            Thread.Sleep(200);
-
             // Timeout should not fire since we received a response
-            Assert.IsFalse(timeoutCalled);
+            Assert.That(() => timeoutCalled, Is.False.After(200, 5));
         }
 
         #endregion

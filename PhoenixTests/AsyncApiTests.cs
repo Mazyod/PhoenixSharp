@@ -4,12 +4,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using Phoenix;
+using PhoenixTests.TestDoubles;
 using PhoenixTests.WebSocketImpl;
 
 namespace PhoenixTests
 {
     [TestFixture, Category("Unit")]
-    public class AsyncApiTests
+    public class AsyncApiTests : PhoenixTestBase
     {
         #region Socket.ConnectAsync Tests
 
@@ -138,7 +139,7 @@ namespace PhoenixTests
 
             // Simulate server reply
             var conn = factory.LastCreatedWebsocket;
-            conn!.SimulateMessage("[\"1\",\"1\",\"test:topic\",\"phx_reply\",{\"status\":\"ok\",\"response\":{}}]");
+            conn!.SimulateMessage(BuildJoinOkReply("1", "test:topic"));
 
             var result = await joinTask;
 
@@ -165,7 +166,7 @@ namespace PhoenixTests
 
             // Simulate server error reply
             var conn = factory.LastCreatedWebsocket;
-            conn!.SimulateMessage("[\"1\",\"1\",\"test:topic\",\"phx_reply\",{\"status\":\"error\",\"response\":{\"reason\":\"unauthorized\"}}]");
+            conn!.SimulateMessage(BuildJoinErrorReply("1", "test:topic", "{\"reason\":\"unauthorized\"}"));
 
             var result = await joinTask;
 
@@ -1000,103 +1001,4 @@ namespace PhoenixTests
 
         #endregion
     }
-
-    #region Additional Mock Classes for Async Tests
-
-    /// <summary>
-    /// Factory that creates websockets that call onError on Connect
-    /// </summary>
-    public sealed class ErrorOnConnectWebsocketFactory : IWebsocketFactory
-    {
-        private readonly string _errorMessage;
-
-        public ErrorOnConnectWebsocketFactory(string errorMessage)
-        {
-            _errorMessage = errorMessage;
-        }
-
-        public IWebsocket Build(WebsocketConfiguration config)
-        {
-            return new ErrorOnConnectWebsocket(config, _errorMessage);
-        }
-    }
-
-    /// <summary>
-    /// Websocket that calls onError callback on Connect
-    /// </summary>
-    public sealed class ErrorOnConnectWebsocket : IWebsocket
-    {
-        private readonly WebsocketConfiguration _config;
-        private readonly string _errorMessage;
-
-        public ErrorOnConnectWebsocket(WebsocketConfiguration config, string errorMessage)
-        {
-            _config = config;
-            _errorMessage = errorMessage;
-        }
-
-        public WebsocketState State => WebsocketState.Closed;
-
-        public void Connect()
-        {
-            _config.onErrorCallback?.Invoke(this, _errorMessage);
-        }
-
-        public void Send(string message) { }
-
-        public void Close(ushort? code = null, string? message = null) { }
-    }
-
-    /// <summary>
-    /// Factory that creates websockets with delayed open
-    /// </summary>
-    public sealed class DelayedOpenWebsocketFactory : IWebsocketFactory
-    {
-        private readonly TimeSpan _delay;
-
-        public DelayedOpenWebsocketFactory(TimeSpan delay)
-        {
-            _delay = delay;
-        }
-
-        public IWebsocket Build(WebsocketConfiguration config)
-        {
-            return new DelayedOpenWebsocket(config, _delay);
-        }
-    }
-
-    /// <summary>
-    /// Websocket that delays calling onOpen
-    /// </summary>
-    public sealed class DelayedOpenWebsocket : IWebsocket
-    {
-        private readonly WebsocketConfiguration _config;
-        private readonly TimeSpan _delay;
-        private WebsocketState _state = WebsocketState.Closed;
-
-        public DelayedOpenWebsocket(WebsocketConfiguration config, TimeSpan delay)
-        {
-            _config = config;
-            _delay = delay;
-        }
-
-        public WebsocketState State => _state;
-
-        public void Connect()
-        {
-            _state = WebsocketState.Connecting;
-            // Don't call onOpen - we're simulating a slow connection
-            // In real usage, onOpen would be called after the delay
-        }
-
-        public void Send(string message) { }
-
-        public void Close(ushort? code = null, string? message = null)
-        {
-            _state = WebsocketState.Closed;
-            _config.onCloseCallback?.Invoke(this, code ?? 0, message ?? "");
-        }
-    }
-
-    #endregion
 }

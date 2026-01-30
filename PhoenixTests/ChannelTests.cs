@@ -2,27 +2,15 @@ using System;
 using System.Collections.Generic;
 using NUnit.Framework;
 using Phoenix;
+using PhoenixTests.TestDoubles;
 using PhoenixTests.WebSocketImpl;
 
 namespace PhoenixTests
 {
     [TestFixture, Category("Unit")]
-    public class ChannelTests
+    public class ChannelTests : PhoenixTestBase
     {
-        public static Channel TestChannel => new("phoenix-test", null, SocketTests.Socket);
-
-        private static Socket CreateConnectedSocket()
-        {
-            var factory = new MockWebsocketFactoryWithCallbackTracking();
-            var socket = new Socket(
-                "ws://localhost:1234",
-                null,
-                factory,
-                new Socket.Options(new JsonMessageSerializer())
-            );
-            socket.Connect();
-            return socket;
-        }
+        public static Channel TestChannel => new("phoenix-test", null, CreateBasicSocket());
 
         [Test]
         public void JoinChannelTest()
@@ -188,7 +176,7 @@ namespace PhoenixTests
         [Test]
         public void ChannelStateHelperMethodsTest()
         {
-            var socket = SocketTests.Socket;
+            var socket = CreateBasicSocket();
             var channel = new Channel("test", null, socket);
 
             // Initially closed
@@ -499,21 +487,21 @@ namespace PhoenixTests
         [Test]
         public void ConstructorThrowsOnNullTopicTest()
         {
-            var socket = SocketTests.Socket;
+            var socket = CreateBasicSocket();
             Assert.Throws<ArgumentNullException>(() => new Channel(null!, null, socket));
         }
 
         [Test]
         public void ConstructorThrowsOnEmptyTopicTest()
         {
-            var socket = SocketTests.Socket;
+            var socket = CreateBasicSocket();
             Assert.Throws<ArgumentException>(() => new Channel("", null, socket));
         }
 
         [Test]
         public void ConstructorThrowsOnWhitespaceTopicTest()
         {
-            var socket = SocketTests.Socket;
+            var socket = CreateBasicSocket();
             Assert.Throws<ArgumentException>(() => new Channel("   ", null, socket));
         }
 
