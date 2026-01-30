@@ -69,7 +69,10 @@ await socket.ConnectAsync();
 var result = await channel.JoinAsync();
 if (result.IsSuccess)
 {
-    var response = await channel.PushAsync<ChatMessage>("send_message", new { text = "Hello!" });
+    var response = await channel.PushAsync<ChatMessage>(
+        "send_message",
+        new { text = "Hello!" }
+    );
     if (response.IsSuccess)
         Console.WriteLine($"Sent with id: {response.Response.Id}");
 }
