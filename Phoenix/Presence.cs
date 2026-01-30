@@ -2,6 +2,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using DiffList = System.Collections.Generic.List<Phoenix.Presence.Diff>;
 // ReSharper disable once InvalidXmlDocComment
 /**
@@ -232,6 +234,113 @@ namespace Phoenix
             }
 
             return state;
+        }
+
+        /// <summary>
+        /// Waits asynchronously for the initial presence sync to complete.
+        /// </summary>
+        /// <param name="cancellationToken">A cancellation token to cancel the wait operation.</param>
+        /// <returns>A task that completes when the initial sync callback is invoked.</returns>
+        /// <remarks>
+        /// This method subscribes to the OnSync delegate and completes when the first sync occurs.
+        /// If a sync has already occurred (State is not empty and not in pending sync state),
+        /// the task may complete on the next sync event.
+        /// </remarks>
+        public Task WaitForInitialSyncAsync(CancellationToken cancellationToken = default)
+        {
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            OnSyncDelegate? handler = null;
+            handler = () =>
+            {
+                // Unsubscribe to prevent multiple completions
+                OnSync -= handler;
+                tcs.TrySetResult(true);
+            };
+
+            OnSync += handler;
+
+            cancellationToken.Register(() =>
+            {
+                OnSync -= handler;
+                tcs.TrySetCanceled();
+            });
+
+            return tcs.Task;
+        }
+
+        /// <summary>
+        /// Waits asynchronously for a specific user to appear in presence state.
+        /// </summary>
+        /// <param name="key">The presence key (typically user ID) to wait for.</param>
+        /// <param name="timeout">The maximum time to wait for the user to appear.</param>
+        /// <param name="cancellationToken">A cancellation token to cancel the wait operation.</param>
+        /// <returns>
+        /// A task that completes with the user's presence payload when they appear,
+        /// or null if the timeout expires before the user appears.
+        /// </returns>
+        /// <remarks>
+        /// If the user is already present in the state, returns immediately with their presence.
+        /// Otherwise, subscribes to OnJoin and waits for the user to join.
+        /// </remarks>
+        public Task<PresencePayload?> WaitForUserAsync(
+            string key,
+            TimeSpan timeout,
+            CancellationToken cancellationToken = default)
+        {
+            if (key == null)
+                throw new ArgumentNullException(nameof(key));
+
+            var tcs = new TaskCompletionSource<PresencePayload?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            // Check if user is already present
+            if (State.TryGetValue(key, out var existingPresence))
+            {
+                return Task.FromResult<PresencePayload?>(existingPresence);
+            }
+
+            OnJoinDelegate? handler = null;
+            CancellationTokenSource? timeoutCts = null;
+            CancellationTokenRegistration cancellationRegistration = default;
+
+            void Cleanup()
+            {
+                if (handler != null)
+                {
+                    OnJoin -= handler;
+                }
+                timeoutCts?.Dispose();
+                cancellationRegistration.Dispose();
+            }
+
+            handler = (joinedKey, _, newPresence) =>
+            {
+                if (joinedKey == key)
+                {
+                    Cleanup();
+                    tcs.TrySetResult(newPresence);
+                }
+            };
+
+            OnJoin += handler;
+
+            // Set up timeout
+            timeoutCts = new CancellationTokenSource();
+            timeoutCts.CancelAfter(timeout);
+            timeoutCts.Token.Register(() =>
+            {
+                Cleanup();
+                tcs.TrySetResult(null);
+            });
+
+            // Handle external cancellation
+            cancellationRegistration = cancellationToken.Register(() =>
+            {
+                Cleanup();
+                tcs.TrySetCanceled();
+            });
+
+            return tcs.Task;
         }
 
         public sealed class Options

@@ -505,6 +505,78 @@ namespace Phoenix
             return tcs.Task;
         }
 
+        /// <summary>
+        /// Waits asynchronously for a single occurrence of a specific event on the channel.
+        /// </summary>
+        /// <param name="eventName">The name of the event to wait for.</param>
+        /// <param name="timeout">
+        /// Optional timeout for waiting. If null, waits indefinitely until the event occurs or cancellation.
+        /// </param>
+        /// <param name="cancellationToken">A cancellation token to cancel the wait operation.</param>
+        /// <returns>A task that completes with the message when the event is received.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when eventName is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when eventName is empty or whitespace.</exception>
+        /// <exception cref="TimeoutException">Thrown when the timeout expires before the event is received.</exception>
+        /// <exception cref="OperationCanceledException">Thrown when the cancellation token is triggered.</exception>
+        /// <remarks>
+        /// This method subscribes to the event, waits for a single occurrence, then automatically unsubscribes.
+        /// The subscription is properly cleaned up on timeout, cancellation, or successful receipt.
+        /// </remarks>
+        public Task<Message> WaitForEventAsync(
+            string eventName,
+            TimeSpan? timeout = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (eventName == null)
+                throw new ArgumentNullException(nameof(eventName));
+            if (string.IsNullOrWhiteSpace(eventName))
+                throw new ArgumentException("Event name cannot be empty or whitespace.", nameof(eventName));
+
+            var tcs = new TaskCompletionSource<Message>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            ChannelSubscription? subscription = null;
+            CancellationTokenSource? timeoutCts = null;
+            CancellationTokenRegistration cancellationRegistration = default;
+
+            void Cleanup()
+            {
+                if (subscription != null)
+                {
+                    Off(subscription);
+                }
+                timeoutCts?.Dispose();
+                cancellationRegistration.Dispose();
+            }
+
+            subscription = On(eventName, message =>
+            {
+                Cleanup();
+                tcs.TrySetResult(message);
+            });
+
+            // Set up timeout if specified
+            if (timeout.HasValue)
+            {
+                timeoutCts = new CancellationTokenSource();
+                timeoutCts.CancelAfter(timeout.Value);
+                timeoutCts.Token.Register(() =>
+                {
+                    Cleanup();
+                    tcs.TrySetException(new TimeoutException(
+                        $"Timeout waiting for event '{eventName}' after {timeout.Value.TotalMilliseconds}ms."));
+                });
+            }
+
+            // Handle external cancellation
+            cancellationRegistration = cancellationToken.Register(() =>
+            {
+                Cleanup();
+                tcs.TrySetCanceled();
+            });
+
+            return tcs.Task;
+        }
+
         // overrideable message hook
         public virtual IJsonBox? OnMessage(Message message)
         {

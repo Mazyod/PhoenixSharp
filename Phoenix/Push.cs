@@ -1,6 +1,8 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using StatusHookTable = System.Collections.Generic.Dictionary<
     Phoenix.ReplyStatus, System.Collections.Generic.List<System.Action<Phoenix.Reply>>>;
 
@@ -154,6 +156,40 @@ namespace Phoenix
                 )
             ));
         }
+
+        /// <summary>
+        /// Waits asynchronously for any reply (Ok, Error, or Timeout) to this push.
+        /// </summary>
+        /// <param name="cancellationToken">A cancellation token to cancel the wait operation.</param>
+        /// <returns>A task that completes with the reply when received.</returns>
+        /// <remarks>
+        /// This method registers callbacks for all reply statuses and returns once any reply is received.
+        /// If the push has already received a reply, it returns immediately with that reply.
+        /// </remarks>
+        public Task<Reply> ReceiveAsync(CancellationToken cancellationToken = default)
+        {
+            var tcs = new TaskCompletionSource<Reply>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            // If we already have a response, return it immediately
+            if (_receivedResp.HasValue)
+            {
+                return Task.FromResult(_receivedResp.Value);
+            }
+
+            void OnReply(Reply reply)
+            {
+                tcs.TrySetResult(reply);
+            }
+
+            Receive(ReplyStatus.Ok, OnReply);
+            Receive(ReplyStatus.Error, OnReply);
+            Receive(ReplyStatus.Timeout, OnReply);
+
+            cancellationToken.Register(() => tcs.TrySetCanceled());
+
+            return tcs.Task;
+        }
+
         //private bool sent = false;
     }
 }

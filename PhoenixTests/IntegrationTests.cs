@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
@@ -369,6 +371,208 @@ namespace PhoenixTests
             // TearDown
 
             socket.Disconnect();
+        }
+
+        [Test]
+        public async Task AsyncApiIntegrationTest()
+        {
+            // SetUp
+            var socketAddress = $"ws://{Host}/socket";
+            var socketFactory = new DotNetWebSocketFactory();
+            var socket = new Socket(
+                socketAddress,
+                null,
+                socketFactory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    ReconnectAfter = _ => TimeSpan.FromMilliseconds(200),
+                    Logger = new BasicLogger()
+                }
+            );
+
+            // Test ConnectAsync
+            await socket.ConnectAsync();
+            Assert.AreEqual(WebsocketState.Open, socket.State);
+
+            // Test JoinAsync with error (missing auth params)
+            var errorChannel = socket.Channel("tester:phoenix-sharp");
+            var errorJoinResult = await errorChannel.JoinAsync(TimeSpan.FromSeconds(5));
+            Assert.IsFalse(errorJoinResult.IsSuccess);
+            // Server returns "error" reply when auth params are missing
+            Assert.AreEqual("error", errorJoinResult.Error);
+            errorChannel.Leave();
+
+            // Test JoinAsync success
+            var roomChannel = socket.Channel("tester:phoenix-sharp", _channelParams);
+
+            // Start waiting for after_join event BEFORE joining (so we don't miss it)
+            var afterJoinTask = roomChannel.WaitForEventAsync("after_join", TimeSpan.FromSeconds(5));
+
+            var joinResult = await roomChannel.JoinAsync(TimeSpan.FromSeconds(5));
+            Assert.IsTrue(joinResult.IsSuccess);
+            Assert.IsNotNull(joinResult.Reply);
+
+            // Wait for the after_join event
+            var afterJoinMessage = await afterJoinTask;
+            Assert.IsNotNull(afterJoinMessage);
+            var payload = afterJoinMessage.Payload.Unbox<JObject>();
+            Assert.AreEqual("Welcome!", payload["message"].ToObject<string>());
+
+            // Test PushAsync with typed response
+            var echoParams = new Dictionary<string, object>
+            {
+                {"echo", "async_test"}
+            };
+
+            var pushResult = await roomChannel.PushAsync<Dictionary<string, object>>(
+                "reply_test",
+                echoParams,
+                TimeSpan.FromSeconds(5)
+            );
+            Assert.IsTrue(pushResult.IsSuccess);
+            Assert.IsNotNull(pushResult.Response);
+            Assert.AreEqual("async_test", pushResult.Response["echo"]?.ToString());
+
+            // Test PushAsync without typed response
+            var untypedPushResult = await roomChannel.PushAsync(
+                "reply_test",
+                echoParams,
+                TimeSpan.FromSeconds(5)
+            );
+            Assert.IsTrue(untypedPushResult.IsSuccess);
+            Assert.IsNotNull(untypedPushResult.Reply);
+
+            // Test PushAsync error
+            var errorPushResult = await roomChannel.PushAsync("error_test", null, TimeSpan.FromSeconds(5));
+            Assert.IsFalse(errorPushResult.IsSuccess);
+            Assert.AreEqual(ReplyStatus.Error, errorPushResult.Status);
+
+            // Test PushAsync timeout
+            var timeoutPushResult = await roomChannel.PushAsync(
+                "timeout_test",
+                null,
+                TimeSpan.FromMilliseconds(50)
+            );
+            Assert.IsFalse(timeoutPushResult.IsSuccess);
+            Assert.AreEqual(ReplyStatus.Timeout, timeoutPushResult.Status);
+
+            // Test Push.ReceiveAsync
+            var push = roomChannel.Push("reply_test", echoParams, TimeSpan.FromSeconds(5));
+            var reply = await push.ReceiveAsync();
+            Assert.AreEqual(ReplyStatus.Ok, reply.ReplyStatus);
+            Assert.IsNotNull(reply.Response);
+
+            // Test WaitForEventAsync timeout
+            try
+            {
+                await roomChannel.WaitForEventAsync("nonexistent_event", TimeSpan.FromMilliseconds(100));
+                Assert.Fail("Expected TimeoutException");
+            }
+            catch (TimeoutException)
+            {
+                // Expected
+            }
+
+            // Test WaitForEventAsync cancellation
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+            try
+            {
+                await roomChannel.WaitForEventAsync("nonexistent_event", null, cts.Token);
+                Assert.Fail("Expected OperationCanceledException");
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected
+            }
+
+            // Test LeaveAsync
+            await roomChannel.LeaveAsync(TimeSpan.FromSeconds(5));
+            Assert.AreEqual(ChannelState.Closed, roomChannel.State);
+
+            // Test DisconnectAsync
+            await socket.DisconnectAsync();
+            Assert.IsNull(socket.Conn);
+
+            // Test ConnectAsync cancellation
+            var socket2 = new Socket(
+                socketAddress,
+                null,
+                socketFactory,
+                new Socket.Options(new JsonMessageSerializer())
+            );
+            using var connectCts = new CancellationTokenSource();
+            connectCts.Cancel(); // Cancel immediately
+            try
+            {
+                await socket2.ConnectAsync(connectCts.Token);
+                Assert.Fail("Expected OperationCanceledException");
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected
+            }
+        }
+
+        [Test]
+        public async Task PresenceAsyncApiIntegrationTest()
+        {
+            // SetUp
+            var socketAddress = $"ws://{Host}/socket";
+            var socketFactory = new DotNetWebSocketFactory();
+            var socket = new Socket(
+                socketAddress,
+                null,
+                socketFactory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    Logger = new BasicLogger()
+                }
+            );
+
+            await socket.ConnectAsync();
+            Assert.AreEqual(WebsocketState.Open, socket.State);
+
+            var channel = socket.Channel("tester:phoenix-sharp", _channelParams);
+            var presence = new Presence(channel);
+
+            // Start waiting for initial sync before joining
+            var syncTask = presence.WaitForInitialSyncAsync();
+
+            // Join the channel
+            var joinResult = await channel.JoinAsync(TimeSpan.FromSeconds(5));
+            Assert.IsTrue(joinResult.IsSuccess);
+
+            // Wait for initial presence sync
+            await syncTask;
+
+            // Verify presence state has been populated
+            Assert.IsTrue(presence.State.Count > 0, "Presence state should be populated after sync");
+
+            // Test WaitForUserAsync - user should already be present
+            var userKey = _channelParams["auth"] as string;
+            var userPresence = await presence.WaitForUserAsync(userKey!, TimeSpan.FromSeconds(1));
+            Assert.IsNotNull(userPresence, "User presence should be found");
+            Assert.AreEqual(1, userPresence!.Metas.Count);
+
+            // Test WaitForUserAsync timeout for non-existent user
+            var nonExistentUser = await presence.WaitForUserAsync("non_existent_user_12345", TimeSpan.FromMilliseconds(100));
+            Assert.IsNull(nonExistentUser, "Non-existent user should return null on timeout");
+
+            // Test WaitForUserAsync cancellation
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+            try
+            {
+                await presence.WaitForUserAsync("another_non_existent", TimeSpan.FromSeconds(10), cts.Token);
+                Assert.Fail("Expected OperationCanceledException");
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected
+            }
+
+            // TearDown
+            await channel.LeaveAsync();
+            await socket.DisconnectAsync();
         }
     }
 }
