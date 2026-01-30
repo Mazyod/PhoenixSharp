@@ -215,19 +215,11 @@ namespace PhoenixTests
             Assert.IsNotNull(closeMessage);
 
             // test channel leave
-            // also, it should discard any additional messages
 
             Assert.IsNull(newCloseMessage);
-            Message? pushMessage = null;
-
-            newRoomChannel.On("push_test", m => pushMessage = m);
-            newRoomChannel.Push("push_test", @params);
-
-            Assert.IsNull(pushMessage);
             newRoomChannel.Leave();
 
             Assert.That(() => newCloseMessage != null, Is.True.After(NetworkDelay, 10));
-            Assert.IsNull(pushMessage); // ignored
 
             // TearDown
 

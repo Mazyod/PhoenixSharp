@@ -2,6 +2,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Phoenix
 {
@@ -158,6 +160,68 @@ namespace Phoenix
                 Conn = null;
                 _reconnectTimer?.ScheduleTimeout();
             }
+        }
+
+        /// <summary>
+        /// Connects to the Phoenix server asynchronously.
+        /// </summary>
+        public Task ConnectAsync(CancellationToken cancellationToken = default)
+        {
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            void OnOpenHandler()
+            {
+                OnOpen -= OnOpenHandler;
+                OnError -= OnErrorHandler;
+                tcs.TrySetResult(true);
+            }
+
+            void OnErrorHandler(string error)
+            {
+                OnOpen -= OnOpenHandler;
+                OnError -= OnErrorHandler;
+                tcs.TrySetException(new Exception($"Connection failed: {error}"));
+            }
+
+            OnOpen += OnOpenHandler;
+            OnError += OnErrorHandler;
+
+            cancellationToken.Register(() =>
+            {
+                OnOpen -= OnOpenHandler;
+                OnError -= OnErrorHandler;
+                tcs.TrySetCanceled();
+            });
+
+            Connect();
+
+            return tcs.Task;
+        }
+
+        /// <summary>
+        /// Disconnects from the Phoenix server asynchronously.
+        /// </summary>
+        public Task DisconnectAsync(CancellationToken cancellationToken = default)
+        {
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            void OnCloseHandler(ushort code, string reason)
+            {
+                OnClose -= OnCloseHandler;
+                tcs.TrySetResult(true);
+            }
+
+            OnClose += OnCloseHandler;
+
+            cancellationToken.Register(() =>
+            {
+                OnClose -= OnCloseHandler;
+                tcs.TrySetCanceled();
+            });
+
+            Disconnect();
+
+            return tcs.Task;
         }
 
         internal void Log(LogLevel level, string source, string message)

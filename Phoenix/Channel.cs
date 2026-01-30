@@ -1,6 +1,8 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using SubscriptionTable = System.Collections.Generic.Dictionary<
     string, System.Collections.Generic.List<Phoenix.ChannelSubscription>>;
 
@@ -36,7 +38,6 @@ namespace Phoenix
     public class Channel : IChannelCleanup
     {
         private readonly SubscriptionTable _bindings = new SubscriptionTable();
-        private readonly object _bindingsLock = new object();
         private readonly Push _joinPush;
         private readonly List<Push> _pushBuffer = new List<Push>();
         private readonly object _pushBufferLock = new object();
@@ -47,6 +48,14 @@ namespace Phoenix
         // internal List<object> stateChangeRefs = new();
         private readonly Scheduler? _rejoinTimer;
 
+        /// <summary>
+        /// Lock for state transitions and bindings access.
+        /// Epoch is incremented on every state change to detect concurrent modifications.
+        /// </summary>
+        private readonly object _stateLock = new object();
+        private long _epoch;
+        private ChannelState _state = ChannelState.Closed;
+
         public readonly Socket Socket;
         public readonly string Topic;
         private bool _joinedOnce;
@@ -54,7 +63,29 @@ namespace Phoenix
         private bool _disposed;
 
 
-        public ChannelState State = ChannelState.Closed;
+        public ChannelState State
+        {
+            get
+            {
+                lock (_stateLock)
+                {
+                    return _state;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Sets the channel state and increments the epoch counter.
+        /// Must be called to ensure epoch is always incremented on state changes.
+        /// </summary>
+        private void SetState(ChannelState newState)
+        {
+            lock (_stateLock)
+            {
+                _state = newState;
+                _epoch++;
+            }
+        }
 
         // TODO: possibly support lazy instantiation of payload (same as Phoenix js)
         public Channel(string topic, Dictionary<string, object>? @params, Socket socket)
@@ -97,7 +128,7 @@ namespace Phoenix
 
             _joinPush.Receive(ReplyStatus.Ok, _ =>
             {
-                State = ChannelState.Joined;
+                SetState(ChannelState.Joined);
                 _rejoinTimer?.Reset();
                 List<Push> bufferCopy;
                 lock (_pushBufferLock)
@@ -111,7 +142,7 @@ namespace Phoenix
 
             _joinPush.Receive(ReplyStatus.Error, _ =>
             {
-                State = ChannelState.Errored;
+                SetState(ChannelState.Errored);
                 if (socket.IsConnected())
                 {
                     _rejoinTimer?.ScheduleTimeout();
@@ -126,7 +157,7 @@ namespace Phoenix
                     socket.Log(LogLevel.Debug, "channel", $"close {topic}");
                 }
 
-                State = ChannelState.Closed;
+                SetState(ChannelState.Closed);
                 // PhoenixJS: See note in socket regarding this
                 // basically, we unregister delegates directly in c# instead of offing an array
                 // this.off(channel.stateChangeRefs)
@@ -147,7 +178,7 @@ namespace Phoenix
                     _joinPush.Reset();
                 }
 
-                State = ChannelState.Errored;
+                SetState(ChannelState.Errored);
                 if (socket.IsConnected())
                 {
                     _rejoinTimer?.ScheduleTimeout();
@@ -165,7 +196,7 @@ namespace Phoenix
                 var leavePush = new Push(this, leaveEvent, null, _timeout);
                 leavePush.Send();
 
-                State = ChannelState.Errored;
+                SetState(ChannelState.Errored);
                 _joinPush.Reset();
 
                 if (socket.IsConnected())
@@ -229,7 +260,7 @@ namespace Phoenix
                 Callback = callback
             };
 
-            lock (_bindingsLock)
+            lock (_stateLock)
             {
                 if (!_bindings.TryGetValue(anyEvent, out var subscriptions))
                 {
@@ -256,7 +287,7 @@ namespace Phoenix
             if (subscription == null)
                 throw new ArgumentNullException(nameof(subscription));
 
-            lock (_bindingsLock)
+            lock (_stateLock)
             {
                 return _bindings.TryGetValue(subscription.Event, out var subscriptions) &&
                        subscriptions.Remove(subscription);
@@ -280,9 +311,32 @@ namespace Phoenix
             if (string.IsNullOrWhiteSpace(anyEvent))
                 throw new ArgumentException("Event name cannot be empty or whitespace.", nameof(anyEvent));
 
-            lock (_bindingsLock)
+            lock (_stateLock)
             {
                 return _bindings.Remove(anyEvent);
+            }
+        }
+
+        /// <summary>
+        /// Clears all user-defined event bindings, keeping only internal events
+        /// (phx_* and chan_reply_*) that are needed for channel lifecycle management.
+        /// Called when leaving a channel to prevent callbacks from firing after Leave().
+        /// MUST be called while holding _stateLock.
+        /// </summary>
+        private void ClearUserBindingsUnsafe()
+        {
+            var keysToRemove = new List<string>();
+            foreach (var key in _bindings.Keys)
+            {
+                if (!key.StartsWith("phx_") && !key.StartsWith(Reply.ReplyEventPrefix))
+                {
+                    keysToRemove.Add(key);
+                }
+            }
+
+            foreach (var key in keysToRemove)
+            {
+                _bindings.Remove(key);
             }
         }
 
@@ -335,7 +389,14 @@ namespace Phoenix
             _rejoinTimer?.Reset();
             _joinPush.CancelTimeout();
 
-            State = ChannelState.Leaving;
+            // Set state to Leaving and clear user bindings atomically
+            // This ensures no race condition where callbacks can fire after Leave()
+            lock (_stateLock)
+            {
+                _state = ChannelState.Leaving;
+                _epoch++;
+                ClearUserBindingsUnsafe();
+            }
 
             void TriggerClose()
             {
@@ -360,6 +421,88 @@ namespace Phoenix
             }
 
             return leavePush;
+        }
+
+        /// <summary>
+        /// Joins the channel asynchronously.
+        /// </summary>
+        public Task<JoinResult> JoinAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+        {
+            var tcs = new TaskCompletionSource<JoinResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var push = Join(timeout);
+
+            push.Receive(ReplyStatus.Ok, reply => tcs.TrySetResult(JoinResult.Success(reply)));
+            push.Receive(ReplyStatus.Error, reply => tcs.TrySetResult(JoinResult.Failure(reply)));
+            push.Receive(ReplyStatus.Timeout, _ => tcs.TrySetResult(JoinResult.Timeout()));
+
+            cancellationToken.Register(() => tcs.TrySetCanceled());
+
+            return tcs.Task;
+        }
+
+        /// <summary>
+        /// Pushes a message to the channel asynchronously.
+        /// </summary>
+        public Task<PushResult> PushAsync(string @event, object? payload = null, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+        {
+            var tcs = new TaskCompletionSource<PushResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var push = Push(@event, payload, timeout);
+
+            push.Receive(ReplyStatus.Ok, reply => tcs.TrySetResult(PushResult.Success(reply)));
+            push.Receive(ReplyStatus.Error, reply => tcs.TrySetResult(PushResult.Failure(reply, ReplyStatus.Error)));
+            push.Receive(ReplyStatus.Timeout, _ => tcs.TrySetResult(PushResult.Timeout()));
+
+            cancellationToken.Register(() => tcs.TrySetCanceled());
+
+            return tcs.Task;
+        }
+
+        /// <summary>
+        /// Pushes a message to the channel asynchronously and deserializes the response.
+        /// </summary>
+        public Task<PushResult<T>> PushAsync<T>(string @event, object? payload = null, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+        {
+            var tcs = new TaskCompletionSource<PushResult<T>>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var push = Push(@event, payload, timeout);
+
+            push.Receive(ReplyStatus.Ok, reply =>
+            {
+                try
+                {
+                    var response = reply.Response != null ? reply.Response.Unbox<T>() : default!;
+                    tcs.TrySetResult(PushResult<T>.Success(response, reply));
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+            });
+            push.Receive(ReplyStatus.Error, reply => tcs.TrySetResult(PushResult<T>.Failure(reply, ReplyStatus.Error)));
+            push.Receive(ReplyStatus.Timeout, _ => tcs.TrySetResult(PushResult<T>.Timeout()));
+
+            cancellationToken.Register(() => tcs.TrySetCanceled());
+
+            return tcs.Task;
+        }
+
+        /// <summary>
+        /// Leaves the channel asynchronously.
+        /// </summary>
+        public Task LeaveAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+        {
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var push = Leave(timeout);
+
+            push.Receive(ReplyStatus.Ok, _ => tcs.TrySetResult(true));
+            push.Receive(ReplyStatus.Timeout, _ => tcs.TrySetResult(true)); // Leave completes even on timeout
+
+            cancellationToken.Register(() => tcs.TrySetCanceled());
+
+            return tcs.Task;
         }
 
         // overrideable message hook
@@ -400,7 +543,7 @@ namespace Phoenix
             }
 
             Socket.LeaveOpenTopic(Topic);
-            State = ChannelState.Joining;
+            SetState(ChannelState.Joining);
             _joinPush.Resend(timeout ?? _timeout);
         }
 
@@ -412,26 +555,40 @@ namespace Phoenix
 
         internal void Trigger(Message message)
         {
+            List<ChannelSubscription>? callbacks = null;
+            long epochWhenWeStarted;
+            bool isInternalEvent = message.Event?.StartsWith("phx_") == true
+                || message.Event?.StartsWith(Reply.ReplyEventPrefix) == true;
+
+            lock (_stateLock)
+            {
+                // Reject non-internal messages if channel is leaving (race condition guard)
+                // This prevents user callbacks from firing after Leave() is called
+                if (_state == ChannelState.Leaving && !isInternalEvent)
+                {
+                    return;
+                }
+
+                epochWhenWeStarted = _epoch;
+
+                // Get callbacks copy while holding lock (if event exists and has bindings)
+                if (message.Event != null && _bindings.TryGetValue(message.Event, out var bindings))
+                {
+                    callbacks = new List<ChannelSubscription>(bindings);
+                }
+            }
+
+            // Process message through OnMessage hook (outside lock to avoid deadlocks)
             var handledPayload = OnMessage(message);
             if (message.Payload != null && handledPayload == null)
             {
                 throw new Exception("channel onMessage callbacks must return payload, modified or unmodified");
             }
 
-            if (message.Event == null)
+            // Early exit if no event or no callbacks
+            if (message.Event == null || callbacks == null)
             {
                 return;
-            }
-
-            List<ChannelSubscription>? eventBindingsCopy;
-            lock (_bindingsLock)
-            {
-                if (!_bindings.TryGetValue(message.Event, out var eventBindings))
-                {
-                    return;
-                }
-
-                eventBindingsCopy = eventBindings != null ? new List<ChannelSubscription>(eventBindings) : null;
             }
 
             var callbackMessage = message with
@@ -439,8 +596,24 @@ namespace Phoenix
                 Payload = handledPayload,
                 JoinRef = message.JoinRef ?? JoinRef
             };
-            eventBindingsCopy?.ForEach(subscription =>
+
+            // Execute callbacks, checking epoch before each for non-internal events only
+            // Internal events (phx_*, chan_reply_*) should always be processed
+            foreach (var subscription in callbacks)
             {
+                // For non-internal events, check if Leave() was called (epoch changed)
+                // This prevents user callbacks from firing after Leave()
+                if (!isInternalEvent)
+                {
+                    lock (_stateLock)
+                    {
+                        if (_epoch != epochWhenWeStarted)
+                        {
+                            return; // Leave() was called, abort remaining callbacks
+                        }
+                    }
+                }
+
                 try
                 {
                     subscription.Callback(callbackMessage);
@@ -452,7 +625,7 @@ namespace Phoenix
                         Socket.Log(LogLevel.Error, "channel", $"Event callback threw exception for '{callbackMessage.Event}': {ex.Message}");
                     }
                 }
-            });
+            }
         }
 
         internal static string ReplyEventName(string? @ref)
@@ -519,11 +692,14 @@ namespace Phoenix
             Socket.OnError -= SocketOnError;
             Socket.OnOpen -= SocketOnOpen;
 
-            // Clear all bindings
-            _bindings.Clear();
-            _pushBuffer.Clear();
-
-            State = ChannelState.Closed;
+            // Clear all bindings and set state under lock
+            lock (_stateLock)
+            {
+                _bindings.Clear();
+                _pushBuffer.Clear();
+                _state = ChannelState.Closed;
+                _epoch++;
+            }
         }
     }
 }
