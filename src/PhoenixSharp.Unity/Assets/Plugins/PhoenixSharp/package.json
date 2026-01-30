@@ -1,6 +1,6 @@
 {
   "name": "io.level3.phoenixsharp",
-  "version": "1.1.0",
+  "version": "1.2.1",
   "displayName": "PhoenixSharp",
   "description": "C# Phoenix Channels client for real-time communication with Phoenix (Elixir) servers. Supports automatic reconnection, presence tracking, and pluggable websocket/serializer implementations.",
   "unity": "2019.4",
