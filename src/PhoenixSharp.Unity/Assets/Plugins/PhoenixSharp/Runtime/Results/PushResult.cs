@@ -47,7 +47,7 @@ namespace Phoenix
             Status = status;
         }
 
-        public static PushResult<T> Success(T response, Reply reply) => new(true, response, reply, ReplyStatus.Ok);
+        public static PushResult<T> Success([AllowNull] T response, Reply reply) => new(true, response!, reply, ReplyStatus.Ok);
         public static PushResult<T> Failure(Reply reply, ReplyStatus status) => new(false, default!, reply, status);
         public static PushResult<T> Timeout() => new(false, default!, null, ReplyStatus.Timeout);
 

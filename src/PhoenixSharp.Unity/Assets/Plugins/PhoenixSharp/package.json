@@ -1,0 +1,40 @@
+{
+  "name": "io.level3.phoenixsharp",
+  "version": "1.0.0",
+  "displayName": "PhoenixSharp",
+  "description": "C# Phoenix Channels client for real-time communication with Phoenix (Elixir) servers. Supports automatic reconnection, presence tracking, and pluggable websocket/serializer implementations.",
+  "unity": "2019.4",
+  "keywords": [
+    "phoenix",
+    "channels",
+    "websocket",
+    "realtime",
+    "elixir",
+    "socket"
+  ],
+  "author": {
+    "name": "Maz Jaleel",
+    "email": "support@level3.io",
+    "url": "https://github.com/Mazyod"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mazyod/PhoenixSharp.git"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "com.unity.nuget.newtonsoft-json": "3.0.0"
+  },
+  "samples": [
+    {
+      "displayName": "BestHTTP WebSocket",
+      "description": "WebSocket implementation using BestHTTP plugin",
+      "path": "Samples~/BestHTTP"
+    },
+    {
+      "displayName": "Coroutine Delayed Executor",
+      "description": "Unity coroutine-based delayed executor implementation",
+      "path": "Samples~/Coroutine"
+    }
+  ]
+}

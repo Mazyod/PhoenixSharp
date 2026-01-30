@@ -3,13 +3,22 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 // This file provides nullable attribute polyfills for netstandard2.0
-// These attributes are built-in for .NET Core 3.0+ and .NET 5+
+// These attributes are built-in for netstandard2.1+, .NET Core 3.0+, and .NET 5+
+// Unity targets netstandard2.1 so these are not needed there
 
-#if NETSTANDARD2_0 || NETSTANDARD2_1
+#if NETSTANDARD2_0
 
 // ReSharper disable once CheckNamespace
 namespace System.Diagnostics.CodeAnalysis
 {
+    /// <summary>
+    /// Specifies that null is allowed as an input even if the corresponding type disallows it.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Field | AttributeTargets.Parameter | AttributeTargets.Property, Inherited = false)]
+    internal sealed class AllowNullAttribute : Attribute
+    {
+    }
+
     /// <summary>
     /// Specifies that an output may be null even if the corresponding type disallows it.
     /// </summary>

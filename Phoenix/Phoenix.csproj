@@ -1,13 +1,6 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
         <TargetFramework>netstandard2.0</TargetFramework>
-        <!-- Disable attributes defined in AssemblyInfo.cs, but generate version attributes -->
-        <GenerateAssemblyTitleAttribute>false</GenerateAssemblyTitleAttribute>
-        <GenerateAssemblyDescriptionAttribute>false</GenerateAssemblyDescriptionAttribute>
-        <GenerateAssemblyConfigurationAttribute>false</GenerateAssemblyConfigurationAttribute>
-        <GenerateAssemblyCompanyAttribute>false</GenerateAssemblyCompanyAttribute>
-        <GenerateAssemblyProductAttribute>false</GenerateAssemblyProductAttribute>
-        <GenerateAssemblyCopyrightAttribute>false</GenerateAssemblyCopyrightAttribute>
         <LangVersion>9.0</LangVersion>
         <Nullable>enable</Nullable>
         <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
@@ -17,7 +10,7 @@
         <!-- NuGet Package Metadata -->
         <PackageId>PhoenixSharp</PackageId>
         <Version>1.0.0</Version>
-        <Authors>Mazyad Alabduljaleel</Authors>
+        <Authors>Maz Jaleel</Authors>
         <Description>A C# Phoenix Channels client for real-time communication with Phoenix (Elixir) servers. Unity compatible. Supports automatic reconnection, presence tracking, and pluggable websocket/serializer implementations.</Description>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
         <PackageProjectUrl>https://github.com/Mazyod/PhoenixSharp</PackageProjectUrl>
@@ -28,14 +21,23 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <InternalsVisibleTo Include="PhoenixTests" />
+    </ItemGroup>
+
+    <!-- Link source files from Unity package (single source of truth) -->
+    <ItemGroup>
+        <Compile Include="../src/PhoenixSharp.Unity/Assets/Plugins/PhoenixSharp/Runtime/**/*.cs" />
+    </ItemGroup>
+
+    <ItemGroup>
         <None Include="../README.md" Pack="true" PackagePath="/" />
     </ItemGroup>
 
     <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
         <WarningLevel>4</WarningLevel>
     </PropertyGroup>
+
     <ItemGroup>
         <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
     </ItemGroup>
-
 </Project>
