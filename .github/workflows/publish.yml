@@ -62,9 +62,6 @@ jobs:
           git add src/PhoenixSharp.Unity/Assets/Plugins/PhoenixSharp/package.json README.md
           git diff --staged --quiet || git commit -m "chore: bump version to ${{ steps.version.outputs.VERSION }}"
           git push origin HEAD:master
-          # Re-tag to include this commit so OpenUPM sees correct version
-          git tag -f ${{ github.event.release.tag_name }}
-          git push origin ${{ github.event.release.tag_name }} --force
 
       - name: Restore dependencies
         run: dotnet restore Phoenix/Phoenix.csproj
