@@ -31,7 +31,7 @@ namespace PhoenixTests
     /// including socket connections, channel operations, presence tracking, and the async API.
     ///
     /// <para><b>Test Server:</b></para>
-    /// Tests connect to a Phoenix server at <c>phoenix-sharp.level3.io:3080</c>.
+    /// Tests connect to a Phoenix server at <c>phoenix-sharp.level3.io</c>.
     /// The server source code is available at: https://github.com/Mazyod/phoenix-integration-tester
     ///
     /// <para><b>Prerequisites:</b></para>
@@ -55,7 +55,7 @@ namespace PhoenixTests
         [SetUp]
         public void Init()
         {
-            var address = $"http://{Host}/api/health-check";
+            var address = $"https://{Host}/api/health-check";
 
             // Verify server is available before running tests
             using HttpClient client = new();
@@ -72,7 +72,7 @@ namespace PhoenixTests
         /// <summary>
         /// The Phoenix server host used for integration testing.
         /// </summary>
-        private const string Host = "phoenix-sharp.level3.io:3080";
+        private const string Host = "phoenix-sharp.level3.io";
 
         /// <summary>
         /// Default channel parameters used for authentication.
@@ -120,7 +120,7 @@ namespace PhoenixTests
                 onCloseData.Add(message);
             }
 
-            var socketAddress = $"ws://{Host}/socket";
+            var socketAddress = $"wss://{Host}/socket";
             var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
@@ -361,7 +361,7 @@ namespace PhoenixTests
                 onOpenCount--;
             }
 
-            var socketAddress = $"ws://{Host}/socket";
+            var socketAddress = $"wss://{Host}/socket";
             var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
@@ -462,7 +462,7 @@ namespace PhoenixTests
                 onOpenCount++;
             }
 
-            var socketAddress = $"ws://{Host}/socket";
+            var socketAddress = $"wss://{Host}/socket";
             var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
@@ -562,7 +562,7 @@ namespace PhoenixTests
         {
             // ===== SECTION: Socket Setup and ConnectAsync =====
 
-            var socketAddress = $"ws://{Host}/socket";
+            var socketAddress = $"wss://{Host}/socket";
             var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
@@ -747,7 +747,7 @@ namespace PhoenixTests
         {
             // ===== SECTION: Socket Setup =====
 
-            var socketAddress = $"ws://{Host}/socket";
+            var socketAddress = $"wss://{Host}/socket";
             var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,

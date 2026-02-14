@@ -32,14 +32,20 @@ dotnet format
 - **Phoenix/** - Main library (netstandard2.0, C# 9.0, nullable enabled)
 - **PhoenixTests/** - NUnit tests (net9.0)
 - **Reference/** - Reference implementations for Unity (BestHTTP websocket, coroutine-based delayed executor)
+- **src/PhoenixSharp.Unity/** - Unity package project (published to OpenUPM as `io.level3.phoenixsharp`)
 
-## NuGet Package
+## Publishing
 
-The library is published to NuGet.org as `PhoenixSharp`.
+The library is distributed via two channels: **NuGet** (`PhoenixSharp`) and **OpenUPM** (`io.level3.phoenixsharp`). Both are published from a single trigger.
 
-**Publishing:** Handled automatically via GitHub Actions trusted publishing. To release:
-1. Create a GitHub release with a version tag (e.g., `v1.0.3`)
-2. The `publish.yml` workflow builds and pushes to NuGet.org
+**To release:**
+1. Create a GitHub release with a version tag (e.g., `v1.2.3`)
+2. The `publish.yml` workflow:
+   - Updates the Unity `package.json` version at `src/PhoenixSharp.Unity/Assets/Plugins/PhoenixSharp/package.json`
+   - Updates the README manifest example
+   - Commits and pushes the version bump back to `master`
+   - Builds and pushes the NuGet package via trusted publishing (OIDC)
+3. OpenUPM automatically detects the new git tag and publishes the Unity package from the `package.json`
 
 **Version management:** Version is set via git tag at release time. The `<Version>` in `Phoenix.csproj` is a fallback for local builds.
 
@@ -94,7 +100,7 @@ The library decouples from specific implementations via interfaces:
 
 Integration tests require a running Phoenix server. The test host is configured in `IntegrationTests.cs`:
 ```csharp
-private const string Host = "phoenix-sharp.level3.io:3080";
+private const string Host = "phoenix-sharp.level3.io";
 ```
 
 Server source: https://github.com/Mazyod/phoenix-integration-tester
