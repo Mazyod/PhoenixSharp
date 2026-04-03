@@ -151,6 +151,9 @@ namespace PhoenixTests
 
             // The timeout should trigger an abnormal close
             Assert.AreEqual(1, conn.CallCloseCount, "Connection should be closed on heartbeat timeout");
+
+            // Reconnect should be scheduled after heartbeat timeout
+            Assert.IsTrue(reconnectCalled, "Reconnect should be scheduled after heartbeat timeout");
         }
 
         [Test]
@@ -349,6 +352,143 @@ namespace PhoenixTests
                 .Count(e => e.Delay == TimeSpan.FromSeconds(30) && !e.IsCancelled) >= 1;
 
             Assert.IsTrue(timeoutStillPending, "Timeout should still be pending after mismatched response");
+        }
+
+        [Test]
+        public void HeartbeatExecutionIsNotLeakedOnReconnectTest()
+        {
+            var mockExecutor = new TrackingDelayedExecutor();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                DelayedExecutor = mockExecutor,
+                HeartbeatInterval = TimeSpan.FromSeconds(30),
+                ReconnectAfter = _ => TimeSpan.FromMilliseconds(100)
+            };
+
+            var socket = new Socket("ws://localhost:1234", null, factory, options);
+            socket.Connect();
+
+            var conn1 = factory.LastCreatedWebsocket;
+            Assert.IsNotNull(conn1);
+
+            // Find the initial heartbeat send execution (30s delay from ResetHeartbeat)
+            var initialHeartbeatSend = mockExecutor.Executions
+                .FirstOrDefault(e => e.Delay == TimeSpan.FromSeconds(30) && !e.IsCancelled);
+            Assert.IsNotNull(initialHeartbeatSend, "Initial heartbeat send should be scheduled");
+
+            // Simulate connection loss (code 1006 triggers reconnect)
+            conn1.SimulateClose(1006, "Connection lost");
+
+            // Trigger reconnect
+            var reconnectExec = mockExecutor.Executions
+                .LastOrDefault(e => e.Delay == TimeSpan.FromMilliseconds(100) && !e.IsCancelled);
+            Assert.IsNotNull(reconnectExec, "Reconnect should be scheduled");
+            reconnectExec!.Execute();
+
+            var conn2 = factory.LastCreatedWebsocket;
+            Assert.AreNotSame(conn1, conn2, "New connection should be established");
+
+            // The old heartbeat send execution should have been cancelled
+            // (either by OnConnClose or by the new ResetHeartbeat on reconnect)
+            Assert.IsTrue(initialHeartbeatSend!.IsCancelled,
+                "Old heartbeat send execution should be cancelled after reconnection");
+        }
+
+        [Test]
+        public void HeartbeatResponseDoesNotLeakExecutionTest()
+        {
+            var mockExecutor = new TrackingDelayedExecutor();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                DelayedExecutor = mockExecutor,
+                HeartbeatInterval = TimeSpan.FromSeconds(30),
+                ReconnectAfter = _ => TimeSpan.FromMilliseconds(100)
+            };
+
+            var socket = new Socket("ws://localhost:1234", null, factory, options);
+            socket.Connect();
+
+            var conn = factory.LastCreatedWebsocket;
+            Assert.IsNotNull(conn);
+
+            // Trigger the initial heartbeat send
+            var heartbeatSend = mockExecutor.Executions
+                .FirstOrDefault(e => e.Delay == TimeSpan.FromSeconds(30) && !e.IsCancelled);
+            Assert.IsNotNull(heartbeatSend);
+            heartbeatSend!.Execute();
+
+            // Heartbeat was sent with ref "1"
+            Assert.AreEqual(1, conn.CallSend.Count);
+
+            // Simulate heartbeat response — this schedules a NEW SendHeartbeat in OnConnMessage
+            conn.SimulateMessage(BuildHeartbeatReply("1"));
+
+            // Find the rescheduled heartbeat send (new 30s execution after the response)
+            var rescheduledSend = mockExecutor.Executions
+                .LastOrDefault(e => e.Delay == TimeSpan.FromSeconds(30) && !e.IsCancelled);
+            Assert.IsNotNull(rescheduledSend, "New heartbeat send should be scheduled after response");
+
+            // Simulate connection loss
+            conn.SimulateClose(1006, "Connection lost");
+
+            // The rescheduled send should be cancelled by OnConnClose -> _heartbeatTimer?.Cancel()
+            Assert.IsTrue(rescheduledSend!.IsCancelled,
+                "Rescheduled heartbeat send should be cancelled after connection close");
+        }
+
+        [Test]
+        public void HeartbeatTimeoutSchedulesReconnectTest()
+        {
+            var mockExecutor = new TrackingDelayedExecutor();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var reconnectCalled = false;
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                DelayedExecutor = mockExecutor,
+                HeartbeatInterval = TimeSpan.FromSeconds(30),
+                ReconnectAfter = _ =>
+                {
+                    reconnectCalled = true;
+                    return TimeSpan.FromMilliseconds(100);
+                }
+            };
+
+            var socket = new Socket("ws://localhost:1234", null, factory, options);
+            socket.Connect();
+
+            var conn1 = factory.LastCreatedWebsocket;
+            Assert.IsNotNull(conn1);
+
+            // Trigger heartbeat send
+            var heartbeatSend = mockExecutor.Executions
+                .FirstOrDefault(e => e.Delay == TimeSpan.FromSeconds(30) && !e.IsCancelled);
+            Assert.IsNotNull(heartbeatSend);
+            heartbeatSend!.Execute();
+
+            // Now find and trigger the heartbeat timeout (another 30s execution)
+            var heartbeatTimeout = mockExecutor.Executions
+                .LastOrDefault(e => e.Delay == TimeSpan.FromSeconds(30) && !e.IsCancelled);
+            Assert.IsNotNull(heartbeatTimeout);
+            heartbeatTimeout!.Execute();
+
+            // AbnormalClose should have closed the connection
+            Assert.AreEqual(1, conn1.CallCloseCount, "Connection should be closed on heartbeat timeout");
+
+            // Reconnect should have been scheduled
+            Assert.IsTrue(reconnectCalled,
+                "Reconnect should be scheduled after heartbeat timeout");
+
+            // Trigger the reconnect
+            var reconnectExec = mockExecutor.Executions
+                .LastOrDefault(e => e.Delay == TimeSpan.FromMilliseconds(100) && !e.IsCancelled);
+            Assert.IsNotNull(reconnectExec, "Reconnect execution should exist");
+            reconnectExec!.Execute();
+
+            // A new connection should be established
+            var conn2 = factory.LastCreatedWebsocket;
+            Assert.AreNotSame(conn1, conn2, "New connection should be created after reconnect");
         }
     }
 }

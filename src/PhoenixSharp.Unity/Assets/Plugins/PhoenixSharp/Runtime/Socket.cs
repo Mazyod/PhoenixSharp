@@ -280,7 +280,12 @@ namespace Phoenix
                 Log(LogLevel.Debug, "transport", "heartbeat timeout. Attempting to re-establish connection");
             }
 
-            AbnormalClose("heartbeat timeout");
+            // Match PhoenixJS: trigger channel errors, then teardown with a callback
+            // that explicitly schedules reconnection. This bypasses OnConnClose's
+            // code != 1000 check, which would otherwise block reconnection.
+            TriggerChanError();
+            _closeWasClean = false;
+            Teardown(() => _reconnectTimer?.ScheduleTimeout(), 1_000, "heartbeat timeout");
         }
 
         private void ResetHeartbeat()
@@ -295,7 +300,7 @@ namespace Phoenix
             _pendingHeartbeatRef = null;
             _heartbeatTimer?.Cancel();
 
-            Opts.DelayedExecutor.Execute(SendHeartbeat, Opts.HeartbeatInterval.Value);
+            _heartbeatTimer = Opts.DelayedExecutor.Execute(SendHeartbeat, Opts.HeartbeatInterval.Value);
         }
 
         private void Teardown(Action? callback = null, ushort? code = null, string? reason = null)
@@ -578,7 +583,7 @@ namespace Phoenix
             {
                 _heartbeatTimer?.Cancel();
                 _pendingHeartbeatRef = null;
-                Opts.DelayedExecutor.Execute(SendHeartbeat, Opts.HeartbeatInterval.Value);
+                _heartbeatTimer = Opts.DelayedExecutor.Execute(SendHeartbeat, Opts.HeartbeatInterval.Value);
             }
 
             if (HasLogger())

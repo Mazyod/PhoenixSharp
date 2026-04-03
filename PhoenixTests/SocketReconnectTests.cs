@@ -489,5 +489,89 @@ namespace PhoenixTests
         }
 
         #endregion
+
+        #region Two-Channel Reconnect Tests
+
+        [Test]
+        public void TwoChannelReconnectCycleDoesNotInfiniteLoopTest()
+        {
+            var mockExecutor = new TrackingDelayedExecutor();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                DelayedExecutor = mockExecutor,
+                HeartbeatInterval = null, // disable to simplify
+                ReconnectAfter = _ => TimeSpan.FromMilliseconds(100)
+            };
+
+            var socket = new Socket("ws://localhost:1234", null, factory, options);
+            socket.Connect();
+            var conn1 = factory.LastCreatedWebsocket;
+            Assert.IsNotNull(conn1);
+
+            // Create and join 2 channels
+            var channelA = socket.Channel("room:1");
+            var channelB = socket.Channel("room:2");
+            channelA.Join();
+            channelB.Join();
+
+            // Simulate join OK replies for both
+            conn1.SimulateMessage(BuildJoinOkReply("1", "room:1"));
+            conn1.SimulateMessage(BuildJoinOkReply("2", "room:2"));
+            Assert.AreEqual(ChannelState.Joined, channelA.State);
+            Assert.AreEqual(ChannelState.Joined, channelB.State);
+
+            // Record old JoinRefs
+            var oldJoinRefA = "1";
+            var oldJoinRefB = "2";
+
+            // Simulate connection loss
+            conn1.SimulateClose(1006, "Connection lost");
+            Assert.AreEqual(ChannelState.Errored, channelA.State);
+            Assert.AreEqual(ChannelState.Errored, channelB.State);
+
+            // Execute reconnect
+            var reconnectExec = mockExecutor.Executions
+                .LastOrDefault(e => e.Delay == TimeSpan.FromMilliseconds(100) && !e.IsCancelled);
+            Assert.IsNotNull(reconnectExec, "Reconnect should be scheduled");
+            reconnectExec!.Execute();
+
+            // New connection established, channels should be rejoining
+            var conn2 = factory.LastCreatedWebsocket;
+            Assert.AreNotSame(conn1, conn2);
+            Assert.AreEqual(ChannelState.Joining, channelA.State);
+            Assert.AreEqual(ChannelState.Joining, channelB.State);
+
+            // Get the new JoinRefs and simulate join OK
+            var newJoinRefA = channelA.JoinRef;
+            var newJoinRefB = channelB.JoinRef;
+            Assert.AreNotEqual(oldJoinRefA, newJoinRefA);
+            Assert.AreNotEqual(oldJoinRefB, newJoinRefB);
+
+            conn2.SimulateMessage(BuildJoinOkReply(newJoinRefA!, "room:1"));
+            conn2.SimulateMessage(BuildJoinOkReply(newJoinRefB!, "room:2"));
+            Assert.AreEqual(ChannelState.Joined, channelA.State);
+            Assert.AreEqual(ChannelState.Joined, channelB.State);
+
+            // Record state: count pending executions and messages sent
+            var executionCountAfterRejoin = mockExecutor.PendingCount;
+            var sendCountAfterRejoin = conn2.CallSend.Count;
+
+            // Simulate server sending phx_close with OLD JoinRefs (stale messages from old connection)
+            conn2.SimulateMessage(BuildPhxMessage(oldJoinRefA, null, "room:1", "phx_close"));
+            conn2.SimulateMessage(BuildPhxMessage(oldJoinRefB, null, "room:2", "phx_close"));
+
+            // Channels should STILL be joined — stale messages dropped by IsMember
+            Assert.AreEqual(ChannelState.Joined, channelA.State,
+                "Channel A should remain Joined after stale phx_close");
+            Assert.AreEqual(ChannelState.Joined, channelB.State,
+                "Channel B should remain Joined after stale phx_close");
+
+            // No additional messages sent (no rejoin triggered)
+            Assert.AreEqual(sendCountAfterRejoin, conn2.CallSend.Count,
+                "No additional messages should be sent after stale phx_close");
+        }
+
+        #endregion
     }
 }
