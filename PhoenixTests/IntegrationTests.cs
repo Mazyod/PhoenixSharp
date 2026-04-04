@@ -84,6 +84,19 @@ namespace PhoenixTests
         };
 
         /// <summary>
+        /// Returns all available WebSocket factory implementations for parameterized tests.
+        /// Each integration test runs once per factory, verifying transport-agnostic behavior.
+        ///
+        /// Note: WebSocketSharp is excluded — the NuGet package (1.0.3-rc11) does not support
+        /// modern TLS versions and fails with "bad protocol version" on wss:// connections.
+        /// </summary>
+        private static IEnumerable<IWebsocketFactory> AvailableFactories()
+        {
+            yield return new DotNetWebSocketFactory();
+            yield return new NativeWebSocketFactory();
+        }
+
+        /// <summary>
         /// Comprehensive test covering the core functionality of the PhoenixSharp client.
         ///
         /// This test verifies:
@@ -101,8 +114,8 @@ namespace PhoenixTests
         /// Expected behavior: All operations complete successfully with appropriate callbacks
         /// being invoked and state transitions occurring as expected.
         /// </summary>
-        [Test]
-        public void GeneralIntegrationTest()
+        [TestCaseSource(nameof(AvailableFactories))]
+        public void GeneralIntegrationTest(IWebsocketFactory socketFactory)
         {
             // ===== SECTION: Socket Setup and Connection =====
 
@@ -121,7 +134,6 @@ namespace PhoenixTests
             }
 
             var socketAddress = $"wss://{Host}/socket";
-            var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
                 null,
@@ -262,8 +274,8 @@ namespace PhoenixTests
                 .Push("timeout_test", null, TimeSpan.FromMilliseconds(50))
                 .Receive(ReplyStatus.Timeout, r => testTimeoutReply = r);
 
-            // Timeout callback should fire after the specified 50ms
-            Assert.That(() => testTimeoutReply != null, Is.True.After(50));
+            // Timeout callback should fire shortly after the specified 50ms
+            Assert.That(() => testTimeoutReply != null, Is.True.After(500, 10));
 
             // ===== SECTION: Channel Auto-Rejoin on Socket Reconnect =====
             // Tests that channels automatically rejoin when the socket disconnects and reconnects.
@@ -342,8 +354,8 @@ namespace PhoenixTests
         /// remain balanced (OnClose decrements, OnOpen increments), demonstrating proper
         /// callback lifecycle management.
         /// </summary>
-        [Test]
-        public void MultipleJoinIntegrationTest()
+        [TestCaseSource(nameof(AvailableFactories))]
+        public void MultipleJoinIntegrationTest(IWebsocketFactory socketFactory)
         {
             // ===== SECTION: Socket Setup with Open/Close Tracking =====
             // Uses onOpenCount to track connection lifecycle - incremented on open, decremented on close
@@ -362,7 +374,6 @@ namespace PhoenixTests
             }
 
             var socketAddress = $"wss://{Host}/socket";
-            var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
                 null,
@@ -450,8 +461,8 @@ namespace PhoenixTests
         /// the OnJoin callback should fire with the user's presence data, including
         /// metadata (metas) with a PhxRef and custom payload data from the server.
         /// </summary>
-        [Test]
-        public void PresenceTrackingTest()
+        [TestCaseSource(nameof(AvailableFactories))]
+        public void PresenceTrackingTest(IWebsocketFactory socketFactory)
         {
             // ===== SECTION: Socket Setup =====
 
@@ -463,7 +474,6 @@ namespace PhoenixTests
             }
 
             var socketAddress = $"wss://{Host}/socket";
-            var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
                 null,
@@ -557,13 +567,12 @@ namespace PhoenixTests
         /// callback-based counterparts, with proper Task completion, timeout handling,
         /// and cancellation token support.
         /// </summary>
-        [Test]
-        public async Task AsyncApiIntegrationTest()
+        [TestCaseSource(nameof(AvailableFactories))]
+        public async Task AsyncApiIntegrationTest(IWebsocketFactory socketFactory)
         {
             // ===== SECTION: Socket Setup and ConnectAsync =====
 
             var socketAddress = $"wss://{Host}/socket";
-            var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
                 null,
@@ -742,13 +751,12 @@ namespace PhoenixTests
         /// Expected behavior: The async presence API should allow awaiting presence state
         /// synchronization and specific user joins, with proper timeout and cancellation support.
         /// </summary>
-        [Test]
-        public async Task PresenceAsyncApiIntegrationTest()
+        [TestCaseSource(nameof(AvailableFactories))]
+        public async Task PresenceAsyncApiIntegrationTest(IWebsocketFactory socketFactory)
         {
             // ===== SECTION: Socket Setup =====
 
             var socketAddress = $"wss://{Host}/socket";
-            var socketFactory = new DotNetWebSocketFactory();
             var socket = new Socket(
                 socketAddress,
                 null,

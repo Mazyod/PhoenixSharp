@@ -35,6 +35,11 @@
       "displayName": "Coroutine Delayed Executor",
       "description": "Unity coroutine-based delayed executor implementation",
       "path": "Samples~/Coroutine"
+    },
+    {
+      "displayName": "NativeWebSocket",
+      "description": "WebSocket implementation using NativeWebSocket (endel/NativeWebSocket)",
+      "path": "Samples~/NativeWebSocket"
     }
   ]
 }
