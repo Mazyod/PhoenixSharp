@@ -119,9 +119,9 @@ var socket = new Socket(address, null, factory, options);
 ```
 
 **Recommended implementations:**
-- **BestHTTP** (Unity) - See [`Reference/Unity/BestHTTP`](Reference/Unity/BestHTTP)
-- **WebSocketSharp** - Good cross-platform option
-- **System.Net.WebSockets** - Built-in .NET option
+- **[NativeWebSocket](https://github.com/endel/NativeWebSocket)** (Unity) - Open source, supports WebGL/Android/iOS/UWP. Install via UPM, then import the sample adapter from the package.
+- **[BestHTTP](https://assetstore.unity.com/packages/tools/network/best-http-2-155981)** (Unity) - Commercial plugin, handles threading automatically. See sample adapter in the package.
+- **System.Net.WebSockets** - Built-in .NET option, no additional dependencies
 
 ### JSON Serialization
 
@@ -165,9 +165,15 @@ var options = new Socket.Options(serializer)
 
 See [`Reference/Unity`](Reference/Unity) for a coroutine-based implementation.
 
+### WebSocket for Unity
+
+The recommended WebSocket library for Unity is **[NativeWebSocket](https://github.com/endel/NativeWebSocket)** — an open-source, dependency-free WebSocket client that supports WebGL, Android, iOS, and UWP. Install it via UPM with the git URL, then import the **NativeWebSocket** sample adapter from the PhoenixSharp package in Unity's Package Manager.
+
+Alternatively, **[BestHTTP](https://assetstore.unity.com/packages/tools/network/best-http-2-155981)** is a commercial plugin that handles threading automatically. A sample adapter is also included in the package.
+
 ### Recommended Libraries
 
-- **[BestHTTP](https://assetstore.unity.com/packages/tools/network/best-http-2-155981)** - Handles threading automatically
+- **[NativeWebSocket](https://github.com/endel/NativeWebSocket)** - Open-source WebSocket client for Unity (WebGL/Android/iOS/UWP)
 - **[com.unity.nuget.newtonsoft-json](https://docs.unity3d.com/Packages/com.unity.nuget.newtonsoft-json@3.2/manual/index.html)** - Unity's official Newtonsoft.Json package
 
 ## API Reference
