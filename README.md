@@ -174,6 +174,7 @@ Alternatively, **[BestHTTP](https://assetstore.unity.com/packages/tools/network/
 ### Recommended Libraries
 
 - **[NativeWebSocket](https://github.com/endel/NativeWebSocket)** - Open-source WebSocket client for Unity (WebGL/Android/iOS/UWP)
+- **[BestHTTP](https://assetstore.unity.com/packages/tools/network/best-http-2-155981)** - Commercial plugin, handles threading automatically
 - **[com.unity.nuget.newtonsoft-json](https://docs.unity3d.com/Packages/com.unity.nuget.newtonsoft-json@3.2/manual/index.html)** - Unity's official Newtonsoft.Json package
 
 ## API Reference
