@@ -154,16 +154,16 @@ For background on Unity's .NET support, see [Microsoft's Unity scripting documen
 
 ### Threading
 
-By default, callbacks use `System.Threading.Tasks` which works with Unity's `SynchronizationContext`. For more control, implement `IDelayedExecutor` (or use [UniTask](https://github.com/Cysharp/UniTask) for better performance):
+By default, the library uses `System.Threading.Tasks` for timers and delays. For Unity, you can swap in a better executor via `IDelayedExecutor`. The recommended option is **[UniTask](https://github.com/Cysharp/UniTask)** — import the sample from the package and use `UniTaskDelayedExecutor` for zero-allocation delays on Unity's PlayerLoop:
 
 ```csharp
 var options = new Socket.Options(serializer)
 {
-    DelayedExecutor = new CoroutineDelayedExecutor()
+    DelayedExecutor = new UniTaskDelayedExecutor()
 };
 ```
 
-See [`Reference/Unity`](Reference/Unity) for a coroutine-based implementation.
+A coroutine-based executor is also available as a sample for projects that don't use UniTask.
 
 ### WebSocket for Unity
 
@@ -173,6 +173,7 @@ Alternatively, **[BestHTTP](https://assetstore.unity.com/packages/tools/network/
 
 ### Recommended Libraries
 
+- **[UniTask](https://github.com/Cysharp/UniTask)** - Zero-allocation async/await; use with the UniTask Delayed Executor sample for best performance
 - **[NativeWebSocket](https://github.com/endel/NativeWebSocket)** - Open-source WebSocket client for Unity (WebGL/Android/iOS/UWP)
 - **[BestHTTP](https://assetstore.unity.com/packages/tools/network/best-http-2-155981)** - Commercial plugin, handles threading automatically
 - **[com.unity.nuget.newtonsoft-json](https://docs.unity3d.com/Packages/com.unity.nuget.newtonsoft-json@3.2/manual/index.html)** - Unity's official Newtonsoft.Json package

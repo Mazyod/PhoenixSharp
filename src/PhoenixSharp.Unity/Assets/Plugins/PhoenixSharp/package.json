@@ -40,6 +40,11 @@
       "displayName": "NativeWebSocket",
       "description": "WebSocket implementation using NativeWebSocket (endel/NativeWebSocket)",
       "path": "Samples~/NativeWebSocket"
+    },
+    {
+      "displayName": "UniTask Delayed Executor",
+      "description": "Zero-allocation delayed executor using Cysharp/UniTask for better performance",
+      "path": "Samples~/UniTask"
     }
   ]
 }
