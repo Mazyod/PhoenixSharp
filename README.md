@@ -54,7 +54,7 @@ Or add manually to `Packages/manifest.json`:
     }
   ],
   "dependencies": {
-    "io.level3.phoenixsharp": "1.4.0"
+    "io.level3.phoenixsharp": "1.4.1"
   }
 }
 ```
