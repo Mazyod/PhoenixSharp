@@ -228,7 +228,7 @@ dotnet test --filter "Category!=Integration"
 dotnet test --filter "Category=Integration"
 ```
 
-Integration tests run against `phoenix-sharp.level3.io:3080`. Server source: [phoenix-integration-tester](https://github.com/Mazyod/phoenix-integration-tester)
+Integration tests run against `phoenix-sharp.level3.io`. Server source: [phoenix-integration-tester](https://github.com/Mazyod/phoenix-integration-tester)
 
 ## Contributing
 
