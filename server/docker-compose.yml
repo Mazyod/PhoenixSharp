@@ -1,0 +1,11 @@
+version: "3.9"
+
+services:
+  web:
+    image: mazyod/phoenix-integration-tester:alpha
+    build: .
+    ports:
+      - 4000:4000
+    environment:
+      - SECRET_KEY_BASE=integration-tester-not-secret-at-least-64-bytes-long-placeholder-value
+      - PHX_HOST=localhost

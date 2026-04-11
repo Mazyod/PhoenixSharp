@@ -1,0 +1,10 @@
+# ignore everything
+*
+
+# .. except
+!mix.exs
+!mix.lock
+
+!/config/
+!/lib/
+!/priv/
