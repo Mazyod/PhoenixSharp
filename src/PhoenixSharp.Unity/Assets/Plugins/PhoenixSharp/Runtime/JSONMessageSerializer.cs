@@ -120,7 +120,23 @@ namespace Phoenix
         public override Message ReadJson(JsonReader reader, Type objectType, Message? existingValue,
             bool hasExistingValue, JsonSerializer serializer)
         {
-            var array = JArray.Load(reader);
+            var token = JToken.Load(reader);
+            if (!(token is JArray array))
+            {
+                throw new JsonSerializationException(
+                    $"expected Phoenix V2 frame to be a JSON array, got {token.Type}"
+                );
+            }
+
+            // Deliberately stricter than phoenix.js array destructuring: reject both
+            // truncated and extended frames instead of silently ignoring extra elements.
+            if (array.Count != 5)
+            {
+                throw new JsonSerializationException(
+                    $"expected 5-element Phoenix V2 frame, got {array.Count}"
+                );
+            }
+
             return new Message(
                 joinRef: array[0].ToObject<string?>(),
                 @ref: array[1].ToObject<string?>(),

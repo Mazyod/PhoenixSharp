@@ -198,6 +198,11 @@ namespace Phoenix
                 {
                     return null;
                 }
+
+                // State can become Closed before the transport delivers its queued
+                // close callback. This clear owns the dead transport, so transition
+                // channels now; the late callback is stale after replacement.
+                TriggerChanError();
             }
 
             Volatile.Write(ref _closeWasClean, false);
@@ -255,7 +260,27 @@ namespace Phoenix
                     return null;
                 }
 
+                if (_disposed)
+                {
+                    if (TryClearConnection(connection))
+                    {
+                        CloseUnclaimedConnection(
+                            connection,
+                            "Socket disposed before connection attempt started"
+                        );
+                    }
+
+                    return new ObjectDisposedException(
+                        nameof(Socket),
+                        "Cannot connect disposed socket"
+                    );
+                }
+
                 Volatile.Write(ref callbacksEnabled, 1);
+                // Residual: Dispose can run after the post-CAS check above but before
+                // Connect(). Dispose clears and closes this transport first, but an
+                // implementation that subsequently reopens in Connect() can remain
+                // live and unclosed; its events are suppressed by the identity guard.
                 connection.Connect();
                 return null;
             }
@@ -576,6 +601,11 @@ namespace Phoenix
 
         private void OnConnOpen(IWebsocket websocket)
         {
+            if (!IsCurrentConnection(websocket))
+            {
+                return;
+            }
+
             if (HasLogger())
             {
                 Log(LogLevel.Debug, "transport", $"Connected to {EndPointUrl()}");
@@ -740,8 +770,7 @@ namespace Phoenix
 
             if (connection.State == WebsocketState.Closed)
             {
-                TryClearConnection(connection);
-                callback?.Invoke();
+                CompleteTeardown(connection, callback);
                 return;
             }
 
@@ -763,9 +792,7 @@ namespace Phoenix
             {
                 // TODO: not sure if this is important at all?
                 // this.conn.onclose = function (){ } // noop
-                TryClearConnection(connection);
-
-                callback?.Invoke();
+                CompleteTeardown(connection, callback);
             });
 
             // });
@@ -791,6 +818,9 @@ namespace Phoenix
             uint tries = 1
         )
         {
+            // At the fifth poll teardown gives up even if the transport is still
+            // Closing. CompleteTeardown clears it, so a later close callback is
+            // intentionally rejected by the transport-identity guard.
             if (tries == 5 || connection.State == WebsocketState.Closed)
             {
                 callback();
@@ -801,6 +831,19 @@ namespace Phoenix
                 () => WaitForSocketClosed(connection, callback, tries + 1),
                 TimeSpan.FromMilliseconds(150 * tries)
             );
+        }
+
+        private void CompleteTeardown(IWebsocket connection, Action? callback)
+        {
+            if (TryClearConnection(connection))
+            {
+                // A close callback may already have transitioned channels. This is
+                // idempotent for Errored/Leaving/Closed channels and fills the gap
+                // when close delivery is queued or polling gives up.
+                TriggerChanError();
+            }
+
+            callback?.Invoke();
         }
 
         private bool ShouldReconnectAfterClose(ushort code)
@@ -825,11 +868,14 @@ namespace Phoenix
             return claimedWaiters;
         }
 
-        private void CloseUnclaimedConnection(IWebsocket connection)
+        private void CloseUnclaimedConnection(
+            IWebsocket connection,
+            string reason = "Connection attempt superseded"
+        )
         {
             try
             {
-                connection.Close(1_000, "Connection attempt superseded");
+                connection.Close(1_000, reason);
             }
             catch (Exception ex)
             {
@@ -854,6 +900,11 @@ namespace Phoenix
 
         private void OnConnClose(IWebsocket websocket, ushort code, string reason)
         {
+            if (!IsCurrentConnection(websocket))
+            {
+                return;
+            }
+
             StopHeartbeat();
 
             if (HasLogger())
@@ -883,6 +934,11 @@ namespace Phoenix
 
         private void OnConnError(IWebsocket websocket, string error)
         {
+            if (!IsCurrentConnection(websocket))
+            {
+                return;
+            }
+
             if (HasLogger())
             {
                 Log(LogLevel.Debug, "transport", $"Error {error}");
@@ -911,13 +967,16 @@ namespace Phoenix
                 channelsCopy = new List<Channel>(_channels);
             }
 
-            channelsCopy.ForEach(channel =>
+            var message = new Message(@event: Message.InBoundEvent.Error.Serialized());
+            foreach (var channel in channelsCopy)
             {
-                if (!(channel.IsErrored() || channel.IsLeaving() || channel.IsClosed()))
+                if (channel.IsErrored() || channel.IsLeaving() || channel.IsClosed())
                 {
-                    channel.Trigger(Message.InBoundEvent.Error);
+                    continue;
                 }
-            });
+
+                TriggerChannel(channel, message);
+            }
         }
 
         internal bool IsConnected()
@@ -1163,6 +1222,11 @@ namespace Phoenix
 
         private void OnConnMessage(IWebsocket websocket, string rawMessage)
         {
+            if (!IsCurrentConnection(websocket))
+            {
+                return;
+            }
+
             Message? message;
             try
             {
@@ -1202,14 +1266,16 @@ namespace Phoenix
                 channelsCopy = new List<Channel>(_channels);
             }
 
-            channelsCopy.ForEach(channel =>
+            foreach (var channel in channelsCopy)
             {
                 // violates tell don't ask, but that's how Phoenix JS is implemented
-                if (channel.IsMember(message))
+                if (!channel.IsMember(message))
                 {
-                    channel.Trigger(message);
+                    continue;
                 }
-            });
+
+                TriggerChannel(channel, message);
+            }
 
             try
             {
@@ -1222,6 +1288,32 @@ namespace Phoenix
                     Log(LogLevel.Error, "socket", $"OnMessage callback threw exception: {ex.Message}");
                 }
             }
+        }
+
+        private void TriggerChannel(Channel channel, Message message)
+        {
+            try
+            {
+                channel.Trigger(message);
+            }
+            catch (Exception ex)
+            {
+                if (HasLogger())
+                {
+                    Log(
+                        LogLevel.Error,
+                        "socket",
+                        $"Channel dispatch failed for topic '{channel.Topic}', "
+                        + $"event '{message.Event ?? "null"}', ref '{message.Ref ?? "null"}': "
+                        + ex.Message
+                    );
+                }
+            }
+        }
+
+        private bool IsCurrentConnection(IWebsocket websocket)
+        {
+            return ReferenceEquals(Conn, websocket);
         }
 
         internal void LeaveOpenTopic(string topic)

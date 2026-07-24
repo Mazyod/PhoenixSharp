@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using Phoenix;
@@ -94,6 +95,20 @@ namespace PhoenixTests
             var serializer = new JsonMessageSerializer();
             var message = serializer.Deserialize<Message>(@"[null, null, null, null, null]");
             Assert.IsNull(message.JoinRef);
+        }
+
+        [Test]
+        public void DeserializeRejectsNonArrayPhoenixFrameWithDescriptiveErrorTest()
+        {
+            var serializer = new JsonMessageSerializer();
+
+            var exception = Assert.Throws<JsonSerializationException>(() =>
+                serializer.Deserialize<Message>(@"{""topic"":""test""}"));
+
+            Assert.That(
+                exception!.Message,
+                Does.Contain("expected Phoenix V2 frame to be a JSON array, got Object")
+            );
         }
 
         [Test]

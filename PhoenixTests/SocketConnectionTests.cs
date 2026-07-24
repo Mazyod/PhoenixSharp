@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using NUnit.Framework;
 using Phoenix;
 using PhoenixTests.TestDoubles;
@@ -505,6 +506,288 @@ namespace PhoenixTests
         }
 
         [Test]
+        public void ChannelDispatchExceptionDoesNotStopOtherChannelsOrLaterMessagesTest()
+        {
+            var logger = new CapturingLogger();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    HeartbeatInterval = null,
+                    Logger = logger,
+                    ReconnectAfter = null,
+                    RejoinAfter = null
+                }
+            );
+            socket.Connect();
+            var connection = factory.LastCreatedWebsocket!;
+            var healthyChannel = socket.Channel("shared:topic");
+            var throwingChannel = new ThrowingOnMessageChannel(
+                "shared:topic",
+                null,
+                socket
+            );
+            AddChannelFirst(socket, throwingChannel);
+            var channelMessageCount = 0;
+            var socketMessageCount = 0;
+            healthyChannel.On("custom_event", _ => channelMessageCount++);
+            socket.OnMessage += _ => socketMessageCount++;
+            var rawMessage = BuildPhxMessage(
+                null,
+                "wire-ref",
+                "shared:topic",
+                "custom_event"
+            );
+
+            Assert.DoesNotThrow(() =>
+            {
+                connection.SimulateMessage(rawMessage);
+                connection.SimulateMessage(rawMessage);
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(channelMessageCount, Is.EqualTo(2));
+                Assert.That(socketMessageCount, Is.EqualTo(2));
+                Assert.That(
+                    logger.Messages.FindAll(message =>
+                        message.Contains(
+                            "Channel dispatch failed for topic 'shared:topic', "
+                            + "event 'custom_event', ref 'wire-ref'"
+                        )),
+                    Has.Count.EqualTo(2)
+                );
+            });
+        }
+
+        [Test]
+        public void ChannelErrorDispatchExceptionDoesNotEscapeCloseOrBlockReconnectTest()
+        {
+            var reconnectDelay = TimeSpan.FromMilliseconds(25);
+            var executor = new TrackingDelayedExecutor();
+            var logger = new CapturingLogger();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    DelayedExecutor = executor,
+                    HeartbeatInterval = null,
+                    Logger = logger,
+                    ReconnectAfter = _ => reconnectDelay,
+                    RejoinAfter = null
+                }
+            );
+            socket.Connect();
+            var healthyChannel = socket.Channel("healthy:topic");
+            var payloadAssumingChannel = new PayloadAssumingOnMessageChannel(
+                "fragile:topic",
+                null,
+                socket
+            );
+            AddChannelFirst(socket, payloadAssumingChannel);
+            healthyChannel.Join().Trigger(ReplyStatus.Ok);
+            payloadAssumingChannel.Join().Trigger(ReplyStatus.Ok);
+            var closeCalled = false;
+            socket.OnClose += (_, _) => closeCalled = true;
+
+            Assert.DoesNotThrow(() =>
+                factory.LastCreatedWebsocket!.SimulateClose(
+                    1_006,
+                    "connection lost"
+                ));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(healthyChannel.State, Is.EqualTo(ChannelState.Errored));
+                Assert.That(closeCalled, Is.True);
+                Assert.That(
+                    executor.Executions.FindAll(execution =>
+                        execution.Delay == reconnectDelay && !execution.IsCancelled),
+                    Has.Count.EqualTo(1)
+                );
+                Assert.That(
+                    logger.Messages,
+                    Has.Some.Contains(
+                        "Channel dispatch failed for topic 'fragile:topic', "
+                        + "event 'phx_error', ref 'null'"
+                    )
+                );
+            });
+        }
+
+        [Test]
+        public void ChannelErrorDispatchExceptionDoesNotEscapeHeartbeatTimeoutTest()
+        {
+            var heartbeatInterval = TimeSpan.FromSeconds(30);
+            var reconnectDelay = TimeSpan.FromMilliseconds(25);
+            var executor = new TrackingDelayedExecutor();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    DelayedExecutor = executor,
+                    HeartbeatInterval = heartbeatInterval,
+                    ReconnectAfter = _ => reconnectDelay,
+                    RejoinAfter = null
+                }
+            );
+            socket.Connect();
+            var connection = factory.LastCreatedWebsocket!;
+            var healthyChannel = socket.Channel("healthy:topic");
+            var payloadAssumingChannel = new PayloadAssumingOnMessageChannel(
+                "fragile:topic",
+                null,
+                socket
+            );
+            AddChannelFirst(socket, payloadAssumingChannel);
+            healthyChannel.Join().Trigger(ReplyStatus.Ok);
+            payloadAssumingChannel.Join().Trigger(ReplyStatus.Ok);
+            var heartbeatSend = executor.Executions.Find(execution =>
+                execution.Delay == heartbeatInterval && !execution.IsCancelled);
+            Assert.That(heartbeatSend, Is.Not.Null);
+            heartbeatSend!.Execute();
+            var heartbeatTimeout = executor.Executions.FindLast(execution =>
+                execution.Delay == heartbeatInterval && !execution.IsCancelled);
+            Assert.That(heartbeatTimeout, Is.Not.Null);
+
+            Assert.DoesNotThrow(heartbeatTimeout!.Execute);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(healthyChannel.State, Is.EqualTo(ChannelState.Errored));
+                Assert.That(connection.CallCloseCount, Is.EqualTo(1));
+                Assert.That(
+                    executor.Executions.FindAll(execution =>
+                        execution.Delay == reconnectDelay && !execution.IsCancelled),
+                    Has.Count.EqualTo(1)
+                );
+            });
+        }
+
+        [Test]
+        public void MalformedV2FrameLogsDescriptiveElementCountTest()
+        {
+            var logger = new CapturingLogger();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    HeartbeatInterval = null,
+                    Logger = logger,
+                    ReconnectAfter = null
+                }
+            );
+            socket.Connect();
+
+            factory.LastCreatedWebsocket!.SimulateMessage(
+                @"[null,""1"",""test"",""custom_event""]"
+            );
+
+            Assert.That(
+                logger.Messages,
+                Has.Some.Contains(
+                    "Failed to deserialize message: expected 5-element Phoenix V2 frame, got 4"
+                )
+            );
+        }
+
+        [Test]
+        public void StaleOpenDoesNotInvokeSocketDelegateTest()
+        {
+            var (socket, _, staleConnection, _) = CreateSocketWithReplacement();
+            var openCalled = false;
+            socket.OnOpen += () => openCalled = true;
+
+            staleConnection.Connect();
+
+            Assert.That(openCalled, Is.False);
+        }
+
+        [Test]
+        public void StaleErrorDoesNotAffectCurrentChannelsOrSocketDelegateTest()
+        {
+            var (socket, _, staleConnection, _) = CreateSocketWithReplacement();
+            var channel = socket.Channel("current:topic");
+            channel.Join().Trigger(ReplyStatus.Ok);
+            var errorCalled = false;
+            socket.OnError += _ => errorCalled = true;
+
+            staleConnection.SimulateError("late error");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(errorCalled, Is.False);
+                Assert.That(channel.State, Is.EqualTo(ChannelState.Joined));
+            });
+        }
+
+        [Test]
+        public void StaleCloseDoesNotAffectCurrentChannelsOrScheduleReconnectTest()
+        {
+            var executor = new TrackingDelayedExecutor();
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                DelayedExecutor = executor,
+                HeartbeatInterval = null,
+                ReconnectAfter = _ => TimeSpan.FromMilliseconds(10),
+                RejoinAfter = null
+            };
+            var (socket, _, staleConnection, _) = CreateSocketWithReplacement(options);
+            var channel = socket.Channel("current:topic");
+            channel.Join().Trigger(ReplyStatus.Ok);
+            var closeCalled = false;
+            socket.OnClose += (_, _) => closeCalled = true;
+
+            staleConnection.SimulateClose(1_006, "late close");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(closeCalled, Is.False);
+                Assert.That(channel.State, Is.EqualTo(ChannelState.Joined));
+                Assert.That(executor.PendingCount, Is.Zero);
+            });
+        }
+
+        [Test]
+        public void StaleMessageDoesNotReachCurrentChannelsOrSocketDelegateTest()
+        {
+            var (socket, _, staleConnection, currentConnection) =
+                CreateSocketWithReplacement();
+            var channel = socket.Channel("current:topic");
+            var channelMessageCount = 0;
+            var socketMessageCount = 0;
+            channel.On("custom_event", _ => channelMessageCount++);
+            socket.OnMessage += _ => socketMessageCount++;
+            var rawMessage = BuildPhxMessage(
+                null,
+                null,
+                "current:topic",
+                "custom_event"
+            );
+
+            staleConnection.SimulateMessage(rawMessage);
+            currentConnection.SimulateMessage(rawMessage);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(channelMessageCount, Is.EqualTo(1));
+                Assert.That(socketMessageCount, Is.EqualTo(1));
+            });
+        }
+
+        [Test]
         public void OnErrorTriggersAppropriateCallbacksTest()
         {
             var factory = new MockWebsocketFactoryWithCallbackTracking();
@@ -750,6 +1033,88 @@ namespace PhoenixTests
         private static string DecodeQueryComponent(string value)
         {
             return Uri.UnescapeDataString(value.Replace("+", " "));
+        }
+
+        private static void AddChannelFirst(Socket socket, Channel channel)
+        {
+            var channels = (List<Channel>)typeof(Socket)
+                .GetField("_channels", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(socket)!;
+            channels.Insert(0, channel);
+        }
+
+        private static (
+            Socket Socket,
+            MockWebsocketFactoryWithCallbackTracking Factory,
+            MockWebsocketAdapterWithCallbacks StaleConnection,
+            MockWebsocketAdapterWithCallbacks CurrentConnection
+        ) CreateSocketWithReplacement(Socket.Options? options = null)
+        {
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                options ?? new Socket.Options(new JsonMessageSerializer())
+                {
+                    HeartbeatInterval = null,
+                    ReconnectAfter = null,
+                    RejoinAfter = null
+                }
+            );
+            socket.Connect();
+            var staleConnection = factory.LastCreatedWebsocket!;
+            staleConnection.SimulateClose(1_000, "replaced by test");
+            socket.Connect();
+            var currentConnection = factory.LastCreatedWebsocket!;
+            Assert.That(currentConnection, Is.Not.SameAs(staleConnection));
+
+            return (socket, factory, staleConnection, currentConnection);
+        }
+
+        private sealed class CapturingLogger : ILogger
+        {
+            public List<string> Messages { get; } = new List<string>();
+
+            public void Log(LogLevel level, string source, string message)
+            {
+                Messages.Add($"{source}: {message}");
+            }
+        }
+
+        private sealed class ThrowingOnMessageChannel : Channel
+        {
+            public ThrowingOnMessageChannel(
+                string topic,
+                Dictionary<string, object>? @params,
+                Socket socket
+            )
+                : base(topic, @params, socket)
+            {
+            }
+
+            public override IJsonBox? OnMessage(Message message)
+            {
+                throw new ApplicationException("throwing channel hook");
+            }
+        }
+
+        private sealed class PayloadAssumingOnMessageChannel : Channel
+        {
+            public PayloadAssumingOnMessageChannel(
+                string topic,
+                Dictionary<string, object>? @params,
+                Socket socket
+            )
+                : base(topic, @params, socket)
+            {
+            }
+
+            public override IJsonBox? OnMessage(Message message)
+            {
+                message.Payload!.Unbox<object>();
+                return message.Payload;
+            }
         }
 
         private sealed class CapturingWebsocketFactory : IWebsocketFactory

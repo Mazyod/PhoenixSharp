@@ -432,6 +432,82 @@ namespace PhoenixTests
         }
 
         [Test]
+        public async Task DisconnectAsync_WhenClosePollingGivesUp_ErrorsJoinedChannelsBeforeCompleting()
+        {
+            var factory = new ControlledLifecycleWebsocketFactory
+            {
+                OpenOnConnect = true
+            };
+            var executor = new TrackingDelayedExecutor();
+            var socket = CreateSocket(factory, executor);
+            socket.Connect();
+            var oldConnection = factory.Connection;
+            var channel = socket.Channel("test:topic");
+            channel.Join().Trigger(ReplyStatus.Ok);
+            var closeCalled = false;
+            socket.OnClose += (_, _) => closeCalled = true;
+
+            var disconnectTask = socket.DisconnectAsync();
+            for (var i = 0; i < 4; i++)
+            {
+                executor.ExecuteLast();
+            }
+
+            await AssertCompletesWithin(disconnectTask);
+            await disconnectTask;
+            Assert.Multiple(() =>
+            {
+                Assert.That(socket.Conn, Is.Null);
+                Assert.That(channel.State, Is.EqualTo(ChannelState.Errored));
+            });
+
+            // The transport reports close only after teardown gave up and cleared it.
+            oldConnection.CompleteClose();
+            Assert.That(closeCalled, Is.False);
+
+            socket.Connect();
+            Assert.Multiple(() =>
+            {
+                Assert.That(factory.Connections, Has.Count.EqualTo(2));
+                Assert.That(socket.Conn, Is.SameAs(factory.Connection));
+                Assert.That(channel.State, Is.EqualTo(ChannelState.Joining));
+            });
+        }
+
+        [Test]
+        public void Connect_WhenClosedTransportHasQueuedClose_IgnoresLateEventAfterReplacement()
+        {
+            var factory = new ControlledLifecycleWebsocketFactory
+            {
+                OpenOnConnect = true
+            };
+            var socket = CreateSocket(factory);
+            socket.Connect();
+            var oldConnection = factory.Connection;
+            var channel = socket.Channel("test:topic");
+            channel.Join().Trigger(ReplyStatus.Ok);
+
+            // Model State becoming Closed before its queued close callback is delivered.
+            oldConnection.MarkClosedWithoutCallback();
+            socket.Connect();
+            var currentConnection = factory.Connection;
+            var closeCalled = false;
+            socket.OnClose += (_, _) => closeCalled = true;
+            Assert.That(channel.State, Is.EqualTo(ChannelState.Joining));
+
+            oldConnection.CompleteClose(1_006, "late queued close");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(factory.Connections, Has.Count.EqualTo(2));
+                Assert.That(socket.Conn, Is.SameAs(currentConnection));
+                Assert.That(currentConnection.State, Is.EqualTo(WebsocketState.Open));
+                Assert.That(channel.State, Is.EqualTo(ChannelState.Joining));
+                Assert.That(closeCalled, Is.False);
+            });
+        }
+
+        [Test]
         public void DisconnectAsync_CancellationToken_CancelsTask()
         {
             var factory = new MockWebsocketFactoryWithCallbackTracking();
@@ -724,6 +800,11 @@ namespace PhoenixTests
             {
                 State = WebsocketState.Closed;
                 _config.onCloseCallback(this, code, reason);
+            }
+
+            public void MarkClosedWithoutCallback()
+            {
+                State = WebsocketState.Closed;
             }
         }
 

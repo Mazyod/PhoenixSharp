@@ -414,6 +414,23 @@ namespace PhoenixTests
         }
 
         [Test]
+        public void TriggerThrowsInvalidOperationWhenOnMessageDropsPayloadTest()
+        {
+            var socket = CreateConnectedSocket();
+            var channel = new NullPayloadChannel("test", null, socket);
+            var payload = new JsonMessageSerializer().Box(
+                new Dictionary<string, object> { { "data", "value" } }
+            );
+
+            Assert.Throws<InvalidOperationException>(() =>
+                channel.Trigger(new Message(
+                    @event: "custom_event",
+                    topic: "test",
+                    payload: payload
+                )));
+        }
+
+        [Test]
         public void TriggerContinuesAfterNonLeaveStateChangeTest()
         {
             var options = new Socket.Options(new JsonMessageSerializer())
@@ -903,6 +920,23 @@ namespace PhoenixTests
         {
             OnMessageCalled = true;
             return base.OnMessage(message);
+        }
+    }
+
+    public class NullPayloadChannel : Channel
+    {
+        public NullPayloadChannel(
+            string topic,
+            Dictionary<string, object>? @params,
+            Socket socket
+        )
+            : base(topic, @params, socket)
+        {
+        }
+
+        public override IJsonBox? OnMessage(Message message)
+        {
+            return null;
         }
     }
 }

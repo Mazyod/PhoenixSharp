@@ -697,7 +697,9 @@ namespace Phoenix
             var handledPayload = OnMessage(message);
             if (message.Payload != null && handledPayload == null)
             {
-                throw new Exception("channel onMessage callbacks must return payload, modified or unmodified");
+                throw new InvalidOperationException(
+                    "channel onMessage callbacks must return payload, modified or unmodified"
+                );
             }
 
             // Early exit if no event or no callbacks
