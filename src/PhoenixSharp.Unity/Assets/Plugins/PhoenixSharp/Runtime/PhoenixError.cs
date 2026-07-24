@@ -8,12 +8,11 @@ namespace Phoenix
     /// </summary>
     public enum PhoenixErrorKind
     {
-        Unknown,
-        Transport,
-        Send,
-        Heartbeat,
-        Serialization,
-        Dispatch
+        Transport = 1,
+        Send = 2,
+        Heartbeat = 3,
+        Serialization = 4,
+        Dispatch = 5
     }
 
     /// <summary>

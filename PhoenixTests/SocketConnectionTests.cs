@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Newtonsoft.Json;
 using NUnit.Framework;
 using Phoenix;
 using PhoenixTests.TestDoubles;
@@ -893,19 +894,18 @@ namespace PhoenixTests
                     Logger = logger
                 }
             );
-            socket.OnError += _ => throw new InvalidOperationException(
+            var subscriberException = new InvalidOperationException(
                 "subscriber failed"
             );
+            socket.OnError += _ => throw subscriberException;
             socket.Connect();
 
             Assert.DoesNotThrow(() =>
                 factory.LastCreatedWebsocket!.SimulateError("transport failed"));
-            Assert.That(
-                logger.Messages,
-                Has.Some.Contains(
-                    "OnError callback threw exception: subscriber failed"
-                )
+            var entry = logger.Entries.Single(logEntry =>
+                logEntry.Message == "OnError callback threw exception"
             );
+            Assert.That(entry.Exception, Is.SameAs(subscriberException));
         }
 
         [Test]
@@ -1029,6 +1029,118 @@ namespace PhoenixTests
                             + "event 'custom_event', ref 'wire-ref'"
                         )),
                     Has.Count.EqualTo(2)
+                );
+            });
+        }
+
+        [Test]
+        public void ChannelDispatchExceptionReachesLoggerAndErrorPathIntactTest()
+        {
+            var logger = new CapturingLogger();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    HeartbeatInterval = null,
+                    Logger = logger,
+                    ReconnectAfter = null,
+                    RejoinAfter = null
+                }
+            );
+            socket.Connect();
+            var throwingChannel = new ThrowingOnMessageChannel(
+                "fragile:topic",
+                null,
+                socket
+            );
+            AddChannelFirst(socket, throwingChannel);
+            PhoenixError? reportedError = null;
+            socket.OnError += error => reportedError = error;
+
+            factory.LastCreatedWebsocket!.SimulateMessage(
+                BuildPhxMessage(
+                    null,
+                    "wire-ref",
+                    "fragile:topic",
+                    "custom_event"
+                )
+            );
+
+            var entry = logger.Entries.Single(logEntry =>
+                logEntry.Message.Contains(
+                    "Channel dispatch failed for topic 'fragile:topic'"
+                )
+            );
+            Assert.Multiple(() =>
+            {
+                Assert.That(
+                    entry.Exception,
+                    Is.SameAs(throwingChannel.DispatchException)
+                );
+                Assert.That(reportedError, Is.Not.Null);
+                Assert.That(
+                    reportedError?.Kind,
+                    Is.EqualTo(PhoenixErrorKind.Dispatch)
+                );
+                Assert.That(
+                    reportedError?.Exception,
+                    Is.SameAs(throwingChannel.DispatchException)
+                );
+            });
+        }
+
+        [Test]
+        public void ChannelDispatchErrorIsReportedBeforeThrowingSinkPropagatesTest()
+        {
+            var sinkException = new InvalidOperationException("sink failed");
+            var logger = new ThrowingErrorLogger(sinkException);
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    HeartbeatInterval = null,
+                    Logger = logger,
+                    ReconnectAfter = null,
+                    RejoinAfter = null
+                }
+            );
+            socket.Connect();
+            var throwingChannel = new ThrowingOnMessageChannel(
+                "fragile:topic",
+                null,
+                socket
+            );
+            AddChannelFirst(socket, throwingChannel);
+            PhoenixError? reportedError = null;
+            socket.OnError += error => reportedError = error;
+
+            var thrownException = Assert.Throws<InvalidOperationException>(() =>
+                factory.LastCreatedWebsocket!.SimulateMessage(
+                    BuildPhxMessage(
+                        null,
+                        "wire-ref",
+                        "fragile:topic",
+                        "custom_event"
+                    )
+                )
+            );
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(thrownException, Is.SameAs(sinkException));
+                Assert.That(
+                    reportedError?.Kind,
+                    Is.EqualTo(PhoenixErrorKind.Dispatch)
+                );
+                Assert.That(
+                    reportedError?.Exception,
+                    Is.SameAs(throwingChannel.DispatchException)
                 );
             });
         }
@@ -1165,12 +1277,22 @@ namespace PhoenixTests
                 @"[null,""1"",""test"",""custom_event""]"
             );
 
-            Assert.That(
-                logger.Messages,
-                Has.Some.Contains(
-                    "Failed to deserialize message: expected 5-element Phoenix V2 frame, got 4"
-                )
+            var entry = logger.Entries.Single(logEntry =>
+                logEntry.Message == "Failed to deserialize message"
             );
+            Assert.Multiple(() =>
+            {
+                Assert.That(
+                    entry.Exception,
+                    Is.TypeOf<JsonSerializationException>()
+                );
+                Assert.That(
+                    entry.Exception?.Message,
+                    Is.EqualTo(
+                        "expected 5-element Phoenix V2 frame, got 4"
+                    )
+                );
+            });
         }
 
         [Test]
@@ -1547,10 +1669,70 @@ namespace PhoenixTests
         private sealed class CapturingLogger : ILogger
         {
             public List<string> Messages { get; } = new List<string>();
+            public List<LogEntry> Entries { get; } = new List<LogEntry>();
 
-            public void Log(LogLevel level, string source, string message)
+            public bool IsEnabled(LogLevel level, string source)
+            {
+                return true;
+            }
+
+            public void Log(
+                LogLevel level,
+                string source,
+                string message,
+                Exception? exception
+            )
             {
                 Messages.Add($"{source}: {message}");
+                Entries.Add(
+                    new LogEntry(level, source, message, exception)
+                );
+            }
+        }
+
+        private sealed class LogEntry
+        {
+            public LogLevel Level { get; }
+            public string Source { get; }
+            public string Message { get; }
+            public Exception? Exception { get; }
+
+            public LogEntry(
+                LogLevel level,
+                string source,
+                string message,
+                Exception? exception
+            )
+            {
+                Level = level;
+                Source = source;
+                Message = message;
+                Exception = exception;
+            }
+        }
+
+        private sealed class ThrowingErrorLogger : ILogger
+        {
+            private readonly Exception _exception;
+
+            public ThrowingErrorLogger(Exception exception)
+            {
+                _exception = exception;
+            }
+
+            public bool IsEnabled(LogLevel level, string source)
+            {
+                return level == LogLevel.Error;
+            }
+
+            public void Log(
+                LogLevel level,
+                string source,
+                string message,
+                Exception? exception
+            )
+            {
+                throw _exception;
             }
         }
 
@@ -1606,6 +1788,9 @@ namespace PhoenixTests
 
         private sealed class ThrowingOnMessageChannel : Channel
         {
+            public Exception DispatchException { get; } =
+                new ApplicationException("throwing channel hook");
+
             public ThrowingOnMessageChannel(
                 string topic,
                 Dictionary<string, object>? @params,
@@ -1617,7 +1802,7 @@ namespace PhoenixTests
 
             public override IJsonBox? OnMessage(Message message)
             {
-                throw new ApplicationException("throwing channel hook");
+                throw DispatchException;
             }
         }
 

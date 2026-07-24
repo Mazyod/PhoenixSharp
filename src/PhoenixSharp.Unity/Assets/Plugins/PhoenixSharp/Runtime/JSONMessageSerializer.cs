@@ -13,6 +13,13 @@ namespace Phoenix
      */
     public sealed class JsonBox : IJsonBox
     {
+        /// <summary>
+        /// Maximum number of UTF-16 characters returned by <see cref="ToString"/>.
+        /// </summary>
+        public const int MaximumToStringLength = 4_096;
+
+        private const string TruncationSuffix = "...[truncated]";
+
         public readonly JToken Element;
 
         public JsonBox(JToken element)
@@ -33,6 +40,30 @@ namespace Phoenix
         public T Unbox<T>()
         {
             return Element.ToObject<T>(JsonMessageSerializer.Serializer);
+        }
+
+        /// <summary>
+        /// Renders the boxed value as compact JSON for diagnostics.
+        /// </summary>
+        /// <remarks>
+        /// Output longer than <see cref="MaximumToStringLength"/> UTF-16
+        /// characters is prefix-truncated and ends with
+        /// <c>...[truncated]</c>. The result is diagnostic text and is not
+        /// guaranteed to remain valid JSON after truncation.
+        /// </remarks>
+        public override string ToString()
+        {
+            var json = Element.ToString(Formatting.None);
+            if (json.Length <= MaximumToStringLength)
+            {
+                return json;
+            }
+
+            return json.Substring(
+                    0,
+                    MaximumToStringLength - TruncationSuffix.Length
+                )
+                + TruncationSuffix;
         }
     }
 

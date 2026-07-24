@@ -189,9 +189,18 @@ namespace Phoenix
             OnClose(_ =>
             {
                 _rejoinTimer?.Reset();
-                if (socket.HasLogger())
+                var logger = socket.GetEnabledLogger(
+                    LogLevel.Debug,
+                    LogSource.Channel
+                );
+                if (logger != null)
                 {
-                    socket.Log(LogLevel.Debug, "channel", $"close {topic}");
+                    logger.Log(
+                        LogLevel.Debug,
+                        LogSource.Channel,
+                        $"close {topic}",
+                        null
+                    );
                 }
 
                 SetState(ChannelState.Closed);
@@ -205,9 +214,18 @@ namespace Phoenix
 
             OnError(_ =>
             {
-                if (socket.HasLogger())
+                var logger = socket.GetEnabledLogger(
+                    LogLevel.Debug,
+                    LogSource.Channel
+                );
+                if (logger != null)
                 {
-                    socket.Log(LogLevel.Debug, "channel", $"error {topic}");
+                    logger.Log(
+                        LogLevel.Debug,
+                        LogSource.Channel,
+                        $"error {topic}",
+                        null
+                    );
                 }
 
                 if (IsJoining())
@@ -229,9 +247,18 @@ namespace Phoenix
                     return;
                 }
 
-                if (socket.HasLogger())
+                var logger = socket.GetEnabledLogger(
+                    LogLevel.Debug,
+                    LogSource.Channel
+                );
+                if (logger != null)
                 {
-                    socket.Log(LogLevel.Debug, "channel", $"timeout {topic} ({JoinRef})");
+                    logger.Log(
+                        LogLevel.Debug,
+                        LogSource.Channel,
+                        $"timeout {topic} ({JoinRef})",
+                        null
+                    );
                 }
 
                 var leaveEvent = Message.OutBoundEvent.Leave.Serialized();
@@ -441,9 +468,18 @@ namespace Phoenix
 
             void TriggerClose()
             {
-                if (Socket.HasLogger())
+                var logger = Socket.GetEnabledLogger(
+                    LogLevel.Debug,
+                    LogSource.Channel
+                );
+                if (logger != null)
                 {
-                    Socket.Log(LogLevel.Debug, "channel", $"leave {Topic}");
+                    logger.Log(
+                        LogLevel.Debug,
+                        LogSource.Channel,
+                        $"leave {Topic}",
+                        null
+                    );
                 }
 
                 Trigger(Message.InBoundEvent.Close);
@@ -638,12 +674,17 @@ namespace Phoenix
                 return true;
             }
 
-            if (Socket.HasLogger())
+            var logger = Socket.GetEnabledLogger(
+                LogLevel.Info,
+                LogSource.Channel
+            );
+            if (logger != null)
             {
-                Socket.Log(
+                logger.Log(
                     LogLevel.Info,
-                    "Channel",
-                    $"dropping outdated message for topic '{Topic}' (joinRef {message.JoinRef} does not match joinRef {JoinRef})"
+                    LogSource.Channel,
+                    $"dropping outdated message for topic '{Topic}' (joinRef {message.JoinRef} does not match joinRef {JoinRef})",
+                    null
                 );
             }
 
@@ -737,9 +778,18 @@ namespace Phoenix
                 }
                 catch (Exception ex)
                 {
-                    if (Socket.HasLogger())
+                    var logger = Socket.GetEnabledLogger(
+                        LogLevel.Error,
+                        LogSource.Channel
+                    );
+                    if (logger != null)
                     {
-                        Socket.Log(LogLevel.Error, "channel", $"Event callback threw exception for '{callbackMessage.Event}': {ex.Message}");
+                        logger.Log(
+                            LogLevel.Error,
+                            LogSource.Channel,
+                            $"Event callback threw exception for '{callbackMessage.Event}'",
+                            ex
+                        );
                     }
                 }
             }

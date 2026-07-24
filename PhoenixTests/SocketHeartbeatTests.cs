@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Reflection;
 using NUnit.Framework;
 using Phoenix;
 using PhoenixTests.TestDoubles;
@@ -169,6 +170,102 @@ namespace PhoenixTests
                     execution => execution.Delay == TimeSpan.FromMilliseconds(100)
                 ),
                 Is.EqualTo(1)
+            );
+            Assert.That(ReadCloseWasClean(socket), Is.False);
+        }
+
+        [Test]
+        public void HeartbeatTimeoutReportsHeartbeatErrorTest()
+        {
+            var mockExecutor = new TrackingDelayedExecutor();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    DelayedExecutor = mockExecutor,
+                    HeartbeatInterval = TimeSpan.FromSeconds(30),
+                    ReconnectAfter = null
+                }
+            );
+            PhoenixError? reportedError = null;
+            socket.OnError += error => reportedError = error;
+            socket.Connect();
+
+            var heartbeatSend = mockExecutor.PendingExecutions.Single();
+            heartbeatSend.Execute();
+            var heartbeatTimeout = mockExecutor.PendingExecutions.Last();
+            heartbeatTimeout.Execute();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(reportedError, Is.Not.Null);
+                Assert.That(
+                    reportedError?.Kind,
+                    Is.EqualTo(PhoenixErrorKind.Heartbeat)
+                );
+                Assert.That(
+                    reportedError?.Message,
+                    Is.EqualTo("Heartbeat timeout")
+                );
+                Assert.That(reportedError?.Exception, Is.Null);
+            });
+        }
+
+        [Test]
+        public void DisconnectFromHeartbeatErrorPreventsReconnectTest()
+        {
+            var heartbeatInterval = TimeSpan.FromSeconds(30);
+            var reconnectDelay = TimeSpan.FromMilliseconds(25);
+            var executor = new TrackingDelayedExecutor();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    DelayedExecutor = executor,
+                    HeartbeatInterval = heartbeatInterval,
+                    ReconnectAfter = _ => reconnectDelay
+                }
+            );
+            socket.OnError += error =>
+            {
+                if (error.Kind == PhoenixErrorKind.Heartbeat)
+                {
+                    socket.Disconnect();
+                }
+            };
+            socket.Connect();
+            var firstConnection = factory.LastCreatedWebsocket;
+
+            var heartbeatSend = executor.PendingExecutions.Single(
+                execution => execution.Delay == heartbeatInterval
+            );
+            heartbeatSend.Execute();
+            var heartbeatTimeout = executor.PendingExecutions.Last(
+                execution => execution.Delay == heartbeatInterval
+            );
+            heartbeatTimeout.Execute();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(
+                    executor.PendingExecutions.Where(execution =>
+                        execution.Delay == reconnectDelay
+                    ),
+                    Is.Empty
+                );
+                Assert.That(ReadCloseWasClean(socket), Is.True);
+            });
+
+            executor.ExecuteAll();
+            Assert.That(
+                factory.LastCreatedWebsocket,
+                Is.SameAs(firstConnection)
             );
         }
 
@@ -591,6 +688,16 @@ namespace PhoenixTests
             // A new connection should be established
             var conn2 = factory.LastCreatedWebsocket;
             Assert.AreNotSame(conn1, conn2, "New connection should be created after reconnect");
+        }
+
+        private static bool ReadCloseWasClean(Socket socket)
+        {
+            return (bool)typeof(Socket)
+                .GetField(
+                    "_closeWasClean",
+                    BindingFlags.Instance | BindingFlags.NonPublic
+                )!
+                .GetValue(socket)!;
         }
     }
 }

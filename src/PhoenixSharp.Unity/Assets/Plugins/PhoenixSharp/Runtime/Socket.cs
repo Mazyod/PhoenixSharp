@@ -350,9 +350,18 @@ namespace Phoenix
             }
             catch (Exception ex)
             {
-                if (HasLogger())
+                var logger = GetEnabledLogger(
+                    LogLevel.Error,
+                    LogSource.Transport
+                );
+                if (logger != null)
                 {
-                    Log(LogLevel.Error, "transport", $"WebSocket connect failed: {ex.Message}");
+                    logger.Log(
+                        LogLevel.Error,
+                        LogSource.Transport,
+                        "WebSocket connect failed",
+                        ex
+                    );
                 }
 
                 if (connection != null)
@@ -667,14 +676,12 @@ namespace Phoenix
             return tcs.Task;
         }
 
-        internal void Log(LogLevel level, string source, string message)
+        internal ILogger? GetEnabledLogger(LogLevel level, string source)
         {
-            Opts.Logger!.Log(level, source, message);
-        }
-
-        internal bool HasLogger()
-        {
-            return Opts.Logger != null;
+            var logger = Opts.Logger;
+            return logger != null && logger.IsEnabled(level, source)
+                ? logger
+                : null;
         }
 
         // PhoenixJS: we use C# delegates instead of callbacks
@@ -691,9 +698,18 @@ namespace Phoenix
                 return;
             }
 
-            if (HasLogger())
+            var logger = GetEnabledLogger(
+                LogLevel.Debug,
+                LogSource.Transport
+            );
+            if (logger != null)
             {
-                Log(LogLevel.Debug, "transport", $"Connected to {endPointUrl}");
+                logger.Log(
+                    LogLevel.Debug,
+                    LogSource.Transport,
+                    $"Connected to {endPointUrl}",
+                    null
+                );
             }
 
             Volatile.Write(ref _closeWasClean, false);
@@ -708,9 +724,18 @@ namespace Phoenix
             }
             catch (Exception ex)
             {
-                if (HasLogger())
+                logger = GetEnabledLogger(
+                    LogLevel.Error,
+                    LogSource.Socket
+                );
+                if (logger != null)
                 {
-                    Log(LogLevel.Error, "socket", $"OnOpen callback threw exception: {ex.Message}");
+                    logger.Log(
+                        LogLevel.Error,
+                        LogSource.Socket,
+                        "OnOpen callback threw exception",
+                        ex
+                    );
                 }
             }
         }
@@ -729,17 +754,52 @@ namespace Phoenix
                 _heartbeatTimer = null;
             }
 
-            if (HasLogger())
+            var logger = GetEnabledLogger(
+                LogLevel.Debug,
+                LogSource.Transport
+            );
+            if (logger != null)
             {
-                Log(LogLevel.Debug, "transport", "heartbeat timeout. Attempting to re-establish connection");
+                logger.Log(
+                    LogLevel.Debug,
+                    LogSource.Transport,
+                    "heartbeat timeout. Attempting to re-establish connection",
+                    null
+                );
             }
+
+            ReportError(
+                new PhoenixError(
+                    "Heartbeat timeout",
+                    PhoenixErrorKind.Heartbeat
+                )
+            );
 
             // Match PhoenixJS: trigger channel errors, then teardown with a callback
             // that explicitly schedules reconnection. This bypasses OnConnClose's
             // code != 1000 check, which would otherwise block reconnection.
             TriggerChanError();
-            Volatile.Write(ref _closeWasClean, false);
-            Teardown(() => _reconnectTimer?.ScheduleTimeout(), 1_000, "heartbeat timeout");
+            Teardown(
+                () =>
+                {
+                    if (Volatile.Read(ref _closeWasClean))
+                    {
+                        return;
+                    }
+
+                    var reconnectTimer = _reconnectTimer;
+                    reconnectTimer?.ScheduleTimeout();
+
+                    // Compensate if Disconnect raced between the clean-close check
+                    // and the thread-safe scheduler accepting this reconnect.
+                    if (Volatile.Read(ref _closeWasClean))
+                    {
+                        reconnectTimer?.Reset();
+                    }
+                },
+                1_000,
+                "heartbeat timeout"
+            );
         }
 
         private void ResetHeartbeat()
@@ -964,12 +1024,17 @@ namespace Phoenix
             }
             catch (Exception ex)
             {
-                if (HasLogger())
+                var logger = GetEnabledLogger(
+                    LogLevel.Error,
+                    LogSource.Transport
+                );
+                if (logger != null)
                 {
-                    Log(
+                    logger.Log(
                         LogLevel.Error,
-                        "transport",
-                        $"Superseded WebSocket close failed: {ex.Message}"
+                        LogSource.Transport,
+                        "Superseded WebSocket close failed",
+                        ex
                     );
                 }
             }
@@ -992,9 +1057,18 @@ namespace Phoenix
 
             StopHeartbeat();
 
-            if (HasLogger())
+            var logger = GetEnabledLogger(
+                LogLevel.Debug,
+                LogSource.Transport
+            );
+            if (logger != null)
             {
-                Log(LogLevel.Debug, "transport", $"Close {code} {reason}");
+                logger.Log(
+                    LogLevel.Debug,
+                    LogSource.Transport,
+                    $"Close {code} {reason}",
+                    null
+                );
             }
 
             TriggerChanError();
@@ -1010,9 +1084,18 @@ namespace Phoenix
             }
             catch (Exception ex)
             {
-                if (HasLogger())
+                logger = GetEnabledLogger(
+                    LogLevel.Error,
+                    LogSource.Socket
+                );
+                if (logger != null)
                 {
-                    Log(LogLevel.Error, "socket", $"OnClose callback threw exception: {ex.Message}");
+                    logger.Log(
+                        LogLevel.Error,
+                        LogSource.Socket,
+                        "OnClose callback threw exception",
+                        ex
+                    );
                 }
             }
         }
@@ -1024,9 +1107,18 @@ namespace Phoenix
                 return;
             }
 
-            if (HasLogger())
+            var logger = GetEnabledLogger(
+                LogLevel.Debug,
+                LogSource.Transport
+            );
+            if (logger != null)
             {
-                Log(LogLevel.Debug, "transport", $"Error {error}");
+                logger.Log(
+                    LogLevel.Debug,
+                    LogSource.Transport,
+                    $"Error {error}",
+                    null
+                );
             }
 
             ReportError(new PhoenixError(error, PhoenixErrorKind.Transport));
@@ -1041,9 +1133,18 @@ namespace Phoenix
             }
             catch (Exception ex)
             {
-                if (HasLogger())
+                var logger = GetEnabledLogger(
+                    LogLevel.Error,
+                    LogSource.Socket
+                );
+                if (logger != null)
                 {
-                    Log(LogLevel.Error, "socket", $"OnError callback threw exception: {ex.Message}");
+                    logger.Log(
+                        LogLevel.Error,
+                        LogSource.Socket,
+                        "OnError callback threw exception",
+                        ex
+                    );
                 }
             }
         }
@@ -1123,9 +1224,18 @@ namespace Phoenix
 
         private void Push(Message message, bool bufferOnFailure)
         {
-            if (HasLogger()) // let {topic, event, payload, ref, join_ref} = data
+            var logger = GetEnabledLogger(
+                LogLevel.Debug,
+                LogSource.Push
+            );
+            if (logger != null) // let {topic, event, payload, ref, join_ref} = data
             {
-                Log(LogLevel.Debug, "push", $"Pushing {message}");
+                logger.Log(
+                    LogLevel.Debug,
+                    LogSource.Push,
+                    $"Pushing {message}",
+                    null
+                );
             }
 
             var sendFailureCount = 0;
@@ -1399,9 +1509,18 @@ namespace Phoenix
             }
             catch (Exception ex)
             {
-                if (HasLogger())
+                var logger = GetEnabledLogger(
+                    LogLevel.Error,
+                    LogSource.Socket
+                );
+                if (logger != null)
                 {
-                    Log(LogLevel.Error, "socket", $"Failed to deserialize message: {ex.Message}");
+                    logger.Log(
+                        LogLevel.Error,
+                        LogSource.Socket,
+                        "Failed to deserialize message",
+                        ex
+                    );
                 }
 
                 return;
@@ -1409,9 +1528,18 @@ namespace Phoenix
 
             if (message == null)
             {
-                if (HasLogger())
+                var logger = GetEnabledLogger(
+                    LogLevel.Error,
+                    LogSource.Socket
+                );
+                if (logger != null)
                 {
-                    Log(LogLevel.Error, "socket", "Deserialized message was null");
+                    logger.Log(
+                        LogLevel.Error,
+                        LogSource.Socket,
+                        "Deserialized message was null",
+                        null
+                    );
                 }
 
                 return;
@@ -1419,9 +1547,18 @@ namespace Phoenix
 
             AcknowledgeHeartbeat(message.Ref);
 
-            if (HasLogger())
+            var receiveLogger = GetEnabledLogger(
+                LogLevel.Debug,
+                LogSource.Receive
+            );
+            if (receiveLogger != null)
             {
-                Log(LogLevel.Debug, "receive", $"Received {message}");
+                receiveLogger.Log(
+                    LogLevel.Debug,
+                    LogSource.Receive,
+                    $"Received {message}",
+                    null
+                );
             }
 
             // copy channels before triggering callbacks, since they might modify the channels list
@@ -1448,9 +1585,18 @@ namespace Phoenix
             }
             catch (Exception ex)
             {
-                if (HasLogger())
+                var logger = GetEnabledLogger(
+                    LogLevel.Error,
+                    LogSource.Socket
+                );
+                if (logger != null)
                 {
-                    Log(LogLevel.Error, "socket", $"OnMessage callback threw exception: {ex.Message}");
+                    logger.Log(
+                        LogLevel.Error,
+                        LogSource.Socket,
+                        "OnMessage callback threw exception",
+                        ex
+                    );
                 }
             }
         }
@@ -1463,14 +1609,28 @@ namespace Phoenix
             }
             catch (Exception ex)
             {
-                if (HasLogger())
+                var messageText =
+                    $"Channel dispatch failed for topic '{channel.Topic}', "
+                    + $"event '{message.Event ?? "null"}', ref '{message.Ref ?? "null"}'";
+                ReportError(
+                    new PhoenixError(
+                        messageText,
+                        PhoenixErrorKind.Dispatch,
+                        ex
+                    )
+                );
+
+                var logger = GetEnabledLogger(
+                    LogLevel.Error,
+                    LogSource.Socket
+                );
+                if (logger != null)
                 {
-                    Log(
+                    logger.Log(
                         LogLevel.Error,
-                        "socket",
-                        $"Channel dispatch failed for topic '{channel.Topic}', "
-                        + $"event '{message.Event ?? "null"}', ref '{message.Ref ?? "null"}': "
-                        + ex.Message
+                        LogSource.Socket,
+                        messageText,
+                        ex
                     );
                 }
             }
@@ -1495,9 +1655,18 @@ namespace Phoenix
                 return;
             }
 
-            if (HasLogger())
+            var logger = GetEnabledLogger(
+                LogLevel.Debug,
+                LogSource.Transport
+            );
+            if (logger != null)
             {
-                Log(LogLevel.Debug, "transport", $"Leaving duplicate channel topic {topic}");
+                logger.Log(
+                    LogLevel.Debug,
+                    LogSource.Transport,
+                    $"Leaving duplicate channel topic {topic}",
+                    null
+                );
             }
 
             dupChannel.Leave();
@@ -1593,7 +1762,10 @@ namespace Phoenix
             // The interval to send a heartbeat message. Null means disable
             public TimeSpan? HeartbeatInterval = TimeSpan.FromSeconds(30);
 
-            // The optional function for specialized logging
+            /// <summary>
+            /// Optional structured log sink. The sink controls level and source
+            /// filtering through <see cref="ILogger.IsEnabled"/>.
+            /// </summary>
             public ILogger? Logger = null;
 
             /// <summary>

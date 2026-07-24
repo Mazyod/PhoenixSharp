@@ -18,9 +18,25 @@ namespace PhoenixTests
     /// </summary>
     public sealed class BasicLogger : ILogger
     {
-        public void Log(LogLevel level, string source, string message)
+        public bool IsEnabled(LogLevel level, string source)
         {
-            Console.WriteLine("[{0}]: {1} - {2}", level, source, message);
+            return true;
+        }
+
+        public void Log(
+            LogLevel level,
+            string source,
+            string message,
+            Exception? exception
+        )
+        {
+            Console.WriteLine(
+                "[{0}]: {1} - {2}{3}",
+                level,
+                source,
+                message,
+                exception == null ? string.Empty : $"{Environment.NewLine}{exception}"
+            );
         }
     }
 
