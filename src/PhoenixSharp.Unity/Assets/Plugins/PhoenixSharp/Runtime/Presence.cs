@@ -69,15 +69,54 @@ namespace Phoenix
 
         public delegate void OnSyncDelegate();
 
+        private sealed class PresenceChange
+        {
+            public readonly PresencePayload ChangedPresence;
+            public readonly PresencePayload? CurrentPresence;
+            public readonly bool IsJoin;
+            public readonly string Key;
+
+            public PresenceChange(
+                bool isJoin,
+                string key,
+                PresencePayload? currentPresence,
+                PresencePayload changedPresence
+            )
+            {
+                IsJoin = isJoin;
+                Key = key;
+                CurrentPresence = currentPresence;
+                ChangedPresence = changedPresence;
+            }
+        }
+
         private readonly Channel _channel;
         private readonly DiffList _pendingDiffs = new DiffList();
+        private readonly object _stateLock = new object();
         private string? _joinRef;
+        private State _state = new State();
 
         public OnJoinDelegate? OnJoin;
         public OnLeaveDelegate? OnLeave;
         public OnSyncDelegate? OnSync;
 
-        public State State = new State();
+        /// <summary>
+        /// Gets the current presence state snapshot.
+        /// </summary>
+        /// <remarks>
+        /// The returned dictionary is an immutable-by-convention snapshot; do not mutate it.
+        /// A later presence update publishes a new dictionary and never mutates this snapshot.
+        /// </remarks>
+        public State State
+        {
+            get
+            {
+                lock (_stateLock)
+                {
+                    return _state;
+                }
+            }
+        }
 
         public Presence(Channel channel, Options? opts = null)
         {
@@ -88,43 +127,134 @@ namespace Phoenix
 
             var options = opts ?? new Options();
 
-            channel.On(options.StateEvent, message =>
-            {
-                var newState = message.Payload?.Unbox<State>() ?? new State();
-                _joinRef = channel.JoinRef;
-                State = SyncState(State, newState, OnJoin, OnLeave);
-
-                State = _pendingDiffs.Aggregate(
-                    State,
-                    (state, diff)
-                        => SyncDiff(new State(state), diff, OnJoin, OnLeave)
-                );
-
-                _pendingDiffs.Clear();
-
-                OnSync?.Invoke();
-            });
-
-            channel.On(options.DiffEvent, message =>
-            {
-                var diff = message.Payload?.Unbox<Diff>();
-                if (diff == null) return;
-
-                if (InPendingSyncState())
-                {
-                    _pendingDiffs.Add(diff);
-                }
-                else
-                {
-                    State = SyncDiff(new State(State), diff, OnJoin, OnLeave);
-                    OnSync?.Invoke();
-                }
-            });
+            channel.On(options.StateEvent, HandleState);
+            channel.On(options.DiffEvent, HandleDiff);
         }
 
         internal bool InPendingSyncState()
         {
-            return _joinRef == null || _joinRef != _channel.JoinRef;
+            var channelJoinRef = _channel.JoinRef;
+            lock (_stateLock)
+            {
+                return InPendingSyncStateUnsafe(channelJoinRef);
+            }
+        }
+
+        private void HandleState(Message message)
+        {
+            var newState = message.Payload?.Unbox<State>() ?? new State();
+            var channelJoinRef = _channel.JoinRef;
+            var changes = new List<PresenceChange>();
+            OnJoinDelegate collectJoin = (key, currentPresence, joinedPresence) =>
+                changes.Add(new PresenceChange(true, key, currentPresence, joinedPresence));
+            OnLeaveDelegate collectLeave = (key, currentPresence, leftPresence) =>
+                changes.Add(new PresenceChange(false, key, currentPresence, leftPresence));
+
+            OnJoinDelegate? onJoin;
+            OnLeaveDelegate? onLeave;
+            OnSyncDelegate? onSync;
+            lock (_stateLock)
+            {
+                _joinRef = channelJoinRef;
+                var updatedState = SyncState(
+                    _state,
+                    newState,
+                    collectJoin,
+                    collectLeave
+                );
+
+                foreach (var diff in _pendingDiffs)
+                {
+                    updatedState = SyncDiff(
+                        updatedState,
+                        diff,
+                        collectJoin,
+                        collectLeave
+                    );
+                }
+
+                _pendingDiffs.Clear();
+                _state = updatedState;
+                onJoin = OnJoin;
+                onLeave = OnLeave;
+                onSync = OnSync;
+            }
+
+            InvokePresenceChanges(changes, onJoin, onLeave);
+            onSync?.Invoke();
+        }
+
+        private void HandleDiff(Message message)
+        {
+            var diff = message.Payload?.Unbox<Diff>();
+            if (diff == null)
+            {
+                return;
+            }
+
+            var channelJoinRef = _channel.JoinRef;
+            var changes = new List<PresenceChange>();
+            OnJoinDelegate collectJoin = (key, currentPresence, joinedPresence) =>
+                changes.Add(new PresenceChange(true, key, currentPresence, joinedPresence));
+            OnLeaveDelegate collectLeave = (key, currentPresence, leftPresence) =>
+                changes.Add(new PresenceChange(false, key, currentPresence, leftPresence));
+
+            OnJoinDelegate? onJoin;
+            OnLeaveDelegate? onLeave;
+            OnSyncDelegate? onSync;
+            lock (_stateLock)
+            {
+                if (InPendingSyncStateUnsafe(channelJoinRef))
+                {
+                    _pendingDiffs.Add(diff);
+                    return;
+                }
+
+                _state = SyncDiff(
+                    _state,
+                    diff,
+                    collectJoin,
+                    collectLeave
+                );
+                onJoin = OnJoin;
+                onLeave = OnLeave;
+                onSync = OnSync;
+            }
+
+            InvokePresenceChanges(changes, onJoin, onLeave);
+            onSync?.Invoke();
+        }
+
+        private bool InPendingSyncStateUnsafe(string? channelJoinRef)
+        {
+            return _joinRef == null || _joinRef != channelJoinRef;
+        }
+
+        private static void InvokePresenceChanges(
+            List<PresenceChange> changes,
+            OnJoinDelegate? onJoin,
+            OnLeaveDelegate? onLeave
+        )
+        {
+            foreach (var change in changes)
+            {
+                if (change.IsJoin)
+                {
+                    onJoin?.Invoke(
+                        change.Key,
+                        change.CurrentPresence,
+                        change.ChangedPresence
+                    );
+                }
+                else
+                {
+                    onLeave?.Invoke(
+                        change.Key,
+                        change.CurrentPresence,
+                        change.ChangedPresence
+                    );
+                }
+            }
         }
 
         // lower-level public static API
@@ -177,7 +307,7 @@ namespace Phoenix
             }
 
             var diff = new Diff { Joins = joins, Leaves = leaves };
-            return SyncDiff(new State(currentState), diff, onJoin, onLeave);
+            return SyncDiff(currentState, diff, onJoin, onLeave);
         }
 
         /**
@@ -186,32 +316,40 @@ namespace Phoenix
          * accepts optional `onJoin` and `onLeave` callbacks to react to a user
          * joining or leaving from a device.
          */
-        private static State SyncDiff(
+        public static State SyncDiff(
             State state,
             Diff diff,
-            OnJoinDelegate? onJoin,
-            OnLeaveDelegate? onLeave
+            OnJoinDelegate? onJoin = null,
+            OnLeaveDelegate? onLeave = null
         )
         {
+            var syncedState = new State(state);
+
             foreach (var key in diff.Joins.Keys)
             {
                 var newPresence = diff.Joins[key];
-                var found = state.TryGetValue(key, out var currentPresence);
-                state[key] = newPresence;
+                var found = syncedState.TryGetValue(key, out var currentPresence);
+                var syncedPresence = newPresence;
                 if (found && currentPresence != null)
                 {
-                    var joinedRefs = state[key].Metas.Select(m => m.PhxRef).ToList();
+                    syncedPresence = new PresencePayload
+                    {
+                        Metas = new List<PresenceMeta>(newPresence.Metas),
+                        Payload = newPresence.Payload
+                    };
+                    var joinedRefs = syncedPresence.Metas.Select(m => m.PhxRef).ToList();
                     var curMetas = currentPresence.Metas.Where(m => joinedRefs.IndexOf(m.PhxRef) < 0).ToList();
-                    state[key].Metas.InsertRange(0, curMetas);
+                    syncedPresence.Metas.InsertRange(0, curMetas);
                 }
 
+                syncedState[key] = syncedPresence;
                 onJoin?.Invoke(key, currentPresence, newPresence);
             }
 
             foreach (var key in diff.Leaves.Keys)
             {
                 var leftPresence = diff.Leaves[key];
-                var found = state.TryGetValue(key, out var currentPresence);
+                var found = syncedState.TryGetValue(key, out var currentPresence);
                 if (!found || currentPresence == null)
                 {
                     continue;
@@ -221,19 +359,23 @@ namespace Phoenix
                 var filteredMetas = currentPresence.Metas.Where(
                     m => refsToRemove.IndexOf(m.PhxRef) < 0).ToList();
 
-                var newPresence = new PresencePayload { Metas = filteredMetas };
+                var newPresence = new PresencePayload
+                {
+                    Metas = filteredMetas,
+                    Payload = currentPresence.Payload
+                };
                 onLeave?.Invoke(key, newPresence, leftPresence);
                 if (newPresence.Metas.Count == 0)
                 {
-                    state.Remove(key);
+                    syncedState.Remove(key);
                 }
                 else
                 {
-                    state[key] = newPresence;
+                    syncedState[key] = newPresence;
                 }
             }
 
-            return state;
+            return syncedState;
         }
 
         /// <summary>
@@ -292,55 +434,96 @@ namespace Phoenix
                 throw new ArgumentNullException(nameof(key));
 
             var tcs = new TaskCompletionSource<PresencePayload?>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-            // Check if user is already present
-            if (State.TryGetValue(key, out var existingPresence))
-            {
-                return Task.FromResult<PresencePayload?>(existingPresence);
-            }
-
-            OnJoinDelegate? handler = null;
-            CancellationTokenSource? timeoutCts = null;
-            CancellationTokenRegistration cancellationRegistration = default;
-
-            void Cleanup()
-            {
-                if (handler != null)
-                {
-                    OnJoin -= handler;
-                }
-                timeoutCts?.Dispose();
-                cancellationRegistration.Dispose();
-            }
-
-            handler = (joinedKey, _, newPresence) =>
+            OnJoinDelegate handler = (joinedKey, _, newPresence) =>
             {
                 if (joinedKey == key)
                 {
-                    Cleanup();
                     tcs.TrySetResult(newPresence);
                 }
             };
 
-            OnJoin += handler;
-
-            // Set up timeout
-            timeoutCts = new CancellationTokenSource();
-            timeoutCts.CancelAfter(timeout);
-            timeoutCts.Token.Register(() =>
+            State stateSnapshot;
+            lock (_stateLock)
             {
-                Cleanup();
-                tcs.TrySetResult(null);
-            });
+                // Capture the snapshot atomically with subscribing. A join either
+                // appears in this snapshot or observes the installed handler.
+                OnJoin += handler;
+                stateSnapshot = _state;
+            }
 
-            // Handle external cancellation
-            cancellationRegistration = cancellationToken.Register(() =>
+            if (stateSnapshot.TryGetValue(key, out var existingPresence))
             {
-                Cleanup();
-                tcs.TrySetCanceled();
-            });
+                RemoveUserWaitHandler(handler);
+                tcs.TrySetResult(existingPresence);
+                return tcs.Task;
+            }
 
-            return tcs.Task;
+            if (tcs.Task.IsCompleted)
+            {
+                RemoveUserWaitHandler(handler);
+                return tcs.Task;
+            }
+
+            CancellationTokenSource? timeoutCts = null;
+            CancellationTokenRegistration timeoutRegistration = default;
+            CancellationTokenRegistration cancellationRegistration = default;
+            try
+            {
+                timeoutCts = new CancellationTokenSource();
+                timeoutCts.CancelAfter(timeout);
+                timeoutRegistration = timeoutCts.Token.Register(() =>
+                    tcs.TrySetResult(null)
+                );
+
+                cancellationRegistration = cancellationToken.Register(() =>
+                    tcs.TrySetCanceled()
+                );
+            }
+            catch
+            {
+                RemoveUserWaitHandler(handler);
+                timeoutRegistration.Dispose();
+                cancellationRegistration.Dispose();
+                timeoutCts?.Dispose();
+                throw;
+            }
+
+            return AwaitUserAndCleanupAsync(
+                tcs.Task,
+                handler,
+                timeoutCts!,
+                timeoutRegistration,
+                cancellationRegistration
+            );
+        }
+
+        private async Task<PresencePayload?> AwaitUserAndCleanupAsync(
+            Task<PresencePayload?> waitTask,
+            OnJoinDelegate handler,
+            CancellationTokenSource timeoutCts,
+            CancellationTokenRegistration timeoutRegistration,
+            CancellationTokenRegistration cancellationRegistration
+        )
+        {
+            try
+            {
+                return await waitTask.ConfigureAwait(false);
+            }
+            finally
+            {
+                RemoveUserWaitHandler(handler);
+                timeoutRegistration.Dispose();
+                cancellationRegistration.Dispose();
+                timeoutCts.Dispose();
+            }
+        }
+
+        private void RemoveUserWaitHandler(OnJoinDelegate handler)
+        {
+            lock (_stateLock)
+            {
+                OnJoin -= handler;
+            }
         }
 
         public sealed class Options

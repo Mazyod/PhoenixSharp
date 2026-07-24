@@ -1,8 +1,13 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using Phoenix;
+using PhoenixTests.TestDoubles;
 using PhoenixTests.WebSocketImpl;
 
 namespace PhoenixTests
@@ -69,6 +74,49 @@ namespace PhoenixTests
             )!;
         }
 
+        private static (Presence presence, Channel channel) CreateSyncedPresence()
+        {
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                DelayedExecutor = new MockDelayedExecutor(),
+                HeartbeatInterval = null,
+                ReconnectAfter = null,
+                RejoinAfter = null
+            };
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                new MockWebsocketFactory(),
+                options
+            );
+            socket.Connect();
+
+            var channel = socket.Channel("presence:test");
+            var presence = new Presence(channel);
+            channel.Join();
+            channel.Trigger(new Message(
+                @event: "presence_state",
+                payload: JsonBox.Serialize(new Dictionary<string, PresencePayload>())
+            ));
+
+            return (presence, channel);
+        }
+
+        private static void SetPresenceStateForRaceTest(
+            Presence presence,
+            Dictionary<string, PresencePayload> state
+        )
+        {
+            const BindingFlags flags = BindingFlags.Instance
+                | BindingFlags.Public
+                | BindingFlags.NonPublic;
+            var stateField = typeof(Presence).GetField("State", flags)
+                ?? typeof(Presence).GetField("_state", flags);
+
+            Assert.That(stateField, Is.Not.Null);
+            stateField!.SetValue(presence, state);
+        }
+
         /**
         syncs empty state
         */
@@ -86,6 +134,104 @@ namespace PhoenixTests
 
             state = Presence.SyncState(state, newState);
             CollectionAssert.AreEqual(newState, state);
+        }
+
+        [Test]
+        public void SyncDiffReturnsFreshSnapshotWithoutMutatingInputTest()
+        {
+            var currentState = new Dictionary<string, PresencePayload>
+            {
+                {"u1", SamplePresencePayload(1)}
+            };
+            var diff = SampleDiff(joins: new Dictionary<string, PresencePayload>
+            {
+                {"u2", SamplePresencePayload(2)}
+            });
+
+            var result = Presence.SyncDiff(currentState, diff);
+
+            Assert.That(result, Is.Not.SameAs(currentState));
+            Assert.That(currentState.Keys, Is.EqualTo(new[] { "u1" }));
+            Assert.That(result.Keys, Is.EquivalentTo(new[] { "u1", "u2" }));
+        }
+
+        [Test]
+        public void InstancePublishesFreshSnapshotBeforeJoinCallbacksTest()
+        {
+            var (presence, channel) = CreateSyncedPresence();
+            var initialState = new Dictionary<string, PresencePayload>
+            {
+                {"u1", SamplePresencePayload(1)}
+            };
+            channel.Trigger(new Message(
+                @event: "presence_state",
+                payload: JsonBox.Serialize(initialState)
+            ));
+
+            var oldSnapshot = presence.State;
+            var oldPresence = oldSnapshot["u1"];
+            var oldMetas = oldPresence.Metas;
+            Dictionary<string, PresencePayload>? callbackSnapshot = null;
+            presence.OnJoin += (key, _, _) =>
+            {
+                if (key == "u2")
+                {
+                    callbackSnapshot = presence.State;
+                }
+            };
+
+            var diff = SampleDiff(joins: new Dictionary<string, PresencePayload>
+            {
+                {"u1", SamplePresencePayload(2)},
+                {"u2", SamplePresencePayload(3)}
+            });
+            channel.Trigger(new Message(
+                @event: "presence_diff",
+                payload: JsonBox.Serialize(diff)
+            ));
+
+            var newSnapshot = presence.State;
+            Assert.That(newSnapshot, Is.Not.SameAs(oldSnapshot));
+            Assert.That(callbackSnapshot, Is.SameAs(newSnapshot));
+            Assert.That(oldSnapshot.Keys, Is.EqualTo(new[] { "u1" }));
+            Assert.That(oldSnapshot["u1"], Is.SameAs(oldPresence));
+            Assert.That(oldPresence.Metas, Is.SameAs(oldMetas));
+            Assert.That(oldMetas.Select(meta => meta.PhxRef), Is.EqualTo(new[] { "1" }));
+            Assert.That(
+                newSnapshot["u1"].Metas.Select(meta => meta.PhxRef),
+                Is.EqualTo(new[] { "1", "2" })
+            );
+            Assert.That(newSnapshot.ContainsKey("u2"), Is.True);
+        }
+
+        [Test]
+        public async Task WaitForUserAsyncDoesNotMissJoinDuringInitialLookupTest()
+        {
+            var (presence, channel) = CreateSyncedPresence();
+            var joiningPresence = SamplePresencePayload(42);
+            var diff = SampleDiff(joins: new Dictionary<string, PresencePayload>
+            {
+                {"race-user", joiningPresence}
+            });
+            var diffMessage = new Message(
+                @event: "presence_diff",
+                payload: JsonBox.Serialize(diff)
+            );
+            var comparer = new CallbackStringComparer();
+            var raceState = new Dictionary<string, PresencePayload>(comparer)
+            {
+                {"sentinel", SamplePresencePayload(1)}
+            };
+            comparer.Arm(() => channel.Trigger(diffMessage));
+            SetPresenceStateForRaceTest(presence, raceState);
+
+            var result = await presence.WaitForUserAsync(
+                "race-user",
+                TimeSpan.FromMilliseconds(100)
+            );
+
+            Assert.That(result, Is.Not.Null);
+            Assert.That(result!.Metas.Single().PhxRef, Is.EqualTo("42"));
         }
 
         [Test]
@@ -263,6 +409,28 @@ namespace PhoenixTests
             Assert.IsNotEmpty(payload["u1"].Metas);
             Assert.AreEqual(1, payload["u1"].Metas[0].Payload.Unbox<JToken>().Value<int>("id"));
             Assert.AreEqual("1", payload["u1"].Metas[0].PhxRef);
+        }
+
+        private sealed class CallbackStringComparer : IEqualityComparer<string>
+        {
+            private Action? _callback;
+
+            public void Arm(Action callback)
+            {
+                _callback = callback;
+            }
+
+            public bool Equals(string? x, string? y)
+            {
+                return StringComparer.Ordinal.Equals(x, y);
+            }
+
+            public int GetHashCode(string value)
+            {
+                var callback = Interlocked.Exchange(ref _callback, null);
+                callback?.Invoke();
+                return StringComparer.Ordinal.GetHashCode(value);
+            }
         }
     }
 }
