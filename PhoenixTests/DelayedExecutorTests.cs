@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Threading;
 using NUnit.Framework;
 using Phoenix;
 using PhoenixTests.TestDoubles;
@@ -20,6 +22,40 @@ namespace PhoenixTests
 
             Assert.IsFalse(works);
             Assert.That(() => works, Is.True.After(100, 1));
+        }
+
+        [Test]
+        public void DelayedExecutorRunsActionOnThreadPoolThreadTest()
+        {
+            using var actionCompleted = new ManualResetEventSlim();
+            var ranOnThreadPoolThread = false;
+            var executor = new TaskDelayedExecutor();
+
+            executor.Execute(() =>
+            {
+                ranOnThreadPoolThread = Thread.CurrentThread.IsThreadPoolThread;
+                actionCompleted.Set();
+            }, TimeSpan.Zero);
+
+            Assert.That(actionCompleted.Wait(TimeSpan.FromSeconds(1)), Is.True);
+            Assert.That(ranOnThreadPoolThread, Is.True);
+        }
+
+        [Test]
+        public void DelayedExecutorCancelBeforeDelayNeverInvokesActionTest()
+        {
+            using var actionInvoked = new ManualResetEventSlim();
+            var executor = new TaskDelayedExecutor();
+            // A long delay guarantees Cancel() runs before the delay elapses,
+            // even on a starved CI runner; the negative wait below bounds runtime.
+            var execution = executor.Execute(
+                actionInvoked.Set,
+                TimeSpan.FromSeconds(30)
+            );
+
+            execution.Cancel();
+
+            Assert.That(actionInvoked.Wait(TimeSpan.FromMilliseconds(100)), Is.False);
         }
 
         [Test]
@@ -100,6 +136,63 @@ namespace PhoenixTests
             });
 
             Assert.That(() => works, Is.False.After(150, 5));
+        }
+
+        [Test]
+        public void DelayedExecutorCancelFromWithinActionIsSafeTest()
+        {
+            using var actionCompleted = new ManualResetEventSlim();
+            IDelayedExecution? execution = null;
+            Exception? cancelException = null;
+            var executor = new TaskDelayedExecutor();
+
+            execution = executor.Execute(() =>
+            {
+                try
+                {
+                    execution!.Cancel();
+                }
+                catch (Exception ex)
+                {
+                    cancelException = ex;
+                }
+                finally
+                {
+                    actionCompleted.Set();
+                }
+            }, TimeSpan.FromMilliseconds(10));
+
+            Assert.That(actionCompleted.Wait(TimeSpan.FromSeconds(1)), Is.True);
+            Assert.That(cancelException, Is.Null);
+        }
+
+        [Test]
+        public void DelayedExecutorRapidCancelChurnReleasesExecutionsWithoutFiringTest()
+        {
+            const int executionCount = 1_000;
+            var callbackCount = 0;
+            var references = new List<WeakReference>(executionCount);
+            var executor = new TaskDelayedExecutor();
+
+            for (var index = 0; index < executionCount; index++)
+            {
+                references.Add(ScheduleAndCancel(
+                    executor,
+                    () => Interlocked.Increment(ref callbackCount)
+                ));
+            }
+
+            Assert.That(
+                () =>
+                {
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                    GC.Collect();
+                    return CountAlive(references);
+                },
+                Is.EqualTo(0).After(2_000, 20)
+            );
+            Assert.That(Volatile.Read(ref callbackCount), Is.EqualTo(0));
         }
 
         [Test]
@@ -319,6 +412,27 @@ namespace PhoenixTests
         }
 
         [Test]
+        public void SchedulerCancelsExecutionCreatedAfterReentrantResetTest()
+        {
+            var callbackCount = 0;
+            var executor = new ReentrantDelayedExecutor();
+            Scheduler? scheduler = null;
+            scheduler = new Scheduler(
+                () => callbackCount++,
+                _ => TimeSpan.Zero,
+                executor
+            );
+            executor.OnExecute = scheduler.Reset;
+
+            scheduler.ScheduleTimeout();
+
+            Assert.That(executor.LastExecution, Is.Not.Null);
+            Assert.That(executor.LastExecution!.IsCancelled, Is.True);
+            executor.LastExecution.Action!();
+            Assert.That(callbackCount, Is.EqualTo(0));
+        }
+
+        [Test]
         public void SchedulerExponentialBackoffPatternTest()
         {
             var receivedDelays = new List<TimeSpan>();
@@ -403,5 +517,44 @@ namespace PhoenixTests
         }
 
         #endregion
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static WeakReference ScheduleAndCancel(
+            TaskDelayedExecutor executor,
+            Action callback
+        )
+        {
+            var execution = executor.Execute(callback, TimeSpan.FromSeconds(30));
+            var reference = new WeakReference(execution);
+            execution.Cancel();
+            return reference;
+        }
+
+        private static int CountAlive(List<WeakReference> references)
+        {
+            var count = 0;
+            foreach (var reference in references)
+            {
+                if (reference.IsAlive)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private sealed class ReentrantDelayedExecutor : IDelayedExecutor
+        {
+            public TrackedDelayedExecution? LastExecution { get; private set; }
+            public Action? OnExecute { get; set; }
+
+            public IDelayedExecution Execute(Action action, TimeSpan delay)
+            {
+                LastExecution = new TrackedDelayedExecution(action, delay);
+                OnExecute?.Invoke();
+                return LastExecution;
+            }
+        }
     }
 }

@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Phoenix
@@ -108,11 +109,73 @@ namespace Phoenix
 
     public sealed class TaskExecution : IDelayedExecution
     {
-        internal bool Cancelled;
+        private const int PendingState = 0;
+        private const int RunningState = 1;
+        private const int CancelledState = 2;
+        private const int CompletedState = 3;
 
+        private readonly CancellationTokenSource _cancellationSource = new CancellationTokenSource();
+        private int _disposed;
+        private int _state;
+
+        internal bool Cancelled => Volatile.Read(ref _state) == CancelledState;
+
+        internal CancellationToken Token => _cancellationSource.Token;
+
+        /// <summary>
+        /// Cancels this execution without waiting for an action that has already started.
+        /// If cancellation claims a pending execution, its action will not subsequently begin.
+        /// </summary>
         public void Cancel()
         {
-            Cancelled = true;
+            if (Interlocked.CompareExchange(
+                ref _state,
+                CancelledState,
+                PendingState
+            ) != PendingState)
+            {
+                return;
+            }
+
+            try
+            {
+                _cancellationSource.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Disposal is coordinated below, but cancellation must remain non-throwing.
+            }
+            catch (AggregateException)
+            {
+                // Only Task.Delay observes this token; guard the non-throwing contract.
+            }
+            finally
+            {
+                DisposeCancellationSource();
+            }
+        }
+
+        internal bool TryBeginExecution()
+        {
+            return Interlocked.CompareExchange(
+                ref _state,
+                RunningState,
+                PendingState
+            ) == PendingState;
+        }
+
+        internal void Complete()
+        {
+            Interlocked.Exchange(ref _state, CompletedState);
+            DisposeCancellationSource();
+        }
+
+        private void DisposeCancellationSource()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                _cancellationSource.Dispose();
+            }
         }
     }
 
@@ -125,13 +188,41 @@ namespace Phoenix
                 throw new ArgumentNullException(nameof(action));
 
             var execution = new TaskExecution();
-            Task.Delay(delay).GetAwaiter().OnCompleted(() =>
+            Task delayTask;
+            try
             {
-                if (!execution.Cancelled)
+                delayTask = Task.Delay(delay, execution.Token);
+                delayTask.ConfigureAwait(false).GetAwaiter().OnCompleted(() =>
                 {
-                    action();
-                }
-            });
+                    try
+                    {
+                        delayTask.GetAwaiter().GetResult();
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return;
+                    }
+
+                    if (!execution.TryBeginExecution())
+                    {
+                        return;
+                    }
+
+                    try
+                    {
+                        action();
+                    }
+                    finally
+                    {
+                        execution.Complete();
+                    }
+                });
+            }
+            catch
+            {
+                execution.Complete();
+                throw;
+            }
 
             return execution;
         }
