@@ -319,6 +319,53 @@ namespace PhoenixTests
         }
 
         [Test]
+        public void FailedHeartbeatSendIsReportedAndNeverBufferedTest()
+        {
+            var mockExecutor = new TrackingDelayedExecutor();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    DelayedExecutor = mockExecutor,
+                    HeartbeatInterval = TimeSpan.FromSeconds(30),
+                    ReconnectAfter = null
+                }
+            );
+            PhoenixError? receivedError = null;
+            socket.OnError += error => receivedError = error;
+            socket.Connect();
+            var connection = factory.LastCreatedWebsocket!;
+            var sendException = new InvalidOperationException("heartbeat send failed");
+            connection.OnSend = _ => throw sendException;
+            var heartbeatExecution = mockExecutor.PendingExecutions.Single(
+                execution => execution.Delay == TimeSpan.FromSeconds(30)
+            );
+
+            Assert.DoesNotThrow(heartbeatExecution.Execute);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(connection.State, Is.EqualTo(WebsocketState.Open));
+                Assert.That(connection.CallSend, Has.Count.EqualTo(1));
+                Assert.That(socket.SendBuffer, Is.Empty);
+                Assert.That(receivedError, Is.Not.Null);
+                Assert.That(receivedError!.Kind, Is.EqualTo(PhoenixErrorKind.Send));
+                Assert.That(receivedError.Exception, Is.SameAs(sendException));
+            });
+
+            connection.OnSend = null;
+            socket.FlushSendBuffer();
+            Assert.That(
+                connection.CallSend,
+                Has.Count.EqualTo(1),
+                "A failed heartbeat must not be resurrected from the send buffer."
+            );
+        }
+
+        [Test]
         public void StaleHeartbeatTimerAfterReconnectResetIsNoOpTest()
         {
             var mockExecutor = new TrackingDelayedExecutor();

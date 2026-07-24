@@ -9,15 +9,52 @@ namespace Phoenix
 {
     public sealed class Socket : IDisposable
     {
+        private const int MaxSendAttempts = 5;
         private volatile bool _disposed;
         public delegate void OnClosedDelegate(ushort code, string message);
 
-        public delegate void OnErrorDelegate(string message);
+        public delegate void OnErrorDelegate(PhoenixError error);
 
         public delegate void OnMessageDelegate(Message message);
 
 
         public delegate void OnOpenDelegate();
+
+        internal readonly struct SendAttempt
+        {
+            public bool WasSent { get; }
+            public bool ShouldRetry { get; }
+            public PhoenixError? Error { get; }
+
+            private SendAttempt(
+                bool wasSent,
+                bool shouldRetry,
+                PhoenixError? error
+            )
+            {
+                WasSent = wasSent;
+                ShouldRetry = shouldRetry;
+                Error = error;
+            }
+
+            public static SendAttempt Sent()
+            {
+                return new SendAttempt(true, false, null);
+            }
+
+            public static SendAttempt NotSent(bool shouldRetry)
+            {
+                return new SendAttempt(false, shouldRetry, null);
+            }
+
+            public static SendAttempt Failed(
+                PhoenixError error,
+                bool shouldRetry
+            )
+            {
+                return new SendAttempt(false, shouldRetry, error);
+            }
+        }
 
         private sealed class PendingConnectWaiter
         {
@@ -69,7 +106,8 @@ namespace Phoenix
         private readonly IWebsocketFactory _websocketFactory;
         internal readonly Options Opts;
 
-        internal readonly List<Func<bool>> SendBuffer = new List<Func<bool>>();
+        internal readonly List<Func<SendAttempt>> SendBuffer =
+            new List<Func<SendAttempt>>();
         private readonly object _sendBufferLock = new object();
         private bool _isFlushingSendBuffer;
         private bool _sendBufferFlushRequested;
@@ -165,7 +203,9 @@ namespace Phoenix
             foreach (var connectWaiter in connectWaiters)
             {
                 connectWaiter.FinishWithException(
-                    new Exception("Connection failed: socket is disconnecting")
+                    new PhoenixConnectionException(
+                        "Connection failed: socket is disconnecting"
+                    )
                 );
             }
 
@@ -398,9 +438,19 @@ namespace Phoenix
                 CompleteSuccessfully();
             }
 
-            void OnErrorHandler(string error)
+            void OnErrorHandler(PhoenixError error)
             {
-                CompleteWithException(new Exception($"Connection failed: {error}"));
+                if (error.Kind != PhoenixErrorKind.Transport)
+                {
+                    return;
+                }
+
+                CompleteWithException(
+                    new PhoenixConnectionException(
+                        $"Connection failed: {error.Message}",
+                        error.Exception
+                    )
+                );
             }
 
             void OnCloseHandler(ushort code, string reason)
@@ -411,7 +461,9 @@ namespace Phoenix
                 }
 
                 CompleteWithException(
-                    new Exception($"Connection failed: connection closed before opening ({code} {reason})")
+                    new PhoenixConnectionException(
+                        $"Connection failed: connection closed before opening ({code} {reason})"
+                    )
                 );
             }
 
@@ -451,7 +503,7 @@ namespace Phoenix
             catch (Exception ex)
             {
                 CompleteWithException(
-                    new Exception($"Connection failed: {ex.Message}", ex)
+                    new PhoenixConnectionException($"Connection failed: {ex.Message}", ex)
                 );
                 return tcs.Task;
             }
@@ -474,7 +526,9 @@ namespace Phoenix
                 else if (disconnecting)
                 {
                     CompleteWithException(
-                        new Exception("Connection failed: socket is disconnecting")
+                        new PhoenixConnectionException(
+                            "Connection failed: socket is disconnecting"
+                        )
                     );
                 }
                 else
@@ -489,7 +543,10 @@ namespace Phoenix
                     else if (connectException != null && _reconnectTimer == null)
                     {
                         CompleteWithException(
-                            new Exception($"Connection failed: {connectException.Message}", connectException)
+                            new PhoenixConnectionException(
+                                $"Connection failed: {connectException.Message}",
+                                connectException
+                            )
                         );
                     }
                 }
@@ -505,7 +562,7 @@ namespace Phoenix
                 else
                 {
                     CompleteWithException(
-                        new Exception($"Connection failed: {ex.Message}", ex)
+                        new PhoenixConnectionException($"Connection failed: {ex.Message}", ex)
                     );
                 }
             }
@@ -576,7 +633,11 @@ namespace Phoenix
             }
             catch (Exception ex)
             {
-                CompleteWithException(ex);
+                CompleteWithException(
+                    ex is PhoenixException
+                        ? ex
+                        : new PhoenixException($"Disconnect failed: {ex.Message}", ex)
+                );
             }
 
             return tcs.Task;
@@ -944,6 +1005,12 @@ namespace Phoenix
                 Log(LogLevel.Debug, "transport", $"Error {error}");
             }
 
+            ReportError(new PhoenixError(error, PhoenixErrorKind.Transport));
+            TriggerChanError();
+        }
+
+        private void ReportError(PhoenixError error)
+        {
             try
             {
                 OnError?.Invoke(error);
@@ -955,8 +1022,6 @@ namespace Phoenix
                     Log(LogLevel.Error, "socket", $"OnError callback threw exception: {ex.Message}");
                 }
             }
-
-            TriggerChanError();
         }
 
         private void TriggerChanError()
@@ -1029,39 +1094,93 @@ namespace Phoenix
 
         internal void Push(Message message)
         {
+            Push(message, bufferOnFailure: true);
+        }
+
+        private void Push(Message message, bool bufferOnFailure)
+        {
             if (HasLogger()) // let {topic, event, payload, ref, join_ref} = data
             {
                 Log(LogLevel.Debug, "push", $"Pushing {message}");
             }
 
-            bool EncodeThenSend()
+            var sendFailureCount = 0;
+            SendAttempt EncodeThenSend()
             {
                 var conn = Conn;
                 if (conn == null)
                 {
-                    return false;
+                    return SendAttempt.NotSent(bufferOnFailure);
                 }
 
-                conn.Send(Opts.MessageSerializer.Serialize(message));
-                return true;
+                string serializedMessage;
+                try
+                {
+                    serializedMessage = Opts.MessageSerializer.Serialize(message);
+                }
+                catch (Exception ex)
+                {
+                    return SendAttempt.Failed(
+                        new PhoenixError(
+                            $"Message serialization failed: {ex.Message}",
+                            PhoenixErrorKind.Serialization,
+                            ex
+                        ),
+                        shouldRetry: false
+                    );
+                }
+
+                try
+                {
+                    conn.Send(serializedMessage);
+                }
+                catch (Exception ex)
+                {
+                    sendFailureCount++;
+                    return SendAttempt.Failed(
+                        new PhoenixError(
+                            $"WebSocket send failed: {ex.Message}",
+                            PhoenixErrorKind.Send,
+                            ex
+                        ),
+                        shouldRetry: bufferOnFailure
+                            && sendFailureCount < MaxSendAttempts
+                    );
+                }
+
+                return SendAttempt.Sent();
             }
 
             if (IsConnected())
             {
-                if (!EncodeThenSend())
+                var sendAttempt = EncodeThenSend();
+                if (!sendAttempt.WasSent)
                 {
-                    BufferSend(EncodeThenSend);
+                    if (sendAttempt.ShouldRetry)
+                    {
+                        BufferSend(
+                            EncodeThenSend,
+                            flushIfConnected: sendAttempt.Error == null
+                        );
+                    }
+
+                    if (sendAttempt.Error != null)
+                    {
+                        ReportError(sendAttempt.Error);
+                    }
                 }
             }
-            else
+            else if (bufferOnFailure)
             {
                 BufferSend(EncodeThenSend);
             }
         }
 
-        private void BufferSend(Func<bool> callback)
+        private void BufferSend(
+            Func<SendAttempt> callback,
+            bool flushIfConnected = true
+        )
         {
-            bool flushAfterBuffering;
             lock (_sendBufferLock)
             {
                 SendBuffer.Add(callback);
@@ -1070,11 +1189,9 @@ namespace Phoenix
                     _sendBufferFlushRequested = true;
                     return;
                 }
-
-                flushAfterBuffering = IsConnected();
             }
 
-            if (flushAfterBuffering)
+            if (flushIfConnected && IsConnected())
             {
                 FlushSendBuffer();
             }
@@ -1133,11 +1250,14 @@ namespace Phoenix
                 return;
             }
 
-            Push(new Message(
-                "phoenix",
-                "heartbeat",
-                @ref: heartbeatRef
-            ));
+            Push(
+                new Message(
+                    "phoenix",
+                    "heartbeat",
+                    @ref: heartbeatRef
+                ),
+                bufferOnFailure: false
+            );
 
             long timeoutGeneration;
             lock (_heartbeatStateLock)
@@ -1165,7 +1285,12 @@ namespace Phoenix
 
         internal void FlushSendBuffer()
         {
-            List<Func<bool>> bufferCopy;
+            if (!IsConnected())
+            {
+                return;
+            }
+
+            List<Func<SendAttempt>> bufferCopy;
             lock (_sendBufferLock)
             {
                 if (_isFlushingSendBuffer)
@@ -1174,34 +1299,45 @@ namespace Phoenix
                     return;
                 }
 
-                if (!IsConnected() || SendBuffer.Count <= 0)
+                if (SendBuffer.Count <= 0)
                 {
                     return;
                 }
 
                 _isFlushingSendBuffer = true;
-                bufferCopy = new List<Func<bool>>(SendBuffer);
+                bufferCopy = new List<Func<SendAttempt>>(SendBuffer);
                 SendBuffer.Clear();
             }
 
+            var errors = new List<PhoenixError>();
             bool flushAgain;
             try
             {
                 for (var index = 0; index < bufferCopy.Count; index++)
                 {
-                    if (bufferCopy[index]())
+                    var sendAttempt = bufferCopy[index]();
+                    if (sendAttempt.WasSent)
                     {
                         continue;
                     }
 
-                    lock (_sendBufferLock)
+                    if (sendAttempt.Error != null)
                     {
-                        SendBuffer.InsertRange(
-                            0,
-                            bufferCopy.GetRange(index, bufferCopy.Count - index)
-                        );
+                        errors.Add(sendAttempt.Error);
                     }
-                    break;
+
+                    if (sendAttempt.ShouldRetry)
+                    {
+                        lock (_sendBufferLock)
+                        {
+                            SendBuffer.InsertRange(
+                                0,
+                                bufferCopy.GetRange(index, bufferCopy.Count - index)
+                            );
+                        }
+
+                        break;
+                    }
                 }
             }
             finally
@@ -1212,6 +1348,11 @@ namespace Phoenix
                     flushAgain = _sendBufferFlushRequested;
                     _sendBufferFlushRequested = false;
                 }
+            }
+
+            foreach (var error in errors)
+            {
+                ReportError(error);
             }
 
             if (flushAgain)

@@ -111,15 +111,18 @@ namespace PhoenixTests
             var connectTask = socket.ConnectAsync();
 
             await AssertCompletesWithin(connectTask);
-            var exception = Assert.ThrowsAsync<Exception>(async () => await connectTask);
+            var exception = Assert.ThrowsAsync<PhoenixConnectionException>(
+                async () => await connectTask
+            );
             Assert.That(exception!.Message, Does.Contain("Connection failed"));
+            Assert.That(exception.InnerException, Is.TypeOf<Exception>());
             Assert.That(socket.OnOpen, Is.Null);
             Assert.That(socket.OnError, Is.Null);
             Assert.That(socket.OnClose, Is.Null);
         }
 
         [Test]
-        public async Task ConnectAsync_WhenTransportThrowsObjectDisposedException_KeepsGenericFailureShape()
+        public async Task ConnectAsync_WhenTransportThrowsObjectDisposedException_WrapsTypedConnectionFailure()
         {
             var socket = new Socket(
                 "ws://localhost:1234",
@@ -134,8 +137,9 @@ namespace PhoenixTests
             var connectTask = socket.ConnectAsync();
 
             await AssertCompletesWithin(connectTask);
-            var exception = Assert.ThrowsAsync<Exception>(async () => await connectTask);
-            Assert.That(exception, Is.TypeOf<Exception>());
+            var exception = Assert.ThrowsAsync<PhoenixConnectionException>(
+                async () => await connectTask
+            );
             Assert.That(exception!.Message, Does.StartWith("Connection failed:"));
             Assert.That(exception.InnerException, Is.TypeOf<ObjectDisposedException>());
         }
@@ -203,8 +207,9 @@ namespace PhoenixTests
                 );
                 foreach (var connectTask in new[] { firstConnectTask, secondConnectTask })
                 {
-                    var exception = Assert.ThrowsAsync<Exception>(async () => await connectTask);
-                    Assert.That(exception, Is.TypeOf<Exception>());
+                    var exception = Assert.ThrowsAsync<PhoenixConnectionException>(
+                        async () => await connectTask
+                    );
                     Assert.That(exception!.Message, Does.Contain("socket is disconnecting"));
                 }
 
@@ -246,8 +251,9 @@ namespace PhoenixTests
                 await AssertCompletesWithin(disconnectTask);
                 await disconnectTask;
                 await AssertCompletesWithin(connectTask);
-                var exception = Assert.ThrowsAsync<Exception>(async () => await connectTask);
-                Assert.That(exception, Is.TypeOf<Exception>());
+                var exception = Assert.ThrowsAsync<PhoenixConnectionException>(
+                    async () => await connectTask
+                );
                 Assert.That(exception!.Message, Does.Contain("socket is disconnecting"));
                 Assert.That(executor.PendingCount, Is.EqualTo(0));
             }
@@ -341,8 +347,65 @@ namespace PhoenixTests
                 }
             );
 
-            var ex = Assert.ThrowsAsync<Exception>(async () => await socket.ConnectAsync());
+            var ex = Assert.ThrowsAsync<PhoenixConnectionException>(
+                async () => await socket.ConnectAsync()
+            );
             Assert.That(ex!.Message, Does.Contain("Connection refused"));
+        }
+
+        [Test]
+        public async Task ConnectAsync_SendFailureDuringOpenFlushStillCompletes()
+        {
+            var sendException = new InvalidOperationException("transient send blip");
+            var failNextSend = true;
+            var successfulSends = new List<string>();
+            var factory = new HookedWebsocketFactory(connection =>
+            {
+                connection.OnSend = data =>
+                {
+                    if (failNextSend)
+                    {
+                        failNextSend = false;
+                        throw sendException;
+                    }
+
+                    successfulSends.Add(data);
+                };
+            });
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    HeartbeatInterval = null,
+                    ReconnectAfter = null
+                }
+            );
+            PhoenixError? receivedError = null;
+            socket.OnError += error => receivedError = error;
+            socket.Push(new Message("topic", "queued"));
+
+            var connectTask = socket.ConnectAsync();
+
+            await AssertCompletesWithin(connectTask);
+            await connectTask;
+            Assert.Multiple(() =>
+            {
+                Assert.That(socket.State, Is.EqualTo(WebsocketState.Open));
+                Assert.That(socket.SendBuffer, Has.Count.EqualTo(1));
+                Assert.That(receivedError, Is.Not.Null);
+                Assert.That(receivedError!.Kind, Is.EqualTo(PhoenixErrorKind.Send));
+                Assert.That(receivedError.Exception, Is.SameAs(sendException));
+            });
+
+            socket.FlushSendBuffer();
+            Assert.Multiple(() =>
+            {
+                Assert.That(socket.SendBuffer, Is.Empty);
+                Assert.That(successfulSends, Has.Count.EqualTo(1));
+                Assert.That(successfulSends[0], Does.Contain("\"queued\""));
+            });
         }
 
         [Test]
@@ -421,7 +484,9 @@ namespace PhoenixTests
             var socket = CreateSocket(factory);
             var connectTask = socket.ConnectAsync();
             factory.Connection.CompleteClose();
-            Assert.ThrowsAsync<Exception>(async () => await connectTask);
+            Assert.ThrowsAsync<PhoenixConnectionException>(
+                async () => await connectTask
+            );
 
             var disconnectTask = socket.DisconnectAsync();
 
@@ -429,6 +494,31 @@ namespace PhoenixTests
             await disconnectTask;
             Assert.That(socket.Conn, Is.Null);
             Assert.That(socket.OnClose, Is.Null);
+        }
+
+        [Test]
+        public async Task DisconnectAsync_WhenTransportCloseThrows_WrapsPhoenixException()
+        {
+            var factory = new ControlledLifecycleWebsocketFactory
+            {
+                OpenOnConnect = true
+            };
+            var socket = CreateSocket(factory);
+            socket.Connect();
+            var transportException = new InvalidOperationException("close failed");
+            factory.Connection.CloseException = transportException;
+
+            var disconnectTask = socket.DisconnectAsync();
+
+            await AssertCompletesWithin(disconnectTask);
+            var exception = Assert.ThrowsAsync<PhoenixException>(
+                async () => await disconnectTask
+            );
+            Assert.Multiple(() =>
+            {
+                Assert.That(exception!.Message, Does.Contain("Disconnect failed"));
+                Assert.That(exception.InnerException, Is.SameAs(transportException));
+            });
         }
 
         [Test]
@@ -552,7 +642,9 @@ namespace PhoenixTests
             await AssertCompletesWithin(disconnectTask);
             await disconnectTask;
             await AssertCompletesWithin(connectTask);
-            Assert.ThrowsAsync<Exception>(async () => await connectTask);
+            Assert.ThrowsAsync<PhoenixConnectionException>(
+                async () => await connectTask
+            );
             Assert.That(socket.OnOpen, Is.Null);
             Assert.That(socket.OnError, Is.Null);
             Assert.That(socket.OnClose, Is.Null);
@@ -572,7 +664,9 @@ namespace PhoenixTests
             var overlappingConnectTask = socket.ConnectAsync();
 
             await AssertCompletesWithin(overlappingConnectTask);
-            Assert.ThrowsAsync<Exception>(async () => await overlappingConnectTask);
+            Assert.ThrowsAsync<PhoenixConnectionException>(
+                async () => await overlappingConnectTask
+            );
             Assert.That(factory.Connection.ConnectCount, Is.EqualTo(1));
 
             factory.Connection.CompleteClose();
@@ -599,7 +693,9 @@ namespace PhoenixTests
             var overlappingConnectTask = socket.ConnectAsync();
 
             await AssertCompletesWithin(overlappingConnectTask);
-            Assert.ThrowsAsync<Exception>(async () => await overlappingConnectTask);
+            Assert.ThrowsAsync<PhoenixConnectionException>(
+                async () => await overlappingConnectTask
+            );
             executor.ExecuteLast();
             await AssertCompletesWithin(disconnectTask);
             await disconnectTask;
@@ -739,6 +835,25 @@ namespace PhoenixTests
             }
         }
 
+        private sealed class HookedWebsocketFactory : IWebsocketFactory
+        {
+            private readonly Action<MockWebsocketAdapterWithCallbacks> _onBuild;
+
+            public HookedWebsocketFactory(
+                Action<MockWebsocketAdapterWithCallbacks> onBuild
+            )
+            {
+                _onBuild = onBuild;
+            }
+
+            public IWebsocket Build(WebsocketConfiguration config)
+            {
+                var connection = new MockWebsocketAdapterWithCallbacks(config);
+                _onBuild(connection);
+                return connection;
+            }
+        }
+
         private sealed class ControlledLifecycleWebsocketFactory : IWebsocketFactory
         {
             public ControlledLifecycleWebsocket Connection { get; private set; } = null!;
@@ -769,6 +884,7 @@ namespace PhoenixTests
             }
 
             public int ConnectCount { get; private set; }
+            public Exception? CloseException { get; set; }
             public WebsocketState State { get; private set; } = WebsocketState.Closed;
 
             public void Connect()
@@ -793,6 +909,11 @@ namespace PhoenixTests
 
             public void Close(ushort? code = null, string? reason = null)
             {
+                if (CloseException != null)
+                {
+                    throw CloseException;
+                }
+
                 State = WebsocketState.Closing;
             }
 

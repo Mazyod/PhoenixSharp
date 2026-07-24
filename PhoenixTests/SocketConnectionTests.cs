@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using Phoenix;
@@ -324,6 +325,234 @@ namespace PhoenixTests
         }
 
         [Test]
+        public void FlushSendBufferRecoversFromSendExceptionAndHonorsPendingFlushTest()
+        {
+            var sendException = new InvalidOperationException("send failed");
+            var factory = new ControllableWebsocketFactory();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+            );
+            PhoenixError? receivedError = null;
+            socket.OnError += error => receivedError = error;
+            factory.ThrowOnSecondSend = () =>
+            {
+                factory.Connections[0].MockState = WebsocketState.Closed;
+                socket.Push(new Message("topic", "fourth"));
+                factory.Connections[0].MockState = WebsocketState.Open;
+                throw sendException;
+            };
+
+            socket.Push(new Message("topic", "first"));
+            socket.Push(new Message("topic", "second"));
+            socket.Push(new Message("topic", "third"));
+            socket.Connect();
+            var connection = factory.Connections[0];
+
+            Assert.DoesNotThrow(connection.Open);
+            Assert.Multiple(() =>
+            {
+                Assert.That(connection.CallSend, Has.Count.EqualTo(4));
+                Assert.That(connection.CallSend[0], Does.Contain("\"first\""));
+                Assert.That(connection.CallSend[1], Does.Contain("\"second\""));
+                Assert.That(connection.CallSend[2], Does.Contain("\"third\""));
+                Assert.That(connection.CallSend[3], Does.Contain("\"fourth\""));
+                Assert.That(socket.SendBuffer, Is.Empty);
+                Assert.That(receivedError, Is.Not.Null);
+                Assert.That(receivedError!.Kind, Is.EqualTo(PhoenixErrorKind.Send));
+                Assert.That(receivedError.Exception, Is.SameAs(sendException));
+            });
+        }
+
+        [Test]
+        public void SendFailureDoesNotErrorChannelOrGrowBufferThroughRejoinsTest()
+        {
+            var executor = new TrackingDelayedExecutor();
+            var rejoinTries = new List<int>();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    DelayedExecutor = executor,
+                    HeartbeatInterval = null,
+                    ReconnectAfter = null,
+                    RejoinAfter = tries =>
+                    {
+                        rejoinTries.Add(tries);
+                        return TimeSpan.FromMilliseconds(tries);
+                    }
+                }
+            );
+            PhoenixError? receivedError = null;
+            socket.OnError += error => receivedError = error;
+            socket.Connect();
+            var connection = factory.LastCreatedWebsocket!;
+            var channel = socket.Channel("test:topic");
+            channel.Join();
+            connection.SimulateMessage(BuildJoinOkReply("1", "test:topic"));
+            var sendException = new InvalidOperationException("frame too large");
+            connection.OnSend = _ => throw sendException;
+
+            socket.Push(new Message("test:topic", "poison"));
+            for (var cycle = 0; cycle < 5 && executor.PendingCount > 0; cycle++)
+            {
+                executor.ExecuteLast();
+            }
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(channel.State, Is.EqualTo(ChannelState.Joined));
+                Assert.That(rejoinTries, Is.Empty);
+                Assert.That(socket.SendBuffer, Has.Count.EqualTo(1));
+                Assert.That(receivedError, Is.Not.Null);
+                Assert.That(receivedError!.Kind, Is.EqualTo(PhoenixErrorKind.Send));
+                Assert.That(receivedError.Exception, Is.SameAs(sendException));
+            });
+        }
+
+        [Test]
+        public void SendFailureDoesNotResetExistingRejoinBackoffTest()
+        {
+            var executor = new TrackingDelayedExecutor();
+            var rejoinTries = new List<int>();
+            var joinTimeout = TimeSpan.FromSeconds(9);
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    DelayedExecutor = executor,
+                    HeartbeatInterval = null,
+                    ReconnectAfter = null,
+                    RejoinAfter = tries =>
+                    {
+                        rejoinTries.Add(tries);
+                        return TimeSpan.FromMilliseconds(tries);
+                    },
+                    Timeout = joinTimeout
+                }
+            );
+            socket.Connect();
+            var connection = factory.LastCreatedWebsocket!;
+            var channel = socket.Channel("test:topic");
+            channel.Join();
+            connection.SimulateMessage(BuildJoinOkReply("1", "test:topic"));
+            connection.OnSend = _ => throw new InvalidOperationException("send failed");
+
+            connection.SimulateError("connection error");
+            executor.PendingExecutions.Single(
+                execution => execution.Delay == TimeSpan.FromMilliseconds(1)
+            ).Execute();
+            executor.PendingExecutions.SingleOrDefault(
+                execution => execution.Delay == joinTimeout
+            )?.Execute();
+
+            Assert.That(rejoinTries, Is.EqualTo(new[] { 1, 2 }));
+        }
+
+        [Test]
+        public void TransportSendPoisonIsEvictedAfterAttemptCapAndFlushContinuesTest()
+        {
+            var sendException = new InvalidOperationException("frame too large");
+            var successfulSends = new List<string>();
+            var factory = new HookedWebsocketFactory(connection =>
+            {
+                connection.OnSend = data =>
+                {
+                    if (data.Contains("\"poison\""))
+                    {
+                        throw sendException;
+                    }
+
+                    successfulSends.Add(data);
+                };
+            });
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    HeartbeatInterval = null,
+                    ReconnectAfter = null
+                }
+            );
+            var errors = new List<PhoenixError>();
+            socket.OnError += errors.Add;
+            socket.Push(new Message("topic", "poison"));
+            socket.Push(new Message("topic", "remainder"));
+
+            socket.Connect();
+            for (var attempt = 1; attempt < 5; attempt++)
+            {
+                socket.FlushSendBuffer();
+            }
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(socket.SendBuffer, Is.Empty);
+                Assert.That(successfulSends, Has.Count.EqualTo(1));
+                Assert.That(successfulSends[0], Does.Contain("\"remainder\""));
+                Assert.That(errors, Has.Count.EqualTo(5));
+                Assert.That(
+                    errors.ConvertAll(error => error.Kind),
+                    Is.All.EqualTo(PhoenixErrorKind.Send)
+                );
+                Assert.That(
+                    errors.ConvertAll(error => error.Exception),
+                    Is.All.SameAs(sendException)
+                );
+            });
+        }
+
+        [Test]
+        public void SerializationPoisonIsDroppedAndFlushContinuesOnOpenConnectionTest()
+        {
+            var serializerException = new InvalidOperationException("cannot serialize bad event");
+            var serializer = new SelectiveThrowSerializer(serializerException);
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(serializer)
+                {
+                    HeartbeatInterval = null,
+                    ReconnectAfter = null
+                }
+            );
+            PhoenixError? receivedError = null;
+            socket.OnError += error => receivedError = error;
+            socket.Push(new Message("topic", "bad"));
+            socket.Push(new Message("topic", "good"));
+
+            Assert.DoesNotThrow(socket.Connect);
+
+            var connection = factory.LastCreatedWebsocket!;
+            Assert.Multiple(() =>
+            {
+                Assert.That(socket.Conn, Is.SameAs(connection));
+                Assert.That(connection.State, Is.EqualTo(WebsocketState.Open));
+                Assert.That(connection.CallSend, Has.Count.EqualTo(1));
+                Assert.That(connection.CallSend[0], Does.Contain("\"good\""));
+                Assert.That(socket.SendBuffer, Is.Empty);
+                Assert.That(receivedError, Is.Not.Null);
+                Assert.That(
+                    receivedError!.Kind,
+                    Is.EqualTo(PhoenixErrorKind.Serialization)
+                );
+                Assert.That(receivedError.Exception, Is.SameAs(serializerException));
+            });
+        }
+
+        [Test]
         public void BufferSendFlushesWhenConnectionOpensBetweenStateChecksTest()
         {
             var factory = new ControllableWebsocketFactory();
@@ -426,7 +655,7 @@ namespace PhoenixTests
                 new Socket.Options(new JsonMessageSerializer())
             );
 
-            string? receivedError = null;
+            PhoenixError? receivedError = null;
             socket.OnError += error => receivedError = error;
 
             socket.Connect();
@@ -435,7 +664,40 @@ namespace PhoenixTests
 
             conn.SimulateError("Test error message");
 
-            Assert.AreEqual("Test error message", receivedError);
+            Assert.That(receivedError, Is.Not.Null);
+            Assert.That(receivedError!.Message, Is.EqualTo("Test error message"));
+            Assert.That(receivedError.Kind, Is.EqualTo(PhoenixErrorKind.Transport));
+            Assert.That(receivedError.Exception, Is.Null);
+        }
+
+        [Test]
+        public void ThrowingOnErrorSubscriberIsContainedAndLoggedTest()
+        {
+            var logger = new CapturingLogger();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    HeartbeatInterval = null,
+                    Logger = logger
+                }
+            );
+            socket.OnError += _ => throw new InvalidOperationException(
+                "subscriber failed"
+            );
+            socket.Connect();
+
+            Assert.DoesNotThrow(() =>
+                factory.LastCreatedWebsocket!.SimulateError("transport failed"));
+            Assert.That(
+                logger.Messages,
+                Has.Some.Contains(
+                    "OnError callback threw exception: subscriber failed"
+                )
+            );
         }
 
         [Test]
@@ -799,7 +1061,7 @@ namespace PhoenixTests
 
             var socket = new Socket("ws://localhost:1234", null, factory, options);
 
-            string? receivedError = null;
+            PhoenixError? receivedError = null;
             socket.OnError += error => receivedError = error;
 
             socket.Connect();
@@ -808,7 +1070,9 @@ namespace PhoenixTests
 
             conn.SimulateError("Test error");
 
-            Assert.AreEqual("Test error", receivedError);
+            Assert.That(receivedError, Is.Not.Null);
+            Assert.That(receivedError!.Message, Is.EqualTo("Test error"));
+            Assert.That(receivedError.Kind, Is.EqualTo(PhoenixErrorKind.Transport));
         }
 
         [Test]
@@ -1082,6 +1346,56 @@ namespace PhoenixTests
             }
         }
 
+        private sealed class HookedWebsocketFactory : IWebsocketFactory
+        {
+            private readonly Action<MockWebsocketAdapterWithCallbacks> _onBuild;
+
+            public HookedWebsocketFactory(
+                Action<MockWebsocketAdapterWithCallbacks> onBuild
+            )
+            {
+                _onBuild = onBuild;
+            }
+
+            public IWebsocket Build(WebsocketConfiguration config)
+            {
+                var connection = new MockWebsocketAdapterWithCallbacks(config);
+                _onBuild(connection);
+                return connection;
+            }
+        }
+
+        private sealed class SelectiveThrowSerializer : IMessageSerializer
+        {
+            private readonly JsonMessageSerializer _inner = new JsonMessageSerializer();
+            private readonly Exception _serializationException;
+
+            public SelectiveThrowSerializer(Exception serializationException)
+            {
+                _serializationException = serializationException;
+            }
+
+            public string Serialize(object? element)
+            {
+                if (element is Message { Event: "bad" })
+                {
+                    throw _serializationException;
+                }
+
+                return _inner.Serialize(element);
+            }
+
+            public T Deserialize<T>(string message)
+            {
+                return _inner.Deserialize<T>(message)!;
+            }
+
+            public IJsonBox Box(object? element)
+            {
+                return _inner.Box(element);
+            }
+        }
+
         private sealed class ThrowingOnMessageChannel : Channel
         {
             public ThrowingOnMessageChannel(
@@ -1134,13 +1448,21 @@ namespace PhoenixTests
                 new List<ControllableWebsocket>();
 
             public Action? DisconnectOnFirstSend { get; set; }
+            public Action? ThrowOnSecondSend { get; set; }
 
             public IWebsocket Build(WebsocketConfiguration config)
             {
                 var disconnectOnFirstSend = Connections.Count == 0
                     ? DisconnectOnFirstSend
                     : null;
-                var websocket = new ControllableWebsocket(config, disconnectOnFirstSend);
+                var throwOnSecondSend = Connections.Count == 0
+                    ? ThrowOnSecondSend
+                    : null;
+                var websocket = new ControllableWebsocket(
+                    config,
+                    disconnectOnFirstSend,
+                    throwOnSecondSend
+                );
                 Connections.Add(websocket);
                 return websocket;
             }
@@ -1150,7 +1472,9 @@ namespace PhoenixTests
         {
             private readonly WebsocketConfiguration _config;
             private readonly Action? _disconnectOnFirstSend;
+            private readonly Action? _throwOnSecondSend;
             private bool _didDisconnectOnSend;
+            private bool _didThrowOnSend;
             private bool _reportClosedOnNextStateRead;
 
             public readonly List<string> CallSend = new List<string>();
@@ -1158,11 +1482,13 @@ namespace PhoenixTests
 
             public ControllableWebsocket(
                 WebsocketConfiguration config,
-                Action? disconnectOnFirstSend
+                Action? disconnectOnFirstSend,
+                Action? throwOnSecondSend
             )
             {
                 _config = config;
                 _disconnectOnFirstSend = disconnectOnFirstSend;
+                _throwOnSecondSend = throwOnSecondSend;
             }
 
             public WebsocketState State
@@ -1197,6 +1523,14 @@ namespace PhoenixTests
 
             public void Send(string message)
             {
+                if (_throwOnSecondSend != null
+                    && !_didThrowOnSend
+                    && CallSend.Count == 1)
+                {
+                    _didThrowOnSend = true;
+                    _throwOnSecondSend();
+                }
+
                 CallSend.Add(message);
                 if (_disconnectOnFirstSend != null && !_didDisconnectOnSend)
                 {

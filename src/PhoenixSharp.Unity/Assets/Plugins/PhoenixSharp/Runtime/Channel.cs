@@ -261,7 +261,7 @@ namespace Phoenix
         {
             if (_joinedOnce)
             {
-                throw new Exception(
+                throw new InvalidOperationException(
                     "tried to join multiple times. 'join' can only be called a single time per channel instance");
             }
 
@@ -395,7 +395,7 @@ namespace Phoenix
 
             if (!_joinedOnce)
             {
-                throw new Exception(
+                throw new InvalidOperationException(
                     $"tried to push '{@event}' to '{Topic}' before joining."
                     + " Use channel.join() before pushing events"
                 );
@@ -776,10 +776,13 @@ namespace Phoenix
         }
 
 
-        private void SocketOnError(string message)
+        private void SocketOnError(PhoenixError error)
         {
             if (_disposed) return;
-            _rejoinTimer?.Reset();
+            if (error.Kind == PhoenixErrorKind.Transport)
+            {
+                _rejoinTimer?.Reset();
+            }
         }
 
         private void SocketOnOpen()

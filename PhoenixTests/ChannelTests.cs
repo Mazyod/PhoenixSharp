@@ -27,7 +27,7 @@ namespace PhoenixTests
             Assert.AreEqual(ChannelState.Joining, channel.State);
 
             // it "throws if attempting to join multiple times"
-            Assert.That(() => channel.Join(), Throws.InstanceOf<Exception>());
+            Assert.That(() => channel.Join(), Throws.TypeOf<InvalidOperationException>());
 
             // it "triggers socket push with channel params"
             CollectionAssert.AreEqual(
@@ -51,7 +51,7 @@ namespace PhoenixTests
             // pushing before joining should throw
             Assert.That(
                 () => channel.Push("event"),
-                Throws.InstanceOf<Exception>()
+                Throws.TypeOf<InvalidOperationException>()
             );
 
             // now, join before the socket is connected
