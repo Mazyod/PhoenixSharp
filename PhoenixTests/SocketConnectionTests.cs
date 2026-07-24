@@ -207,6 +207,214 @@ namespace PhoenixTests
             });
         }
 
+        [Test]
+        public void ParamsProviderIsReevaluatedForEachReconnectBuildTest()
+        {
+            var executor = new TrackingDelayedExecutor();
+            var factory = new UriTrackingWebsocketFactory();
+            var token = "initial +& token";
+            var providerInvocations = 0;
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                DelayedExecutor = executor,
+                HeartbeatInterval = null,
+                ParamsProvider = () =>
+                {
+                    providerInvocations++;
+                    return new Dictionary<string, string>(
+                        StringComparer.OrdinalIgnoreCase
+                    )
+                    {
+                        { "token", token },
+                        { "VSN", "provider-version" }
+                    };
+                },
+                ReconnectAfter = _ => TimeSpan.FromMilliseconds(1),
+                Vsn = "options-version"
+            };
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                options
+            );
+
+            socket.Connect();
+            socket.Connect();
+            token = "refreshed =# token";
+            factory.Connections[0].SimulateClose(1_006, "token expired");
+            executor.PendingExecutions.Single().Execute();
+
+            var firstQuery = ParseQuery(factory.BuildUris[0]);
+            var secondQuery = ParseQuery(factory.BuildUris[1]);
+            Assert.Multiple(() =>
+            {
+                Assert.That(providerInvocations, Is.EqualTo(2));
+                Assert.That(factory.BuildUris, Has.Count.EqualTo(2));
+                Assert.That(
+                    firstQuery.GetValueOrDefault("token"),
+                    Is.EqualTo("initial +& token")
+                );
+                Assert.That(
+                    secondQuery.GetValueOrDefault("token"),
+                    Is.EqualTo("refreshed =# token")
+                );
+                Assert.That(
+                    firstQuery.Single(pair =>
+                        pair.Key.Equals("vsn", StringComparison.OrdinalIgnoreCase)
+                    ).Value,
+                    Is.EqualTo("options-version")
+                );
+                Assert.That(
+                    secondQuery.Single(pair =>
+                        pair.Key.Equals("vsn", StringComparison.OrdinalIgnoreCase)
+                    ).Value,
+                    Is.EqualTo("options-version")
+                );
+            });
+        }
+
+        [Test]
+        public void ParamsProviderThrowWithoutReconnectFaultsConnectAsyncWithTypedExceptionTest()
+        {
+            var providerException = new InvalidOperationException("token unavailable");
+            var providerInvocations = 0;
+            var factory = new UriTrackingWebsocketFactory();
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                HeartbeatInterval = null,
+                ParamsProvider = () =>
+                {
+                    providerInvocations++;
+                    throw providerException;
+                },
+                ReconnectAfter = null
+            };
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                options
+            );
+
+            var exception = Assert.ThrowsAsync<PhoenixConnectionException>(
+                async () => await socket.ConnectAsync()
+            );
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(exception!.InnerException, Is.SameAs(providerException));
+                Assert.That(providerInvocations, Is.EqualTo(1));
+                Assert.That(factory.BuildUris, Is.Empty);
+                Assert.That(socket.Conn, Is.Null);
+            });
+        }
+
+        [Test]
+        public void ParamsProviderThrowWithReconnectKeepsConnectAsyncPendingUntilRetryTest()
+        {
+            var executor = new TrackingDelayedExecutor();
+            var providerInvocations = 0;
+            var factory = new UriTrackingWebsocketFactory();
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                DelayedExecutor = executor,
+                HeartbeatInterval = null,
+                ParamsProvider = () =>
+                {
+                    providerInvocations++;
+                    if (providerInvocations == 1)
+                    {
+                        throw new InvalidOperationException("token refresh failed");
+                    }
+
+                    return new Dictionary<string, string>
+                    {
+                        { "token", "fresh" }
+                    };
+                },
+                ReconnectAfter = _ => TimeSpan.FromMilliseconds(1)
+            };
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                options
+            );
+
+            var connectTask = socket.ConnectAsync();
+
+            Assert.That(connectTask.IsCompleted, Is.False);
+            Assert.That(executor.PendingCount, Is.EqualTo(1));
+            Assert.That(factory.BuildUris, Is.Empty);
+            executor.ExecuteLast();
+
+            Assert.DoesNotThrowAsync(async () => await connectTask);
+            Assert.Multiple(() =>
+            {
+                Assert.That(providerInvocations, Is.EqualTo(2));
+                Assert.That(factory.BuildUris, Has.Count.EqualTo(1));
+                Assert.That(
+                    ParseQuery(factory.BuildUris[0]).GetValueOrDefault("token"),
+                    Is.EqualTo("fresh")
+                );
+            });
+        }
+
+        [Test]
+        public void ParamsProviderNullResultIsTreatedAsEmptyParametersTest()
+        {
+            var providerInvocations = 0;
+            var factory = new UriTrackingWebsocketFactory();
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                HeartbeatInterval = null,
+                ParamsProvider = () =>
+                {
+                    providerInvocations++;
+                    return null;
+                },
+                ReconnectAfter = null,
+                Vsn = "provider-null-version"
+            };
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                options
+            );
+
+            socket.Connect();
+
+            var query = ParseQuery(factory.BuildUris.Single());
+            Assert.Multiple(() =>
+            {
+                Assert.That(providerInvocations, Is.EqualTo(1));
+                Assert.That(query, Has.Count.EqualTo(1));
+                Assert.That(
+                    query.GetValueOrDefault("vsn"),
+                    Is.EqualTo("provider-null-version")
+                );
+            });
+        }
+
+        [Test]
+        public void ConstructorRejectsStaticParametersAndParamsProviderTest()
+        {
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                ParamsProvider = () => new Dictionary<string, string>()
+            };
+
+            Assert.Throws<ArgumentException>(() =>
+                new Socket(
+                    "ws://localhost:1234",
+                    new Dictionary<string, string>(),
+                    new MockWebsocketFactory(),
+                    options
+                ));
+        }
+
         #endregion
 
         #region Send Buffer Tests
@@ -1439,6 +1647,21 @@ namespace PhoenixTests
             {
                 LastUri = config.uri;
                 return new MockWebsocketAdapter(config);
+            }
+        }
+
+        private sealed class UriTrackingWebsocketFactory : IWebsocketFactory
+        {
+            public List<Uri> BuildUris { get; } = new List<Uri>();
+            public List<MockWebsocketAdapterWithCallbacks> Connections { get; } =
+                new List<MockWebsocketAdapterWithCallbacks>();
+
+            public IWebsocket Build(WebsocketConfiguration config)
+            {
+                BuildUris.Add(config.uri);
+                var connection = new MockWebsocketAdapterWithCallbacks(config);
+                Connections.Add(connection);
+                return connection;
             }
         }
 

@@ -101,6 +101,7 @@ namespace Phoenix
         // private uint connectClock = 1;
         private readonly string _endPoint;
         private readonly Dictionary<string, string>? _params;
+        private readonly Func<Dictionary<string, string>?>? _paramsProvider;
         private readonly Scheduler? _reconnectTimer;
 
         private readonly IWebsocketFactory _websocketFactory;
@@ -143,11 +144,19 @@ namespace Phoenix
                 throw new ArgumentNullException(nameof(websocketFactory));
             if (opts == null)
                 throw new ArgumentNullException(nameof(opts));
+            if (@params != null && opts.ParamsProvider != null)
+            {
+                throw new ArgumentException(
+                    "Static connection parameters and ParamsProvider cannot both be specified.",
+                    nameof(@params)
+                );
+            }
 
             _endPoint = endPoint;
             _params = @params == null
                 ? null
                 : new Dictionary<string, string>(@params, @params.Comparer);
+            _paramsProvider = opts.ParamsProvider;
             _websocketFactory = websocketFactory;
             Opts = opts;
 
@@ -170,11 +179,25 @@ namespace Phoenix
 
         // NOTE: Protocol inference not support in C# client
 
-        private Uri EndPointUrl()
+        private Dictionary<string, string> SnapshotConnectionParams()
         {
-            var @params = _params == null
+            Dictionary<string, string>? source;
+            if (_paramsProvider == null)
+            {
+                source = _params;
+            }
+            else
+            {
+                source = _paramsProvider();
+            }
+
+            return source == null
                 ? new Dictionary<string, string>()
-                : new Dictionary<string, string>(_params, _params.Comparer);
+                : new Dictionary<string, string>(source, source.Comparer);
+        }
+
+        private Uri EndPointUrl(Dictionary<string, string> @params)
+        {
             @params["vsn"] = Opts.Vsn;
 
             var stringParams = @params
@@ -250,15 +273,16 @@ namespace Phoenix
 
             try
             {
+                var endPointUrl = EndPointUrl(SnapshotConnectionParams());
                 var callbacksEnabled = 0;
                 var config = new WebsocketConfiguration
                 {
-                    uri = EndPointUrl(),
+                    uri = endPointUrl,
                     onOpenCallback = websocket =>
                     {
                         if (Volatile.Read(ref callbacksEnabled) != 0)
                         {
-                            OnConnOpen(websocket);
+                            OnConnOpen(websocket, endPointUrl);
                         }
                     },
                     onCloseCallback = (websocket, code, reason) =>
@@ -660,7 +684,7 @@ namespace Phoenix
         // public Subscription OnError(Action callback)
         // public Subscription OnMessage(Action callback)
 
-        private void OnConnOpen(IWebsocket websocket)
+        private void OnConnOpen(IWebsocket websocket, Uri endPointUrl)
         {
             if (!IsCurrentConnection(websocket))
             {
@@ -669,7 +693,7 @@ namespace Phoenix
 
             if (HasLogger())
             {
-                Log(LogLevel.Debug, "transport", $"Connected to {EndPointUrl()}");
+                Log(LogLevel.Debug, "transport", $"Connected to {endPointUrl}");
             }
 
             Volatile.Write(ref _closeWasClean, false);
@@ -1571,6 +1595,22 @@ namespace Phoenix
 
             // The optional function for specialized logging
             public ILogger? Logger = null;
+
+            /// <summary>
+            /// Provides connection parameters immediately before each WebSocket
+            /// transport build.
+            /// </summary>
+            /// <remarks>
+            /// Use this only when the socket constructor's parameter dictionary is
+            /// null; specifying both throws <see cref="ArgumentException"/>. The
+            /// delegate is captured when the socket is constructed. It may be invoked
+            /// concurrently when connection attempts race, so it must be thread-safe.
+            /// Each returned dictionary is snapshotted immediately, including its
+            /// comparer; null is treated as an empty dictionary. Keys and values are
+            /// raw and are URL-escaped by the socket. <see cref="Vsn"/> always takes
+            /// precedence.
+            /// </remarks>
+            public Func<Dictionary<string, string>?>? ParamsProvider { get; set; }
 
             // The interval for reconnecting in the event of a connection error. Null means none.
             public Func<int, TimeSpan>? ReconnectAfter = tries =>
