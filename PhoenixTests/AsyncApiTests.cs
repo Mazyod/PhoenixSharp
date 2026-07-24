@@ -31,6 +31,300 @@ namespace PhoenixTests
             await connectTask;
 
             Assert.AreEqual(WebsocketState.Open, socket.State);
+            Assert.That(socket.OnOpen, Is.Null);
+            Assert.That(socket.OnError, Is.Null);
+            Assert.That(socket.OnClose, Is.Null);
+        }
+
+        [Test]
+        public async Task ConnectAsync_WhenAlreadyConnected_CompletesWithinBoundedWait()
+        {
+            var socket = CreateConnectedSocket();
+
+            var connectTask = socket.ConnectAsync();
+
+            await AssertCompletesWithin(connectTask);
+            await connectTask;
+
+            Assert.That(socket.OnOpen, Is.Null);
+            Assert.That(socket.OnError, Is.Null);
+            Assert.That(socket.OnClose, Is.Null);
+        }
+
+        [Test]
+        public async Task ConnectAsync_AfterDispose_FaultsWithinBoundedWait()
+        {
+            var (socket, _) = CreateDisconnectedSocket();
+            socket.Dispose();
+            using var cancellationTokenSource = new CancellationTokenSource();
+
+            var connectTask = socket.ConnectAsync(cancellationTokenSource.Token);
+
+            try
+            {
+                await AssertCompletesWithin(connectTask);
+                Assert.ThrowsAsync<ObjectDisposedException>(async () => await connectTask);
+            }
+            finally
+            {
+                cancellationTokenSource.Cancel();
+            }
+        }
+
+        [Test]
+        public async Task ConnectAsync_WhenDisposedDuringInFlightConnect_FaultsWithinBoundedWait()
+        {
+            var factory = new ControlledLifecycleWebsocketFactory();
+            var socket = CreateSocket(factory);
+            using var cancellationTokenSource = new CancellationTokenSource();
+            var connectTask = socket.ConnectAsync(cancellationTokenSource.Token);
+            Assert.That(factory.Connection.State, Is.EqualTo(WebsocketState.Connecting));
+
+            socket.Dispose();
+
+            try
+            {
+                await AssertCompletesWithin(connectTask);
+                Assert.ThrowsAsync<ObjectDisposedException>(async () => await connectTask);
+                factory.Connection.CompleteClose(1_000, "Socket disposed");
+                Assert.That(connectTask.IsFaulted, Is.True);
+            }
+            finally
+            {
+                cancellationTokenSource.Cancel();
+            }
+        }
+
+        [Test]
+        public async Task ConnectAsync_WhenConnectThrowsWithoutReconnect_FaultsWithinBoundedWait()
+        {
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                new ThrowingWebsocketFactory(),
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    ReconnectAfter = null
+                }
+            );
+
+            var connectTask = socket.ConnectAsync();
+
+            await AssertCompletesWithin(connectTask);
+            var exception = Assert.ThrowsAsync<Exception>(async () => await connectTask);
+            Assert.That(exception!.Message, Does.Contain("Connection failed"));
+            Assert.That(socket.OnOpen, Is.Null);
+            Assert.That(socket.OnError, Is.Null);
+            Assert.That(socket.OnClose, Is.Null);
+        }
+
+        [Test]
+        public async Task ConnectAsync_WhenTransportThrowsObjectDisposedException_KeepsGenericFailureShape()
+        {
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                new ObjectDisposedOnBuildWebsocketFactory(),
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    ReconnectAfter = null
+                }
+            );
+
+            var connectTask = socket.ConnectAsync();
+
+            await AssertCompletesWithin(connectTask);
+            var exception = Assert.ThrowsAsync<Exception>(async () => await connectTask);
+            Assert.That(exception, Is.TypeOf<Exception>());
+            Assert.That(exception!.Message, Does.StartWith("Connection failed:"));
+            Assert.That(exception.InnerException, Is.TypeOf<ObjectDisposedException>());
+        }
+
+        [Test]
+        public async Task ConnectAsync_WhenConnectThrowsWithReconnect_WaitsForRetry()
+        {
+            var factory = new FailingThenSucceedingWebsocketFactory(1);
+            var executor = new TrackingDelayedExecutor();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    DelayedExecutor = executor,
+                    HeartbeatInterval = null,
+                    ReconnectAfter = _ => TimeSpan.FromMilliseconds(1)
+                }
+            );
+
+            var connectTask = socket.ConnectAsync();
+
+            Assert.That(connectTask.IsCompleted, Is.False);
+            Assert.That(executor.PendingCount, Is.EqualTo(1));
+            executor.ExecuteLast();
+            await AssertCompletesWithin(connectTask);
+            await connectTask;
+            Assert.That(factory.Attempts, Is.EqualTo(2));
+            Assert.That(socket.OnOpen, Is.Null);
+            Assert.That(socket.OnError, Is.Null);
+            Assert.That(socket.OnClose, Is.Null);
+        }
+
+        [Test]
+        public async Task ConnectAsync_WaitingForReconnect_WhenDisconnectCalled_FaultsWithinBoundedWait()
+        {
+            var factory = new ControlledLifecycleWebsocketFactory();
+            var executor = new TrackingDelayedExecutor();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    DelayedExecutor = executor,
+                    HeartbeatInterval = null,
+                    ReconnectAfter = _ => TimeSpan.FromMilliseconds(1)
+                }
+            );
+            using var cancellationTokenSource = new CancellationTokenSource();
+            var firstConnectTask = socket.ConnectAsync(cancellationTokenSource.Token);
+            var secondConnectTask = socket.ConnectAsync(cancellationTokenSource.Token);
+            factory.Connection.CompleteClose(1_006, "refused");
+            Assert.That(firstConnectTask.IsCompleted, Is.False);
+            Assert.That(secondConnectTask.IsCompleted, Is.False);
+            Assert.That(executor.PendingCount, Is.EqualTo(1));
+
+            socket.Disconnect();
+
+            try
+            {
+                await AssertCompletesWithin(
+                    Task.WhenAll(firstConnectTask, secondConnectTask)
+                );
+                foreach (var connectTask in new[] { firstConnectTask, secondConnectTask })
+                {
+                    var exception = Assert.ThrowsAsync<Exception>(async () => await connectTask);
+                    Assert.That(exception, Is.TypeOf<Exception>());
+                    Assert.That(exception!.Message, Does.Contain("socket is disconnecting"));
+                }
+
+                Assert.That(executor.PendingCount, Is.EqualTo(0));
+                Assert.That(socket.OnOpen, Is.Null);
+                Assert.That(socket.OnError, Is.Null);
+                Assert.That(socket.OnClose, Is.Null);
+            }
+            finally
+            {
+                cancellationTokenSource.Cancel();
+            }
+        }
+
+        [Test]
+        public async Task ConnectAsync_WaitingAfterSynchronousFailure_WhenDisconnectAsyncCalled_FaultsWithinBoundedWait()
+        {
+            var executor = new TrackingDelayedExecutor();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                new ThrowingWebsocketFactory(),
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    DelayedExecutor = executor,
+                    HeartbeatInterval = null,
+                    ReconnectAfter = _ => TimeSpan.FromMilliseconds(1)
+                }
+            );
+            using var cancellationTokenSource = new CancellationTokenSource();
+            var connectTask = socket.ConnectAsync(cancellationTokenSource.Token);
+            Assert.That(connectTask.IsCompleted, Is.False);
+            Assert.That(executor.PendingCount, Is.EqualTo(1));
+
+            var disconnectTask = socket.DisconnectAsync();
+
+            try
+            {
+                await AssertCompletesWithin(disconnectTask);
+                await disconnectTask;
+                await AssertCompletesWithin(connectTask);
+                var exception = Assert.ThrowsAsync<Exception>(async () => await connectTask);
+                Assert.That(exception, Is.TypeOf<Exception>());
+                Assert.That(exception!.Message, Does.Contain("socket is disconnecting"));
+                Assert.That(executor.PendingCount, Is.EqualTo(0));
+            }
+            finally
+            {
+                cancellationTokenSource.Cancel();
+            }
+        }
+
+        [Test]
+        public async Task ConnectAsync_ConcurrentWaiters_AllCompleteOnOpen()
+        {
+            var factory = new ControlledLifecycleWebsocketFactory();
+            var socket = CreateSocket(factory);
+
+            var firstConnectTask = socket.ConnectAsync();
+            var secondConnectTask = socket.ConnectAsync();
+
+            factory.Connection.Open();
+
+            var allConnectTasks = Task.WhenAll(firstConnectTask, secondConnectTask);
+            await AssertCompletesWithin(allConnectTasks);
+            await allConnectTasks;
+            Assert.That(factory.Connection.ConnectCount, Is.EqualTo(1));
+            Assert.That(socket.OnOpen, Is.Null);
+            Assert.That(socket.OnError, Is.Null);
+            Assert.That(socket.OnClose, Is.Null);
+        }
+
+        [Test]
+        public async Task ConnectAsync_AfterRemoteCloseWithoutReconnect_OpensNewTransport()
+        {
+            var factory = new ControlledLifecycleWebsocketFactory();
+            var socket = CreateSocket(factory);
+            socket.Connect();
+            var closedConnection = factory.Connection;
+            closedConnection.Open();
+            closedConnection.CompleteClose(1_006, "remote close");
+            factory.OpenOnConnect = true;
+            using var cancellationTokenSource = new CancellationTokenSource();
+
+            var connectTask = socket.ConnectAsync(cancellationTokenSource.Token);
+
+            try
+            {
+                await AssertCompletesWithin(connectTask);
+                await connectTask;
+            }
+            finally
+            {
+                cancellationTokenSource.Cancel();
+            }
+
+            Assert.That(factory.Connections, Has.Count.EqualTo(2));
+            Assert.That(factory.Connection, Is.Not.SameAs(closedConnection));
+            Assert.That(factory.Connection.State, Is.EqualTo(WebsocketState.Open));
+            Assert.That(socket.OnOpen, Is.Null);
+            Assert.That(socket.OnError, Is.Null);
+            Assert.That(socket.OnClose, Is.Null);
+        }
+
+        [Test]
+        public void Connect_AfterRemoteCloseWithoutReconnect_OpensNewTransport()
+        {
+            var factory = new ControlledLifecycleWebsocketFactory();
+            var socket = CreateSocket(factory);
+            socket.Connect();
+            var closedConnection = factory.Connection;
+            closedConnection.Open();
+            closedConnection.CompleteClose(1_006, "remote close");
+            factory.OpenOnConnect = true;
+
+            socket.Connect();
+
+            Assert.That(factory.Connections, Has.Count.EqualTo(2));
+            Assert.That(factory.Connection, Is.Not.SameAs(closedConnection));
+            Assert.That(factory.Connection.State, Is.EqualTo(WebsocketState.Open));
         }
 
         [Test]
@@ -67,6 +361,9 @@ namespace PhoenixTests
 
             Assert.ThrowsAsync<TaskCanceledException>(async () =>
                 await socket.ConnectAsync(cts.Token));
+            Assert.That(socket.OnOpen, Is.Null);
+            Assert.That(socket.OnError, Is.Null);
+            Assert.That(socket.OnClose, Is.Null);
         }
 
         #endregion
@@ -93,6 +390,48 @@ namespace PhoenixTests
         }
 
         [Test]
+        public async Task DisconnectAsync_WhenNeverConnected_CompletesWithinBoundedWait()
+        {
+            var (socket, _) = CreateDisconnectedSocket();
+
+            var disconnectTask = socket.DisconnectAsync();
+
+            await AssertCompletesWithin(disconnectTask);
+            await disconnectTask;
+
+            Assert.That(socket.OnClose, Is.Null);
+        }
+
+        [Test]
+        public async Task DisconnectAsync_AfterDispose_CompletesWithinBoundedWait()
+        {
+            var (socket, _) = CreateDisconnectedSocket();
+            socket.Dispose();
+
+            var disconnectTask = socket.DisconnectAsync();
+
+            await AssertCompletesWithin(disconnectTask);
+            await disconnectTask;
+        }
+
+        [Test]
+        public async Task DisconnectAsync_WhenTransportIsAlreadyClosed_CompletesWithinBoundedWait()
+        {
+            var factory = new ControlledLifecycleWebsocketFactory();
+            var socket = CreateSocket(factory);
+            var connectTask = socket.ConnectAsync();
+            factory.Connection.CompleteClose();
+            Assert.ThrowsAsync<Exception>(async () => await connectTask);
+
+            var disconnectTask = socket.DisconnectAsync();
+
+            await AssertCompletesWithin(disconnectTask);
+            await disconnectTask;
+            Assert.That(socket.Conn, Is.Null);
+            Assert.That(socket.OnClose, Is.Null);
+        }
+
+        [Test]
         public void DisconnectAsync_CancellationToken_CancelsTask()
         {
             var factory = new MockWebsocketFactoryWithCallbackTracking();
@@ -115,9 +454,345 @@ namespace PhoenixTests
 
             Assert.ThrowsAsync<TaskCanceledException>(async () =>
                 await socket.DisconnectAsync(cts.Token));
+            Assert.That(socket.OnClose, Is.Null);
         }
 
         #endregion
+
+        #region Socket operation overlap tests
+
+        [Test]
+        public async Task DisconnectAsync_DuringConnectAsync_DisconnectsAndFaultsConnectWaiter()
+        {
+            var factory = new ControlledLifecycleWebsocketFactory();
+            var executor = new TrackingDelayedExecutor();
+            var socket = CreateSocket(factory, executor);
+
+            var connectTask = socket.ConnectAsync();
+            var disconnectTask = socket.DisconnectAsync();
+            factory.Connection.CompleteClose();
+            executor.ExecuteLast();
+
+            await AssertCompletesWithin(disconnectTask);
+            await disconnectTask;
+            await AssertCompletesWithin(connectTask);
+            Assert.ThrowsAsync<Exception>(async () => await connectTask);
+            Assert.That(socket.OnOpen, Is.Null);
+            Assert.That(socket.OnError, Is.Null);
+            Assert.That(socket.OnClose, Is.Null);
+        }
+
+        [Test]
+        public async Task ConnectAsync_DuringDisconnectAsync_FaultsWithoutStartingNewConnection()
+        {
+            var factory = new ControlledLifecycleWebsocketFactory();
+            var executor = new TrackingDelayedExecutor();
+            var socket = CreateSocket(factory, executor);
+            var initialConnectTask = socket.ConnectAsync();
+            factory.Connection.Open();
+            await initialConnectTask;
+
+            var disconnectTask = socket.DisconnectAsync();
+            var overlappingConnectTask = socket.ConnectAsync();
+
+            await AssertCompletesWithin(overlappingConnectTask);
+            Assert.ThrowsAsync<Exception>(async () => await overlappingConnectTask);
+            Assert.That(factory.Connection.ConnectCount, Is.EqualTo(1));
+
+            factory.Connection.CompleteClose();
+            executor.ExecuteLast();
+            await AssertCompletesWithin(disconnectTask);
+            await disconnectTask;
+            Assert.That(socket.OnOpen, Is.Null);
+            Assert.That(socket.OnError, Is.Null);
+            Assert.That(socket.OnClose, Is.Null);
+        }
+
+        [Test]
+        public async Task ConnectAsync_DuringDisconnectAfterTransportCloses_FaultsWithoutHanging()
+        {
+            var factory = new ControlledLifecycleWebsocketFactory();
+            var executor = new TrackingDelayedExecutor();
+            var socket = CreateSocket(factory, executor);
+            var initialConnectTask = socket.ConnectAsync();
+            factory.Connection.Open();
+            await initialConnectTask;
+
+            var disconnectTask = socket.DisconnectAsync();
+            factory.Connection.CompleteClose();
+            var overlappingConnectTask = socket.ConnectAsync();
+
+            await AssertCompletesWithin(overlappingConnectTask);
+            Assert.ThrowsAsync<Exception>(async () => await overlappingConnectTask);
+            executor.ExecuteLast();
+            await AssertCompletesWithin(disconnectTask);
+            await disconnectTask;
+            Assert.That(factory.Connection.ConnectCount, Is.EqualTo(1));
+            Assert.That(socket.OnOpen, Is.Null);
+            Assert.That(socket.OnError, Is.Null);
+            Assert.That(socket.OnClose, Is.Null);
+        }
+
+        [Test]
+        public async Task Connect_AfterTransportClosesDuringDisconnect_IsNotClearedByOldTeardown()
+        {
+            var factory = new ControlledLifecycleWebsocketFactory();
+            var executor = new TrackingDelayedExecutor();
+            var socket = CreateSocket(factory, executor);
+            socket.Connect();
+            var closedConnection = factory.Connection;
+            closedConnection.Open();
+            var disconnectTask = socket.DisconnectAsync();
+            closedConnection.CompleteClose();
+            factory.OpenOnConnect = true;
+
+            socket.Connect();
+
+            Assert.That(factory.Connections, Has.Count.EqualTo(2));
+            var replacementConnection = factory.Connection;
+            Assert.That(replacementConnection.State, Is.EqualTo(WebsocketState.Open));
+
+            for (var i = 0; i < 4; i++)
+            {
+                executor.ExecuteLast();
+            }
+
+            await AssertCompletesWithin(disconnectTask);
+            await disconnectTask;
+            Assert.That(socket.Conn, Is.SameAs(replacementConnection));
+        }
+
+        [Test]
+        public void ConcurrentConnect_DuringBuildWindow_ClaimsOneAndClosesLoser()
+        {
+            using var buildEntered = new ManualResetEventSlim(false);
+            using var releaseBuild = new ManualResetEventSlim(false);
+            var factory = new BlockingFirstBuildWebsocketFactory(
+                buildEntered,
+                releaseBuild
+            );
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    HeartbeatInterval = null,
+                    ReconnectAfter = null
+                }
+            );
+            var socketCloseCount = 0;
+            socket.OnClose += (_, _) => Interlocked.Increment(ref socketCloseCount);
+            var firstConnectTask = Task.Run(socket.Connect);
+            Assert.That(
+                buildEntered.Wait(TimeSpan.FromSeconds(2)),
+                Is.True,
+                "The first transport build did not enter its deterministic blocking window."
+            );
+
+            try
+            {
+                socket.Connect();
+                Assert.That(factory.Connections, Has.Count.EqualTo(1));
+            }
+            finally
+            {
+                releaseBuild.Set();
+            }
+
+            Assert.That(
+                firstConnectTask.Wait(TimeSpan.FromSeconds(2)),
+                Is.True,
+                "The blocked Connect() call did not finish."
+            );
+            Assert.That(factory.Connections, Has.Count.EqualTo(2));
+            Assert.That(
+                factory.Connections.FindAll(connection => connection.ConnectCalled),
+                Has.Count.EqualTo(1)
+            );
+            Assert.That(
+                factory.Connections.FindAll(connection => connection.CloseCalled),
+                Has.Count.EqualTo(1)
+            );
+            Assert.That(
+                socket.Conn,
+                Is.SameAs(factory.Connections.Find(connection => connection.ConnectCalled))
+            );
+            Assert.That(socketCloseCount, Is.Zero);
+        }
+
+        #endregion
+
+        private static async Task AssertCompletesWithin(Task task)
+        {
+            var completedTask = await Task.WhenAny(
+                task,
+                Task.Delay(TimeSpan.FromMilliseconds(250))
+            );
+
+            Assert.That(
+                completedTask,
+                Is.SameAs(task),
+                "The asynchronous socket operation did not complete within 250 ms."
+            );
+        }
+
+        private static Socket CreateSocket(
+            ControlledLifecycleWebsocketFactory factory,
+            IDelayedExecutor? executor = null
+        )
+        {
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                HeartbeatInterval = null,
+                ReconnectAfter = null
+            };
+            if (executor != null)
+            {
+                options.DelayedExecutor = executor;
+            }
+
+            return new Socket("ws://localhost:1234", null, factory, options);
+        }
+
+        private sealed class ObjectDisposedOnBuildWebsocketFactory : IWebsocketFactory
+        {
+            public IWebsocket Build(WebsocketConfiguration config)
+            {
+                throw new ObjectDisposedException("transport");
+            }
+        }
+
+        private sealed class ControlledLifecycleWebsocketFactory : IWebsocketFactory
+        {
+            public ControlledLifecycleWebsocket Connection { get; private set; } = null!;
+            public List<ControlledLifecycleWebsocket> Connections { get; } =
+                new List<ControlledLifecycleWebsocket>();
+            public bool OpenOnConnect { get; set; }
+
+            public IWebsocket Build(WebsocketConfiguration config)
+            {
+                Connection = new ControlledLifecycleWebsocket(config, OpenOnConnect);
+                Connections.Add(Connection);
+                return Connection;
+            }
+        }
+
+        private sealed class ControlledLifecycleWebsocket : IWebsocket
+        {
+            private readonly WebsocketConfiguration _config;
+            private readonly bool _openOnConnect;
+
+            public ControlledLifecycleWebsocket(
+                WebsocketConfiguration config,
+                bool openOnConnect = false
+            )
+            {
+                _config = config;
+                _openOnConnect = openOnConnect;
+            }
+
+            public int ConnectCount { get; private set; }
+            public WebsocketState State { get; private set; } = WebsocketState.Closed;
+
+            public void Connect()
+            {
+                ConnectCount++;
+                State = WebsocketState.Connecting;
+                if (_openOnConnect)
+                {
+                    Open();
+                }
+            }
+
+            public void Open()
+            {
+                State = WebsocketState.Open;
+                _config.onOpenCallback(this);
+            }
+
+            public void Send(string data)
+            {
+            }
+
+            public void Close(ushort? code = null, string? reason = null)
+            {
+                State = WebsocketState.Closing;
+            }
+
+            public void CompleteClose(ushort code = 1_000, string reason = "closed by test")
+            {
+                State = WebsocketState.Closed;
+                _config.onCloseCallback(this, code, reason);
+            }
+        }
+
+        private sealed class BlockingFirstBuildWebsocketFactory : IWebsocketFactory
+        {
+            private readonly ManualResetEventSlim _buildEntered;
+            private readonly ManualResetEventSlim _releaseBuild;
+            private int _buildCount;
+
+            public BlockingFirstBuildWebsocketFactory(
+                ManualResetEventSlim buildEntered,
+                ManualResetEventSlim releaseBuild
+            )
+            {
+                _buildEntered = buildEntered;
+                _releaseBuild = releaseBuild;
+            }
+
+            public List<BlockingBuildWebsocket> Connections { get; } =
+                new List<BlockingBuildWebsocket>();
+
+            public IWebsocket Build(WebsocketConfiguration config)
+            {
+                if (Interlocked.Increment(ref _buildCount) == 1)
+                {
+                    _buildEntered.Set();
+                    _releaseBuild.Wait(TimeSpan.FromSeconds(5));
+                }
+
+                var connection = new BlockingBuildWebsocket(config);
+                Connections.Add(connection);
+                return connection;
+            }
+        }
+
+        private sealed class BlockingBuildWebsocket : IWebsocket
+        {
+            private readonly WebsocketConfiguration _config;
+
+            public BlockingBuildWebsocket(WebsocketConfiguration config)
+            {
+                _config = config;
+            }
+
+            public bool CloseCalled { get; private set; }
+            public bool ConnectCalled { get; private set; }
+            public WebsocketState State { get; private set; } = WebsocketState.Closed;
+
+            public void Connect()
+            {
+                ConnectCalled = true;
+                State = WebsocketState.Connecting;
+            }
+
+            public void Send(string data)
+            {
+            }
+
+            public void Close(ushort? code = null, string? reason = null)
+            {
+                CloseCalled = true;
+                State = WebsocketState.Closed;
+                _config.onCloseCallback(
+                    this,
+                    code ?? 1_000,
+                    reason ?? "closed by losing build compensation"
+                );
+            }
+        }
 
         #region Channel.JoinAsync Tests
 

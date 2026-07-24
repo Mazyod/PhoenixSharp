@@ -19,6 +19,31 @@ namespace Phoenix
 
         public delegate void OnOpenDelegate();
 
+        private sealed class PendingConnectWaiter
+        {
+            private readonly Action<Exception> _finishWithException;
+            private readonly Func<bool> _tryClaim;
+
+            public PendingConnectWaiter(
+                Func<bool> tryClaim,
+                Action<Exception> finishWithException
+            )
+            {
+                _tryClaim = tryClaim;
+                _finishWithException = finishWithException;
+            }
+
+            public bool TryClaim()
+            {
+                return _tryClaim();
+            }
+
+            public void FinishWithException(Exception exception)
+            {
+                _finishWithException(exception);
+            }
+        }
+
 
         /**
          * In PhoenixJS, listening to socket events is done by passing a callback and
@@ -30,6 +55,9 @@ namespace Phoenix
         // private readonly Dictionary<Event, List<Subscription>> stateChangeCallbacks = new();
         private readonly List<Channel> _channels = new List<Channel>();
         private readonly object _channelsLock = new object();
+        private readonly HashSet<PendingConnectWaiter> _pendingConnectWaiters =
+            new HashSet<PendingConnectWaiter>();
+        private readonly object _pendingConnectWaitersLock = new object();
 
         // TODO: binaryType?
 
@@ -48,6 +76,7 @@ namespace Phoenix
 
         private readonly object _heartbeatStateLock = new object();
         private bool _closeWasClean;
+        private IWebsocket? _conn;
         private long _heartbeatGeneration;
         private IDelayedExecution? _heartbeatTimer;
         private string? _pendingHeartbeatRef;
@@ -92,7 +121,7 @@ namespace Phoenix
             }
         }
 
-        public IWebsocket? Conn { get; private set; }
+        public IWebsocket? Conn => Volatile.Read(ref _conn);
 
         // convenience
         public WebsocketState? State => Conn?.State;
@@ -122,36 +151,109 @@ namespace Phoenix
         public void Disconnect(Action? callback = null, ushort? code = null, string? reason = null)
         {
             // connectClock++;
-            Volatile.Write(ref _closeWasClean, true);
+            List<PendingConnectWaiter> connectWaiters;
+            lock (_pendingConnectWaitersLock)
+            {
+                Volatile.Write(ref _closeWasClean, true);
+                connectWaiters = ClaimPendingConnectWaitersLocked();
+            }
+
+            foreach (var connectWaiter in connectWaiters)
+            {
+                connectWaiter.FinishWithException(
+                    new Exception("Connection failed: socket is disconnecting")
+                );
+            }
+
             _reconnectTimer?.Reset();
             Teardown(callback, code, reason);
         }
 
         public void Connect()
         {
-            if (_disposed) return;
-            // connectClock++;
-            if (Conn != null)
+            ConnectAndGetException();
+        }
+
+        private Exception? ConnectAndGetException()
+        {
+            if (_disposed)
             {
-                return;
+                return new ObjectDisposedException(nameof(Socket), "Cannot connect disposed socket");
+            }
+
+            // connectClock++;
+            var connection = Conn;
+            if (connection != null)
+            {
+                if (connection.State != WebsocketState.Closed)
+                {
+                    return null;
+                }
+
+                if (!TryClearConnection(connection))
+                {
+                    return null;
+                }
             }
 
             Volatile.Write(ref _closeWasClean, false);
-
-            var config = new WebsocketConfiguration
-            {
-                uri = EndPointUrl(),
-                onOpenCallback = OnConnOpen,
-                onCloseCallback = OnConnClose,
-                onErrorCallback = OnConnError,
-                onMessageCallback = OnConnMessage
-            };
-
-            Conn = _websocketFactory.Build(config);
+            connection = null;
 
             try
             {
-                Conn.Connect();
+                var callbacksEnabled = 0;
+                var config = new WebsocketConfiguration
+                {
+                    uri = EndPointUrl(),
+                    onOpenCallback = websocket =>
+                    {
+                        if (Volatile.Read(ref callbacksEnabled) != 0)
+                        {
+                            OnConnOpen(websocket);
+                        }
+                    },
+                    onCloseCallback = (websocket, code, reason) =>
+                    {
+                        if (Volatile.Read(ref callbacksEnabled) != 0)
+                        {
+                            OnConnClose(websocket, code, reason);
+                        }
+                    },
+                    onErrorCallback = (websocket, error) =>
+                    {
+                        if (Volatile.Read(ref callbacksEnabled) != 0)
+                        {
+                            OnConnError(websocket, error);
+                        }
+                    },
+                    onMessageCallback = (websocket, message) =>
+                    {
+                        if (Volatile.Read(ref callbacksEnabled) != 0)
+                        {
+                            OnConnMessage(websocket, message);
+                        }
+                    }
+                };
+
+                connection = _websocketFactory.Build(config);
+                var existingConnection = Interlocked.CompareExchange(
+                    ref _conn,
+                    connection,
+                    null
+                );
+                if (existingConnection != null)
+                {
+                    if (!ReferenceEquals(existingConnection, connection))
+                    {
+                        CloseUnclaimedConnection(connection);
+                    }
+
+                    return null;
+                }
+
+                Volatile.Write(ref callbacksEnabled, 1);
+                connection.Connect();
+                return null;
             }
             catch (Exception ex)
             {
@@ -160,43 +262,224 @@ namespace Phoenix
                     Log(LogLevel.Error, "transport", $"WebSocket connect failed: {ex.Message}");
                 }
 
-                Conn = null;
+                if (connection != null)
+                {
+                    TryClearConnection(connection);
+                }
                 _reconnectTimer?.ScheduleTimeout();
+                return ex;
             }
         }
 
         /// <summary>
         /// Connects to the Phoenix server asynchronously.
         /// </summary>
+        /// <remarks>
+        /// The task completes immediately when the socket is already open and faults
+        /// immediately for terminal failures such as disposal or explicit disconnection.
+        /// When reconnection is configured, the task remains pending while retries
+        /// continue and may never complete if the retry chain never succeeds or ends.
+        /// Use <paramref name="cancellationToken"/> to stop waiting independently.
+        /// </remarks>
         public Task ConnectAsync(CancellationToken cancellationToken = default)
         {
+            if (_disposed)
+            {
+                return Task.FromException(
+                    new ObjectDisposedException(nameof(Socket), "Cannot connect disposed socket")
+                );
+            }
+
             var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completionClaimed = 0;
+            CancellationTokenRegistration cancellationRegistration = default;
+            PendingConnectWaiter? pendingConnectWaiter = null;
+
+            bool TryClaimCompletion()
+            {
+                return Interlocked.CompareExchange(ref completionClaimed, 1, 0) == 0;
+            }
+
+            void Cleanup()
+            {
+                if (pendingConnectWaiter != null)
+                {
+                    lock (_pendingConnectWaitersLock)
+                    {
+                        _pendingConnectWaiters.Remove(pendingConnectWaiter);
+                    }
+                }
+
+                OnOpen -= OnOpenHandler;
+                OnError -= OnErrorHandler;
+                OnClose -= OnCloseHandler;
+                cancellationRegistration.Dispose();
+            }
+
+            void FinishSuccessfully()
+            {
+                Cleanup();
+                tcs.SetResult(true);
+            }
+
+            void FinishWithException(Exception exception)
+            {
+                Cleanup();
+                tcs.SetException(exception);
+            }
+
+            void FinishWithCancellation()
+            {
+                Cleanup();
+                tcs.SetCanceled();
+            }
+
+            void CompleteSuccessfully()
+            {
+                if (!TryClaimCompletion())
+                {
+                    return;
+                }
+
+                FinishSuccessfully();
+            }
+
+            void CompleteWithException(Exception exception)
+            {
+                if (!TryClaimCompletion())
+                {
+                    return;
+                }
+
+                FinishWithException(exception);
+            }
+
+            void CompleteWithCancellation()
+            {
+                if (!TryClaimCompletion())
+                {
+                    return;
+                }
+
+                FinishWithCancellation();
+            }
 
             void OnOpenHandler()
             {
-                OnOpen -= OnOpenHandler;
-                OnError -= OnErrorHandler;
-                tcs.TrySetResult(true);
+                CompleteSuccessfully();
             }
 
             void OnErrorHandler(string error)
             {
-                OnOpen -= OnOpenHandler;
-                OnError -= OnErrorHandler;
-                tcs.TrySetException(new Exception($"Connection failed: {error}"));
+                CompleteWithException(new Exception($"Connection failed: {error}"));
             }
 
-            OnOpen += OnOpenHandler;
-            OnError += OnErrorHandler;
-
-            cancellationToken.Register(() =>
+            void OnCloseHandler(ushort code, string reason)
             {
-                OnOpen -= OnOpenHandler;
-                OnError -= OnErrorHandler;
-                tcs.TrySetCanceled();
-            });
+                if (ShouldReconnectAfterClose(code))
+                {
+                    return;
+                }
 
-            Connect();
+                CompleteWithException(
+                    new Exception($"Connection failed: connection closed before opening ({code} {reason})")
+                );
+            }
+
+            pendingConnectWaiter = new PendingConnectWaiter(
+                TryClaimCompletion,
+                FinishWithException
+            );
+            var registered = false;
+            lock (_pendingConnectWaitersLock)
+            {
+                if (!_disposed)
+                {
+                    OnOpen += OnOpenHandler;
+                    OnError += OnErrorHandler;
+                    OnClose += OnCloseHandler;
+                    _pendingConnectWaiters.Add(pendingConnectWaiter);
+                    registered = true;
+                }
+            }
+
+            if (!registered)
+            {
+                if (pendingConnectWaiter.TryClaim())
+                {
+                    pendingConnectWaiter.FinishWithException(
+                        new ObjectDisposedException(nameof(Socket), "Cannot connect disposed socket")
+                    );
+                }
+
+                return tcs.Task;
+            }
+
+            try
+            {
+                cancellationRegistration = cancellationToken.Register(CompleteWithCancellation);
+            }
+            catch (Exception ex)
+            {
+                CompleteWithException(
+                    new Exception($"Connection failed: {ex.Message}", ex)
+                );
+                return tcs.Task;
+            }
+
+            if (Volatile.Read(ref completionClaimed) != 0)
+            {
+                Cleanup();
+                return tcs.Task;
+            }
+
+            try
+            {
+                var state = State;
+                var disconnecting =
+                    Conn != null && Volatile.Read(ref _closeWasClean);
+                if (state == WebsocketState.Open && !disconnecting)
+                {
+                    CompleteSuccessfully();
+                }
+                else if (disconnecting)
+                {
+                    CompleteWithException(
+                        new Exception("Connection failed: socket is disconnecting")
+                    );
+                }
+                else
+                {
+                    var connectException = ConnectAndGetException();
+                    if (_disposed)
+                    {
+                        CompleteWithException(
+                            new ObjectDisposedException(nameof(Socket), "Cannot connect disposed socket")
+                        );
+                    }
+                    else if (connectException != null && _reconnectTimer == null)
+                    {
+                        CompleteWithException(
+                            new Exception($"Connection failed: {connectException.Message}", connectException)
+                        );
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                if (_disposed)
+                {
+                    CompleteWithException(
+                        new ObjectDisposedException(nameof(Socket), "Cannot connect disposed socket")
+                    );
+                }
+                else
+                {
+                    CompleteWithException(
+                        new Exception($"Connection failed: {ex.Message}", ex)
+                    );
+                }
+            }
 
             return tcs.Task;
         }
@@ -207,22 +490,65 @@ namespace Phoenix
         public Task DisconnectAsync(CancellationToken cancellationToken = default)
         {
             var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completionClaimed = 0;
+            CancellationTokenRegistration cancellationRegistration = default;
 
-            void OnCloseHandler(ushort code, string reason)
+            void CompleteSuccessfully()
             {
-                OnClose -= OnCloseHandler;
-                tcs.TrySetResult(true);
+                if (Interlocked.CompareExchange(ref completionClaimed, 1, 0) != 0)
+                {
+                    return;
+                }
+
+                cancellationRegistration.Dispose();
+                tcs.SetResult(true);
             }
 
-            OnClose += OnCloseHandler;
-
-            cancellationToken.Register(() =>
+            void CompleteWithException(Exception exception)
             {
-                OnClose -= OnCloseHandler;
-                tcs.TrySetCanceled();
-            });
+                if (Interlocked.CompareExchange(ref completionClaimed, 1, 0) != 0)
+                {
+                    return;
+                }
 
-            Disconnect();
+                cancellationRegistration.Dispose();
+                tcs.SetException(exception);
+            }
+
+            void CompleteWithCancellation()
+            {
+                if (Interlocked.CompareExchange(ref completionClaimed, 1, 0) != 0)
+                {
+                    return;
+                }
+
+                cancellationRegistration.Dispose();
+                tcs.SetCanceled();
+            }
+
+            try
+            {
+                cancellationRegistration = cancellationToken.Register(CompleteWithCancellation);
+            }
+            catch (Exception ex)
+            {
+                CompleteWithException(ex);
+                return tcs.Task;
+            }
+
+            if (Volatile.Read(ref completionClaimed) != 0)
+            {
+                cancellationRegistration.Dispose();
+            }
+
+            try
+            {
+                Disconnect(CompleteSuccessfully);
+            }
+            catch (Exception ex)
+            {
+                CompleteWithException(ex);
+            }
 
             return tcs.Task;
         }
@@ -401,9 +727,16 @@ namespace Phoenix
 
         private void Teardown(Action? callback = null, ushort? code = null, string? reason = null)
         {
-            if (Conn == null || Conn.State == WebsocketState.Closed)
+            var connection = Conn;
+            if (connection == null)
             {
-                Conn = null;
+                callback?.Invoke();
+                return;
+            }
+
+            if (connection.State == WebsocketState.Closed)
+            {
+                TryClearConnection(connection);
                 callback?.Invoke();
                 return;
             }
@@ -414,22 +747,19 @@ namespace Phoenix
             // if (conn != null) {
             if (code.HasValue)
             {
-                Conn.Close(code.Value, reason);
+                connection.Close(code.Value, reason);
             }
             else
             {
-                Conn.Close();
+                connection.Close();
             }
             // }
 
-            WaitForSocketClosed(() =>
+            WaitForSocketClosed(connection, () =>
             {
-                if (Conn != null)
-                {
-                    // TODO: not sure if this is important at all?
-                    // this.conn.onclose = function (){ } // noop
-                    Conn = null;
-                }
+                // TODO: not sure if this is important at all?
+                // this.conn.onclose = function (){ } // noop
+                TryClearConnection(connection);
 
                 callback?.Invoke();
             });
@@ -451,17 +781,70 @@ namespace Phoenix
         //     );
         // }
 
-        private void WaitForSocketClosed(Action callback, uint tries = 1)
+        private void WaitForSocketClosed(
+            IWebsocket connection,
+            Action callback,
+            uint tries = 1
+        )
         {
-            if (tries == 5 || Conn == null || Conn.State == WebsocketState.Closed)
+            if (tries == 5 || connection.State == WebsocketState.Closed)
             {
                 callback();
                 return;
             }
 
             Opts.DelayedExecutor.Execute(
-                () => WaitForSocketClosed(callback, tries + 1),
+                () => WaitForSocketClosed(connection, callback, tries + 1),
                 TimeSpan.FromMilliseconds(150 * tries)
+            );
+        }
+
+        private bool ShouldReconnectAfterClose(ushort code)
+        {
+            return !Volatile.Read(ref _closeWasClean)
+                && code != 1_000
+                && _reconnectTimer != null;
+        }
+
+        private List<PendingConnectWaiter> ClaimPendingConnectWaitersLocked()
+        {
+            var claimedWaiters = new List<PendingConnectWaiter>();
+            foreach (var pendingConnectWaiter in _pendingConnectWaiters)
+            {
+                if (pendingConnectWaiter.TryClaim())
+                {
+                    claimedWaiters.Add(pendingConnectWaiter);
+                }
+            }
+
+            _pendingConnectWaiters.Clear();
+            return claimedWaiters;
+        }
+
+        private void CloseUnclaimedConnection(IWebsocket connection)
+        {
+            try
+            {
+                connection.Close(1_000, "Connection attempt superseded");
+            }
+            catch (Exception ex)
+            {
+                if (HasLogger())
+                {
+                    Log(
+                        LogLevel.Error,
+                        "transport",
+                        $"Superseded WebSocket close failed: {ex.Message}"
+                    );
+                }
+            }
+        }
+
+        private bool TryClearConnection(IWebsocket connection)
+        {
+            return ReferenceEquals(
+                Interlocked.CompareExchange(ref _conn, null, connection),
+                connection
             );
         }
 
@@ -476,7 +859,7 @@ namespace Phoenix
 
             TriggerChanError();
 
-            if (!Volatile.Read(ref _closeWasClean) && code != 1_000)
+            if (ShouldReconnectAfterClose(code))
             {
                 _reconnectTimer?.ScheduleTimeout();
             }
@@ -562,9 +945,20 @@ namespace Phoenix
                 throw new ArgumentException("Topic cannot be empty or whitespace.", nameof(topic));
 
             var chan = new Channel(topic, chanParams, this);
+            bool disposed;
             lock (_channelsLock)
             {
-                _channels.Add(chan);
+                disposed = _disposed;
+                if (!disposed)
+                {
+                    _channels.Add(chan);
+                }
+            }
+
+            if (disposed)
+            {
+                ((IChannelCleanup)chan).Cleanup();
+                throw new ObjectDisposedException(nameof(Socket), "Cannot create channel on disposed socket");
             }
 
             return chan;
@@ -854,8 +1248,24 @@ namespace Phoenix
         /// </summary>
         public void Dispose()
         {
-            if (_disposed) return;
-            _disposed = true;
+            List<PendingConnectWaiter> connectWaiters;
+            lock (_pendingConnectWaitersLock)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _disposed = true;
+                connectWaiters = ClaimPendingConnectWaitersLocked();
+            }
+
+            foreach (var connectWaiter in connectWaiters)
+            {
+                connectWaiter.FinishWithException(
+                    new ObjectDisposedException(nameof(Socket), "Cannot connect disposed socket")
+                );
+            }
 
             // Cancel all timers
             StopHeartbeat();
@@ -886,18 +1296,18 @@ namespace Phoenix
             OnMessage = null;
 
             // Close the connection if open
-            if (Conn != null && Conn.State != WebsocketState.Closed)
+            var connection = Interlocked.Exchange(ref _conn, null);
+            if (connection != null && connection.State != WebsocketState.Closed)
             {
                 try
                 {
-                    Conn.Close(1000, "Socket disposed");
+                    connection.Close(1000, "Socket disposed");
                 }
                 catch
                 {
                     // Ignore errors during disposal
                 }
             }
-            Conn = null;
         }
 
 

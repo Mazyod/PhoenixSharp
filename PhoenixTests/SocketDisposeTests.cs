@@ -1,5 +1,8 @@
 using System;
 using System.Linq;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using NUnit.Framework;
 using Phoenix;
 using PhoenixTests.TestDoubles;
@@ -116,6 +119,36 @@ namespace PhoenixTests
             socket.Dispose();
 
             Assert.Throws<ObjectDisposedException>(() => socket.Channel("test"));
+        }
+
+        [Test]
+        public void ChannelCreationLosingRaceWithDisposeThrowsTest()
+        {
+            var socket = CreateSocket();
+            var channelsLock = typeof(Socket)
+                .GetField("_channelsLock", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(socket)!;
+            Task<Channel> channelCreationTask;
+
+            lock (channelsLock)
+            {
+                channelCreationTask = Task.Run(() => socket.Channel("test"));
+                Assert.That(
+                    SpinWait.SpinUntil(
+                        () => socket.OnOpen != null,
+                        TimeSpan.FromSeconds(1)
+                    ),
+                    Is.True,
+                    "Channel construction did not reach its socket delegate registration."
+                );
+
+                // Monitor locks are reentrant, so Dispose copies and clears the channel
+                // list while Channel() is blocked at its own lock acquisition.
+                socket.Dispose();
+            }
+
+            Assert.ThrowsAsync<ObjectDisposedException>(async () =>
+                await channelCreationTask);
         }
 
         [Test]
