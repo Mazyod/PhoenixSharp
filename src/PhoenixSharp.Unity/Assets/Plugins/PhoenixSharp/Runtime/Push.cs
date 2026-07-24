@@ -13,15 +13,18 @@ namespace Phoenix
         private readonly Channel _channel;
         private readonly string _event;
         private readonly Func<IJsonBox?>? _payload;
+        private readonly object _stateLock = new object();
 
         private readonly StatusHookTable _recHooks = new StatusHookTable();
+        private long _attempt;
+        private bool _completed;
         private IDelayedExecution? _delayedExecution;
         private Reply? _receivedResp;
+        private string? _ref;
         private string? _refEvent;
+        private ChannelSubscription? _refEventSubscription;
         private TimeSpan _timeout;
-
-        // internal state
-        internal string? Ref;
+        private bool _timeoutActive;
 
         // define a constructor that takes a channel, event, payload, and timeout
         public Push(Channel channel, string @event, Func<IJsonBox?>? payload, TimeSpan timeout)
@@ -39,27 +42,37 @@ namespace Phoenix
             _timeout = timeout;
         }
 
+        // internal state
+        internal string? Ref
+        {
+            get
+            {
+                lock (_stateLock)
+                {
+                    return _ref;
+                }
+            }
+        }
+
         public void Resend(TimeSpan timeout)
         {
-            _timeout = timeout;
-            Reset();
+            Reset(timeout);
             Send();
         }
 
         public void Send()
         {
-            if (HasReceived(ReplyStatus.Timeout))
+            if (!StartTimeout(true, out var messageRef))
             {
                 return;
             }
 
-            StartTimeout();
             // sent = true;
             _channel.Socket.Push(new Message(
                 _channel.Topic,
                 _event,
                 _payload?.Invoke(),
-                Ref,
+                messageRef,
                 _channel.JoinRef
             ));
         }
@@ -69,11 +82,25 @@ namespace Phoenix
             if (callback == null)
                 throw new ArgumentNullException(nameof(callback));
 
-            if (HasReceived(status) && _receivedResp.HasValue)
+            Reply? receivedResponse;
+            lock (_stateLock)
             {
-                callback(_receivedResp.Value);
+                AddReceiveHookUnsafe(status, callback);
+                receivedResponse = HasReceivedUnsafe(status)
+                    ? _receivedResp
+                    : null;
             }
 
+            if (receivedResponse.HasValue)
+            {
+                callback(receivedResponse.Value);
+            }
+
+            return this;
+        }
+
+        private void AddReceiveHookUnsafe(ReplyStatus status, Action<Reply> callback)
+        {
             if (!_recHooks.TryGetValue(status, out var callbacks))
             {
                 callbacks = new List<Action<Reply>>();
@@ -81,74 +108,217 @@ namespace Phoenix
             }
 
             callbacks.Add(callback);
-
-            return this;
         }
 
         internal void Reset()
         {
-            CancelRefEvent();
-            Ref = null;
-            _refEvent = null;
-            _receivedResp = null;
+            Reset(null);
+        }
+
+        private void Reset(TimeSpan? timeout)
+        {
+            ChannelSubscription? refEventSubscription;
+            IDelayedExecution? delayedExecution;
+            lock (_stateLock)
+            {
+                _attempt++;
+                _completed = false;
+                _timeoutActive = false;
+                refEventSubscription = _refEventSubscription;
+                _refEventSubscription = null;
+                delayedExecution = _delayedExecution;
+                _delayedExecution = null;
+                _ref = null;
+                _refEvent = null;
+                _receivedResp = null;
+                if (timeout.HasValue)
+                {
+                    _timeout = timeout.Value;
+                }
+            }
+
+            CancelRefEvent(refEventSubscription);
+            delayedExecution?.Cancel();
             // sent = false;
         }
 
-        private void MatchReceive(Reply? reply)
+        private void MatchReceive(long attempt, Reply? reply)
         {
-            if (!reply.HasValue || !_recHooks.TryGetValue(reply.Value.ReplyStatus, out var callbacks))
+            if (!reply.HasValue)
             {
                 return;
             }
 
-            callbacks.ForEach(callback => callback(reply.Value));
+            List<Action<Reply>>? callbacks = null;
+            ChannelSubscription? refEventSubscription;
+            IDelayedExecution? delayedExecution;
+            var receivedResponse = reply.Value;
+            lock (_stateLock)
+            {
+                if (attempt != _attempt
+                    || _completed
+                    || (receivedResponse.ReplyStatus == ReplyStatus.Timeout && !_timeoutActive))
+                {
+                    return;
+                }
+
+                _completed = true;
+                _timeoutActive = false;
+                _receivedResp = receivedResponse;
+                refEventSubscription = _refEventSubscription;
+                _refEventSubscription = null;
+                delayedExecution = _delayedExecution;
+                _delayedExecution = null;
+
+                if (_recHooks.TryGetValue(receivedResponse.ReplyStatus, out var registeredCallbacks))
+                {
+                    callbacks = new List<Action<Reply>>(registeredCallbacks);
+                }
+            }
+
+            CancelRefEvent(refEventSubscription);
+            delayedExecution?.Cancel();
+            callbacks?.ForEach(callback => callback(receivedResponse));
         }
 
-        private void CancelRefEvent()
+        private void CancelRefEvent(ChannelSubscription? subscription)
         {
-            if (_refEvent != null)
+            if (subscription != null)
             {
-                _channel.Off(_refEvent);
+                _channel.Off(subscription);
             }
         }
 
         internal void CancelTimeout()
         {
-            _delayedExecution?.Cancel();
-            _delayedExecution = null;
+            IDelayedExecution? delayedExecution;
+            lock (_stateLock)
+            {
+                _timeoutActive = false;
+                delayedExecution = _delayedExecution;
+                _delayedExecution = null;
+            }
+
+            delayedExecution?.Cancel();
         }
 
         internal void StartTimeout()
         {
-            // PhoenixJS: null check implicit
-            CancelTimeout();
-
-            Ref = _channel.Socket.MakeRef();
-            _refEvent = Channel.ReplyEventName(Ref);
-
-            _channel.On(_refEvent, message =>
-            {
-                CancelRefEvent();
-                CancelTimeout();
-                _receivedResp = message.Payload?.Unbox<Reply?>();
-                MatchReceive(_receivedResp);
-            });
-
-            _delayedExecution =
-                _channel.Socket.Opts.DelayedExecutor.Execute(() => { Trigger(ReplyStatus.Timeout); }, _timeout);
+            StartTimeout(false, out _);
         }
 
-        private bool HasReceived(ReplyStatus status)
+        private bool StartTimeout(bool stopAfterTimeout, out string? messageRef)
+        {
+            ChannelSubscription? previousSubscription;
+            IDelayedExecution? previousExecution;
+            string refEvent;
+            TimeSpan timeout;
+            long attempt;
+            lock (_stateLock)
+            {
+                if (stopAfterTimeout && HasReceivedUnsafe(ReplyStatus.Timeout))
+                {
+                    messageRef = _ref;
+                    return false;
+                }
+
+                previousSubscription = _refEventSubscription;
+                _refEventSubscription = null;
+                previousExecution = _delayedExecution;
+                _delayedExecution = null;
+
+                attempt = ++_attempt;
+                messageRef = _channel.Socket.MakeRef();
+                _ref = messageRef;
+                refEvent = Channel.ReplyEventName(messageRef);
+                _refEvent = refEvent;
+                timeout = _timeout;
+                _completed = false;
+                _timeoutActive = true;
+            }
+
+            CancelRefEvent(previousSubscription);
+            previousExecution?.Cancel();
+
+            var subscription = _channel.On(refEvent, message =>
+            {
+                var reply = message.Payload?.Unbox<Reply?>();
+                MatchReceive(attempt, reply);
+            });
+
+            bool keepSubscription;
+            lock (_stateLock)
+            {
+                keepSubscription = attempt == _attempt && !_completed;
+                if (keepSubscription)
+                {
+                    _refEventSubscription = subscription;
+                }
+            }
+
+            if (!keepSubscription)
+            {
+                CancelRefEvent(subscription);
+                return true;
+            }
+
+            var delayedExecution = _channel.Socket.Opts.DelayedExecutor.Execute(
+                () => Trigger(attempt, refEvent, ReplyStatus.Timeout),
+                timeout
+            );
+
+            bool keepExecution;
+            lock (_stateLock)
+            {
+                keepExecution = attempt == _attempt && !_completed && _timeoutActive;
+                if (keepExecution)
+                {
+                    _delayedExecution = delayedExecution;
+                }
+            }
+
+            if (!keepExecution)
+            {
+                delayedExecution.Cancel();
+            }
+
+            return true;
+        }
+
+        private bool HasReceivedUnsafe(ReplyStatus status)
         {
             return _receivedResp?.ReplyStatus == status;
         }
 
         internal void Trigger(ReplyStatus status)
         {
+            long attempt;
+            string? refEvent;
+            lock (_stateLock)
+            {
+                attempt = _attempt;
+                refEvent = _refEvent;
+            }
+
+            Trigger(attempt, refEvent, status);
+        }
+
+        private void Trigger(long attempt, string? refEvent, ReplyStatus status)
+        {
+            lock (_stateLock)
+            {
+                if (attempt != _attempt
+                    || _completed
+                    || (status == ReplyStatus.Timeout && !_timeoutActive))
+                {
+                    return;
+                }
+            }
+
             var serializer = _channel.Socket.Opts.MessageSerializer;
 
             _channel.Trigger(new Message(
-                @event: _refEvent,
+                @event: refEvent,
                 payload: serializer.Box(new Dictionary<string, object>
                     {
                         {"status", status.Serialized()}
@@ -170,20 +340,27 @@ namespace Phoenix
         {
             var tcs = new TaskCompletionSource<Reply>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-            // If we already have a response, return it immediately
-            if (_receivedResp.HasValue)
-            {
-                return Task.FromResult(_receivedResp.Value);
-            }
-
             void OnReply(Reply reply)
             {
                 tcs.TrySetResult(reply);
             }
 
-            Receive(ReplyStatus.Ok, OnReply);
-            Receive(ReplyStatus.Error, OnReply);
-            Receive(ReplyStatus.Timeout, OnReply);
+            Reply? receivedResponse;
+            lock (_stateLock)
+            {
+                receivedResponse = _receivedResp;
+                if (!receivedResponse.HasValue)
+                {
+                    AddReceiveHookUnsafe(ReplyStatus.Ok, OnReply);
+                    AddReceiveHookUnsafe(ReplyStatus.Error, OnReply);
+                    AddReceiveHookUnsafe(ReplyStatus.Timeout, OnReply);
+                }
+            }
+
+            if (receivedResponse.HasValue)
+            {
+                return Task.FromResult(receivedResponse.Value);
+            }
 
             cancellationToken.Register(() => tcs.TrySetCanceled());
 

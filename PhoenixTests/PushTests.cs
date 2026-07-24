@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using NUnit.Framework;
 using Phoenix;
 using PhoenixTests.TestDoubles;
@@ -223,6 +225,76 @@ namespace PhoenixTests
             Assert.AreEqual(ReplyStatus.Ok, receivedReply?.ReplyStatus);
         }
 
+        [Test]
+        public void ReceiveDuringDispatchDoesNotSkipExistingCallbacksTest()
+        {
+            var (channel, _, _) = CreateJoinedChannel();
+            using var callbackEntered = new ManualResetEventSlim();
+            using var releaseCallback = new ManualResetEventSlim();
+            var trailingCallbackCount = 0;
+
+            var push = channel.Push("test_event");
+            push.Receive(ReplyStatus.Ok, _ =>
+            {
+                callbackEntered.Set();
+                releaseCallback.Wait();
+            });
+            push.Receive(
+                ReplyStatus.Ok,
+                _ => Interlocked.Increment(ref trailingCallbackCount)
+            );
+
+            var dispatchTask = Task.Run(() => push.Trigger(ReplyStatus.Ok));
+            Assert.That(
+                callbackEntered.Wait(TimeSpan.FromSeconds(1)),
+                Is.True,
+                "Reply dispatch did not reach the blocking callback."
+            );
+
+            var registrationTask = Task.Run(() =>
+            {
+                for (var hookIndex = 0; hookIndex < 1_000; hookIndex++)
+                {
+                    push.Receive(ReplyStatus.Ok, _ => { });
+                }
+            });
+            var registrationCompleted = registrationTask.Wait(TimeSpan.FromSeconds(1));
+            releaseCallback.Set();
+
+            Assert.That(
+                registrationCompleted,
+                Is.True,
+                "Receive blocked while a user callback was running."
+            );
+            Assert.That(
+                dispatchTask.Wait(TimeSpan.FromSeconds(1)),
+                Is.True,
+                "Reply dispatch did not complete."
+            );
+            Assert.That(trailingCallbackCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ReceiveAfterReplyReplaysAndRemainsRegisteredForResendTest()
+        {
+            var (channel, _, _) = CreateJoinedChannel();
+            var callbackCount = 0;
+            var push = channel.Push("test_event");
+
+            push.Trigger(ReplyStatus.Ok);
+            push.Receive(
+                ReplyStatus.Ok,
+                _ => Interlocked.Increment(ref callbackCount)
+            );
+
+            Assert.That(callbackCount, Is.EqualTo(1));
+
+            push.Resend(TimeSpan.FromSeconds(10));
+            push.Trigger(ReplyStatus.Ok);
+
+            Assert.That(callbackCount, Is.EqualTo(2));
+        }
+
         #endregion
 
         #region Send() Behavior Tests
@@ -315,6 +387,24 @@ namespace PhoenixTests
             Assert.AreEqual(0, websocket.CallSend.Count);
         }
 
+        [Test]
+        public void SendAfterSuccessfulReplyStartsNewCompletionCycleTest()
+        {
+            var (channel, _, _) = CreateJoinedChannel();
+            var okCount = 0;
+            var push = channel.Push("test_event");
+            push.Receive(
+                ReplyStatus.Ok,
+                _ => Interlocked.Increment(ref okCount)
+            );
+
+            push.Trigger(ReplyStatus.Ok);
+            push.Send();
+            push.Trigger(ReplyStatus.Ok);
+
+            Assert.That(okCount, Is.EqualTo(2));
+        }
+
         #endregion
 
         #region Timeout Handling Tests
@@ -359,6 +449,74 @@ namespace PhoenixTests
             mockExecutor.ExecutePending();
 
             Assert.IsTrue(timeoutCalled);
+        }
+
+        [Test]
+        public void ReplyWinningRaceSuppressesAlreadyStartedTimeoutTest()
+        {
+            var executor = new TrackingDelayedExecutor();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                DelayedExecutor = executor
+            };
+            var socket = new Socket("ws://localhost:1234", null, factory, options);
+            socket.Connect();
+
+            using var timeoutSnapshotReached = new ManualResetEventSlim();
+            using var releaseTimeout = new ManualResetEventSlim();
+            var channel = new CoordinatedReplyChannel(
+                "test",
+                socket,
+                timeoutSnapshotReached,
+                releaseTimeout
+            );
+            var joinPush = channel.Join();
+            joinPush.Trigger(ReplyStatus.Ok);
+            executor.Clear();
+
+            var okCount = 0;
+            var timeoutCount = 0;
+            var push = channel.Push("test_event");
+            push.Receive(
+                ReplyStatus.Ok,
+                _ => Interlocked.Increment(ref okCount)
+            );
+            push.Receive(
+                ReplyStatus.Timeout,
+                _ => Interlocked.Increment(ref timeoutCount)
+            );
+
+            channel.CoordinateTimeout = true;
+            var timeoutExecution = executor.Executions[0];
+            var timeoutTask = Task.Run(timeoutExecution.Execute);
+
+            try
+            {
+                Assert.That(
+                    timeoutSnapshotReached.Wait(TimeSpan.FromSeconds(1)),
+                    Is.True,
+                    "Timeout dispatch did not reach the coordination point."
+                );
+
+                push.Trigger(ReplyStatus.Ok);
+            }
+            finally
+            {
+                releaseTimeout.Set();
+            }
+
+            Assert.That(
+                timeoutTask.Wait(TimeSpan.FromSeconds(1)),
+                Is.True,
+                "Timeout dispatch did not complete."
+            );
+            Assert.That(okCount, Is.EqualTo(1));
+            Assert.That(
+                timeoutCount,
+                Is.EqualTo(0),
+                "The timeout must be ignored after the reply completes the send cycle."
+            );
         }
 
         [Test]
@@ -773,5 +931,39 @@ namespace PhoenixTests
         }
 
         #endregion
+
+        private sealed class CoordinatedReplyChannel : Channel
+        {
+            private readonly ManualResetEventSlim _timeoutSnapshotReached;
+            private readonly ManualResetEventSlim _releaseTimeout;
+
+            public CoordinatedReplyChannel(
+                string topic,
+                Socket socket,
+                ManualResetEventSlim timeoutSnapshotReached,
+                ManualResetEventSlim releaseTimeout
+            ) : base(topic, null, socket)
+            {
+                _timeoutSnapshotReached = timeoutSnapshotReached;
+                _releaseTimeout = releaseTimeout;
+            }
+
+            public bool CoordinateTimeout { get; set; }
+
+            public override IJsonBox? OnMessage(Message message)
+            {
+                var payload = base.OnMessage(message);
+                var reply = message.Payload?.Unbox<Reply?>();
+                if (CoordinateTimeout
+                    && reply.HasValue
+                    && reply.Value.ReplyStatus == ReplyStatus.Timeout)
+                {
+                    _timeoutSnapshotReached.Set();
+                    _releaseTimeout.Wait();
+                }
+
+                return payload;
+            }
+        }
     }
 }
