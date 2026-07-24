@@ -26,8 +26,10 @@ namespace Phoenix
     {
         private readonly Action _callback;
         private readonly IDelayedExecutor _delayedExecutor;
+        private readonly object _stateLock = new object();
         private readonly Func<int, TimeSpan> _timerCalc;
         private IDelayedExecution? _execution;
+        private long _generation;
         private int _tries;
 
         public Scheduler(Action callback, Func<int, TimeSpan> timerCalc, IDelayedExecutor delayedExecutor)
@@ -39,19 +41,66 @@ namespace Phoenix
 
         public void Reset()
         {
-            _tries = 0;
-            _execution?.Cancel();
-            _execution = null;
+            IDelayedExecution? execution;
+            lock (_stateLock)
+            {
+                _generation++;
+                _tries = 0;
+                execution = _execution;
+                _execution = null;
+            }
+
+            execution?.Cancel();
         }
 
         public void ScheduleTimeout()
         {
-            _execution?.Cancel();
-            _execution = _delayedExecutor.Execute(() =>
+            IDelayedExecution? previousExecution;
+            long generation;
+            int nextTry;
+            lock (_stateLock)
             {
+                generation = ++_generation;
+                nextTry = _tries + 1;
+                previousExecution = _execution;
+                _execution = null;
+            }
+
+            previousExecution?.Cancel();
+            var delay = _timerCalc(nextTry);
+            var execution = _delayedExecutor.Execute(() => Fire(generation), delay);
+
+            bool keepExecution;
+            lock (_stateLock)
+            {
+                keepExecution = generation == _generation;
+                if (keepExecution)
+                {
+                    _execution = execution;
+                }
+            }
+
+            if (!keepExecution)
+            {
+                execution.Cancel();
+            }
+        }
+
+        private void Fire(long generation)
+        {
+            lock (_stateLock)
+            {
+                if (generation != _generation)
+                {
+                    return;
+                }
+
+                _generation++;
                 _tries += 1;
-                _callback();
-            }, _timerCalc(_tries + 1));
+                _execution = null;
+            }
+
+            _callback();
         }
     }
 

@@ -245,6 +245,80 @@ namespace PhoenixTests
         }
 
         [Test]
+        public void SchedulerResetMakesCapturedExecutionStaleTest()
+        {
+            var callCount = 0;
+            var receivedTries = new List<int>();
+            var executor = new TrackingDelayedExecutor();
+            var scheduler = new Scheduler(
+                () => callCount++,
+                tries =>
+                {
+                    receivedTries.Add(tries);
+                    return TimeSpan.FromMilliseconds(tries);
+                },
+                executor
+            );
+
+            scheduler.ScheduleTimeout();
+            var staleAction = executor.Executions[0].Action!;
+            scheduler.Reset();
+
+            staleAction();
+            scheduler.ScheduleTimeout();
+
+            Assert.That(callCount, Is.EqualTo(0));
+            Assert.That(receivedTries, Is.EqualTo(new[] { 1, 1 }));
+        }
+
+        [Test]
+        public void SchedulerSupersededExecutionIsNoOpTest()
+        {
+            var callCount = 0;
+            var executor = new TrackingDelayedExecutor();
+            var scheduler = new Scheduler(
+                () => callCount++,
+                _ => TimeSpan.Zero,
+                executor
+            );
+
+            scheduler.ScheduleTimeout();
+            var firstAction = executor.Executions[0].Action!;
+            scheduler.ScheduleTimeout();
+            var secondAction = executor.Executions[1].Action!;
+
+            firstAction();
+            Assert.That(callCount, Is.EqualTo(0));
+
+            secondAction();
+            Assert.That(callCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void SchedulerGenuineFireAdvancesNextBackoffAttemptTest()
+        {
+            var receivedTries = new List<int>();
+            var executor = new TrackingDelayedExecutor();
+            var scheduler = new Scheduler(
+                () => { },
+                tries =>
+                {
+                    receivedTries.Add(tries);
+                    return TimeSpan.FromMilliseconds(tries);
+                },
+                executor
+            );
+
+            scheduler.ScheduleTimeout();
+            executor.Executions[0].Action!();
+            scheduler.ScheduleTimeout();
+            executor.Executions[1].Action!();
+            scheduler.ScheduleTimeout();
+
+            Assert.That(receivedTries, Is.EqualTo(new[] { 1, 2, 3 }));
+        }
+
+        [Test]
         public void SchedulerExponentialBackoffPatternTest()
         {
             var receivedDelays = new List<TimeSpan>();
