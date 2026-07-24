@@ -155,6 +155,7 @@ namespace PhoenixTests.TestDoubles
         public ushort? LastCloseCode;
         public string? LastCloseReason;
         public WebsocketState MockState = WebsocketState.Closed;
+        public Action<string>? OnSend { get; set; }
 
         public MockWebsocketAdapterWithCallbacks(WebsocketConfiguration config)
         {
@@ -173,6 +174,7 @@ namespace PhoenixTests.TestDoubles
         public void Send(string message)
         {
             CallSend.Add(message);
+            OnSend?.Invoke(message);
         }
 
         public void Close(ushort? code = null, string? message = null)

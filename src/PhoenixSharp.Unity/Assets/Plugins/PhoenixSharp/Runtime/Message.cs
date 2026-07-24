@@ -31,6 +31,11 @@ namespace Phoenix
         public readonly string? Status;
         public readonly IJsonBox? Response;
 
+        /// <summary>
+        /// Gets the standard status category for this reply.
+        /// Unrecognized statuses map to <see cref="ReplyStatus.Error"/>; inspect
+        /// <see cref="Status"/> to distinguish their exact wire values.
+        /// </summary>
         [IgnoreDataMember]
         public ReplyStatus ReplyStatus
         {
@@ -46,7 +51,7 @@ namespace Phoenix
                     "ok" => ReplyStatus.Ok,
                     "error" => ReplyStatus.Error,
                     "timeout" => ReplyStatus.Timeout,
-                    _ => throw new ArgumentException("Unknown status: " + Status)
+                    _ => ReplyStatus.Error
                 };
             }
         }

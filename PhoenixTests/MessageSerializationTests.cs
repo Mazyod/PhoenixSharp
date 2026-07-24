@@ -131,5 +131,38 @@ namespace PhoenixTests
             var response = reply.Value.Response.Unbox<JObject>();
             Assert.AreEqual(42, response.Value<int>("some_key"));
         }
+
+        [Test]
+        public void CustomReplyStatusRoundTripsAsErrorWithoutLosingRawStatusTest()
+        {
+            var serializer = new JsonMessageSerializer();
+            var message = new Message(
+                "phoenix-test",
+                Message.InBoundEvent.Reply.Serialized(),
+                @ref: "123",
+                payload: JsonBox.Serialize(new Dictionary<string, object>
+                {
+                    {"status", "partial"},
+                    {
+                        "response", new Dictionary<string, object>
+                        {
+                            {"progress", 50}
+                        }
+                    }
+                }),
+                joinRef: "456"
+            );
+
+            var serialized = serializer.Serialize(message);
+            var deserialized = serializer.Deserialize<Message>(serialized);
+            var reply = deserialized?.Payload?.Unbox<Reply?>()
+                ?? throw new AssertionException("Expected a reply payload.");
+            var response = reply.Response?.Unbox<JObject>()
+                ?? throw new AssertionException("Expected a reply response.");
+
+            Assert.That(reply.Status, Is.EqualTo("partial"));
+            Assert.That(reply.ReplyStatus, Is.EqualTo(ReplyStatus.Error));
+            Assert.That(response.Value<int>("progress"), Is.EqualTo(50));
+        }
     }
 }

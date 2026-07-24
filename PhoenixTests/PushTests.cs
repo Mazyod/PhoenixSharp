@@ -295,6 +295,38 @@ namespace PhoenixTests
             Assert.That(callbackCount, Is.EqualTo(2));
         }
 
+        [Test]
+        public void ReceiveErrorAfterCustomReplyReplaysRawStatusWithoutTimeoutTest()
+        {
+            var (channel, websocket, executor) = CreateJoinedChannel();
+            var push = channel.Push("test_event");
+
+            websocket.SimulateMessage(BuildPushReply(
+                "1",
+                push.Ref!,
+                channel.Topic,
+                "partial",
+                "{\"progress\":50}"
+            ));
+
+            Reply? replayedReply = null;
+            var timeoutCount = 0;
+            push.Receive(ReplyStatus.Error, reply => replayedReply = reply);
+            push.Receive(
+                ReplyStatus.Timeout,
+                _ => Interlocked.Increment(ref timeoutCount)
+            );
+
+            Assert.That(replayedReply, Is.Not.Null);
+            var reply = replayedReply.GetValueOrDefault();
+            Assert.That(reply.Status, Is.EqualTo("partial"));
+            Assert.That(reply.ReplyStatus, Is.EqualTo(ReplyStatus.Error));
+
+            executor.ExecutePending();
+
+            Assert.That(timeoutCount, Is.Zero);
+        }
+
         #endregion
 
         #region Send() Behavior Tests
@@ -517,6 +549,78 @@ namespace PhoenixTests
                 Is.EqualTo(0),
                 "The timeout must be ignored after the reply completes the send cycle."
             );
+        }
+
+        [Test]
+        public void ResendSuppressesAlreadyStartedTimeoutFromPreviousAttemptTest()
+        {
+            var executor = new TrackingDelayedExecutor();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                DelayedExecutor = executor
+            };
+            var socket = new Socket("ws://localhost:1234", null, factory, options);
+            socket.Connect();
+
+            using var timeoutSnapshotReached = new ManualResetEventSlim();
+            using var releaseTimeout = new ManualResetEventSlim();
+            var channel = new CoordinatedReplyChannel(
+                "test",
+                socket,
+                timeoutSnapshotReached,
+                releaseTimeout
+            );
+            var joinPush = channel.Join();
+            joinPush.Trigger(ReplyStatus.Ok);
+            executor.Clear();
+
+            var okCount = 0;
+            var timeoutCount = 0;
+            var push = channel.Push("test_event");
+            push.Receive(
+                ReplyStatus.Ok,
+                _ => Interlocked.Increment(ref okCount)
+            );
+            push.Receive(
+                ReplyStatus.Timeout,
+                _ => Interlocked.Increment(ref timeoutCount)
+            );
+
+            channel.CoordinateTimeout = true;
+            var staleTimeoutExecution = executor.Executions[0];
+            var staleTimeoutTask = Task.Run(staleTimeoutExecution.Execute);
+
+            try
+            {
+                Assert.That(
+                    timeoutSnapshotReached.Wait(TimeSpan.FromSeconds(1)),
+                    Is.True,
+                    "The stale timeout dispatch did not reach the coordination point."
+                );
+
+                push.Resend(TimeSpan.FromSeconds(10));
+            }
+            finally
+            {
+                releaseTimeout.Set();
+            }
+
+            Assert.That(
+                staleTimeoutTask.Wait(TimeSpan.FromSeconds(1)),
+                Is.True,
+                "The stale timeout dispatch did not complete."
+            );
+            Assert.That(
+                timeoutCount,
+                Is.Zero,
+                "A timeout from the previous send attempt must not complete the resend."
+            );
+
+            push.Trigger(ReplyStatus.Ok);
+
+            Assert.That(okCount, Is.EqualTo(1));
+            Assert.That(timeoutCount, Is.Zero);
         }
 
         [Test]

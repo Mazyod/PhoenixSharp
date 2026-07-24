@@ -453,6 +453,7 @@ namespace Phoenix
             var leavePush = new Push(this, leaveEvent, null, timeout ?? _timeout);
             leavePush
                 .Receive(ReplyStatus.Ok, _ => TriggerClose())
+                .Receive(ReplyStatus.Error, _ => TriggerClose())
                 .Receive(ReplyStatus.Timeout, _ => TriggerClose());
             leavePush.Send();
 
@@ -539,6 +540,7 @@ namespace Phoenix
             var push = Leave(timeout);
 
             push.Receive(ReplyStatus.Ok, _ => tcs.TrySetResult(true));
+            push.Receive(ReplyStatus.Error, _ => tcs.TrySetResult(true));
             push.Receive(ReplyStatus.Timeout, _ => tcs.TrySetResult(true)); // Leave completes even on timeout
 
             cancellationToken.Register(() => tcs.TrySetCanceled());

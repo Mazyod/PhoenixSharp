@@ -851,6 +851,47 @@ namespace PhoenixTests
         }
 
         [Test]
+        public async Task JoinAsync_ReturnsFailurePromptlyOnCustomReply()
+        {
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var executor = new TrackingDelayedExecutor();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    DelayedExecutor = executor,
+                    RejoinAfter = null
+                }
+            );
+            socket.Connect();
+
+            var channel = socket.Channel("test:topic");
+            var joinTask = channel.JoinAsync(TimeSpan.FromSeconds(5));
+
+            var conn = factory.LastCreatedWebsocket;
+            conn!.SimulateMessage(BuildPhxReply(
+                "1",
+                "1",
+                "test:topic",
+                "partial",
+                "{\"progress\":50}"
+            ));
+
+            await AssertCompletesWithin(joinTask);
+            var result = await joinTask;
+
+            Assert.That(result.IsSuccess, Is.False);
+            Assert.That(result.Reply, Is.Not.Null);
+            var reply = result.Reply.GetValueOrDefault();
+            Assert.That(reply.Status, Is.EqualTo("partial"));
+            Assert.That(reply.ReplyStatus, Is.EqualTo(ReplyStatus.Error));
+            Assert.That(result.Error, Is.EqualTo("partial"));
+            Assert.That(channel.State, Is.EqualTo(ChannelState.Errored));
+        }
+
+        [Test]
         public async Task JoinAsync_ReturnsTimeoutOnTimeout()
         {
             var factory = new MockWebsocketFactoryWithCallbackTracking();
@@ -963,6 +1004,67 @@ namespace PhoenixTests
 
             Assert.IsFalse(result.IsSuccess);
             Assert.AreEqual(ReplyStatus.Error, result.Status);
+        }
+
+        [Test]
+        public async Task PushAsync_ReturnsFailurePromptlyOnCustomReply()
+        {
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var executor = new TrackingDelayedExecutor();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    DelayedExecutor = executor
+                }
+            );
+            socket.Connect();
+
+            var channel = socket.Channel("test:topic");
+            channel.Join();
+
+            var conn = factory.LastCreatedWebsocket;
+            conn!.SimulateMessage(BuildJoinOkReply("1", "test:topic"));
+
+            var pushTask = channel.PushAsync("test_event", null, TimeSpan.FromSeconds(5));
+
+            conn.SimulateMessage(BuildPushReply(
+                "1",
+                "2",
+                "test:topic",
+                "partial",
+                "{\"progress\":50}"
+            ));
+
+            var completedTask = await Task.WhenAny(
+                pushTask,
+                Task.Delay(TimeSpan.FromMilliseconds(250))
+            );
+            if (completedTask != pushTask)
+            {
+                executor.ExecuteAll();
+            }
+
+            var result = await pushTask;
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(
+                    completedTask,
+                    Is.SameAs(pushTask),
+                    "The custom reply did not complete PushAsync within 250 ms."
+                );
+                Assert.That(result.IsSuccess, Is.False);
+                Assert.That(result.Status, Is.EqualTo(ReplyStatus.Error));
+                Assert.That(result.Reply, Is.Not.Null);
+                if (result.Reply.HasValue)
+                {
+                    Assert.That(result.Reply.Value.Status, Is.EqualTo("partial"));
+                    Assert.That(result.Reply.Value.ReplyStatus, Is.EqualTo(ReplyStatus.Error));
+                }
+            });
         }
 
         [Test]
@@ -1090,6 +1192,52 @@ namespace PhoenixTests
         }
 
         [Test]
+        public async Task PushAsyncTyped_ReturnsFailurePromptlyOnCustomReply()
+        {
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var executor = new TrackingDelayedExecutor();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    DelayedExecutor = executor
+                }
+            );
+            socket.Connect();
+
+            var channel = socket.Channel("test:topic");
+            channel.Join();
+
+            var conn = factory.LastCreatedWebsocket;
+            conn!.SimulateMessage(BuildJoinOkReply("1", "test:topic"));
+
+            var pushTask = channel.PushAsync<Dictionary<string, object>>(
+                "test_event",
+                null,
+                TimeSpan.FromSeconds(5)
+            );
+
+            conn.SimulateMessage(BuildPushReply(
+                "1",
+                "2",
+                "test:topic",
+                "partial",
+                "{\"progress\":50}"
+            ));
+
+            await AssertCompletesWithin(pushTask);
+            var result = await pushTask;
+
+            Assert.That(result.IsSuccess, Is.False);
+            Assert.That(result.Status, Is.EqualTo(ReplyStatus.Error));
+            Assert.That(result.Reply, Is.Not.Null);
+            Assert.That(result.Reply.GetValueOrDefault().Status, Is.EqualTo("partial"));
+            Assert.That(result.Response, Is.Null);
+        }
+
+        [Test]
         public void PushAsyncTyped_CancellationToken_CancelsTask()
         {
             var factory = new MockWebsocketFactoryWithCallbackTracking();
@@ -1140,6 +1288,74 @@ namespace PhoenixTests
             await channel.LeaveAsync(TimeSpan.FromSeconds(5));
 
             Assert.AreEqual(ChannelState.Closed, channel.State);
+        }
+
+        [Test]
+        public async Task LeaveAsync_ErrorReplyCompletesAndClosesChannel()
+        {
+            await AssertLeaveAsyncCompletesOnReplyStatus("error");
+        }
+
+        [Test]
+        public async Task LeaveAsync_CustomReplyCompletesAndClosesChannel()
+        {
+            await AssertLeaveAsyncCompletesOnReplyStatus("partial");
+        }
+
+        private static async Task AssertLeaveAsyncCompletesOnReplyStatus(string status)
+        {
+            var serializer = new JsonMessageSerializer();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(serializer)
+                {
+                    DelayedExecutor = new TrackingDelayedExecutor(),
+                    HeartbeatInterval = null
+                }
+            );
+            socket.Connect();
+
+            var channel = socket.Channel("test:topic");
+            channel.Join();
+
+            var conn = factory.LastCreatedWebsocket!;
+            conn.SimulateMessage(BuildJoinOkReply("1", "test:topic"));
+            conn.OnSend = data =>
+            {
+                var sentMessage = serializer.Deserialize<Message>(data);
+                if (sentMessage?.Event != Message.OutBoundEvent.Leave.Serialized())
+                {
+                    return;
+                }
+
+                conn.SimulateMessage(BuildPhxReply(
+                    sentMessage.JoinRef,
+                    sentMessage.Ref!,
+                    sentMessage.Topic!,
+                    status
+                ));
+            };
+
+            var leaveTask = channel.LeaveAsync(TimeSpan.FromSeconds(5));
+            var completedTask = await Task.WhenAny(
+                leaveTask,
+                Task.Delay(TimeSpan.FromMilliseconds(250))
+            );
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(
+                    completedTask,
+                    Is.SameAs(leaveTask),
+                    "LeaveAsync did not complete within 250 ms of the leave reply."
+                );
+                Assert.That(channel.State, Is.EqualTo(ChannelState.Closed));
+            });
+
+            await leaveTask;
         }
 
         [Test]
@@ -1392,6 +1608,46 @@ namespace PhoenixTests
             var reply = await receiveTask;
 
             Assert.AreEqual(ReplyStatus.Error, reply.ReplyStatus);
+        }
+
+        [Test]
+        public async Task ReceiveAsync_ReturnsCustomReplyPromptlyAsError()
+        {
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var executor = new TrackingDelayedExecutor();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    DelayedExecutor = executor
+                }
+            );
+            socket.Connect();
+
+            var channel = socket.Channel("test:topic");
+            channel.Join();
+
+            var conn = factory.LastCreatedWebsocket;
+            conn!.SimulateMessage(BuildJoinOkReply("1", "test:topic"));
+
+            var push = channel.Push("test_event", null, TimeSpan.FromSeconds(5));
+            var receiveTask = push.ReceiveAsync();
+
+            conn.SimulateMessage(BuildPushReply(
+                "1",
+                "2",
+                "test:topic",
+                "partial",
+                "{\"progress\":50}"
+            ));
+
+            await AssertCompletesWithin(receiveTask);
+            var reply = await receiveTask;
+
+            Assert.That(reply.Status, Is.EqualTo("partial"));
+            Assert.That(reply.ReplyStatus, Is.EqualTo(ReplyStatus.Error));
         }
 
         [Test]
