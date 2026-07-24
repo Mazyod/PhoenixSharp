@@ -48,7 +48,7 @@ namespace Phoenix
 
         private IDelayedExecution? _heartbeatTimer;
         private string? _pendingHeartbeatRef;
-        private uint _ref;
+        private long _ref;
 
         public OnClosedDelegate? OnClose;
 
@@ -500,8 +500,8 @@ namespace Phoenix
 
         internal string MakeRef()
         {
-            // overflows are fine in C#, they just wrap
-            return (++_ref).ToString();
+            // A long counter makes wraparound impractical; Interlocked keeps concurrent refs unique.
+            return Interlocked.Increment(ref _ref).ToString();
         }
 
         private void SendHeartbeat()
