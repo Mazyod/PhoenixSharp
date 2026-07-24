@@ -98,6 +98,45 @@ namespace PhoenixTests
             Assert.That(conn.CallSend[0].Contains(joinEvent));
         }
 
+        [Test]
+        public void FlushSendBufferRebuffersRemainingMessagesWhenConnectionDisappearsTest()
+        {
+            var factory = new ControllableWebsocketFactory();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+            );
+            factory.DisconnectOnFirstSend = () =>
+            {
+                socket.Disconnect();
+                socket.Push(new Message("topic", "fourth"));
+            };
+
+            socket.Push(new Message("topic", "first"));
+            socket.Push(new Message("topic", "second"));
+            socket.Push(new Message("topic", "third"));
+
+            socket.Connect();
+            var firstConnection = factory.Connections[0];
+
+            Assert.DoesNotThrow(firstConnection.Open);
+            Assert.That(firstConnection.CallSend, Has.Count.EqualTo(1));
+            Assert.That(firstConnection.CallSend[0], Does.Contain("\"first\""));
+            Assert.That(socket.SendBuffer, Has.Count.EqualTo(3));
+
+            socket.Connect();
+            var secondConnection = factory.Connections[1];
+            secondConnection.Open();
+
+            Assert.That(secondConnection.CallSend, Has.Count.EqualTo(3));
+            Assert.That(secondConnection.CallSend[0], Does.Contain("\"second\""));
+            Assert.That(secondConnection.CallSend[1], Does.Contain("\"third\""));
+            Assert.That(secondConnection.CallSend[2], Does.Contain("\"fourth\""));
+            Assert.That(socket.SendBuffer, Is.Empty);
+        }
+
         #endregion
 
         #region Connection State Tests
@@ -476,5 +515,72 @@ namespace PhoenixTests
         }
 
         #endregion
+
+        private sealed class ControllableWebsocketFactory : IWebsocketFactory
+        {
+            public readonly List<ControllableWebsocket> Connections =
+                new List<ControllableWebsocket>();
+
+            public Action? DisconnectOnFirstSend { get; set; }
+
+            public IWebsocket Build(WebsocketConfiguration config)
+            {
+                var disconnectOnFirstSend = Connections.Count == 0
+                    ? DisconnectOnFirstSend
+                    : null;
+                var websocket = new ControllableWebsocket(config, disconnectOnFirstSend);
+                Connections.Add(websocket);
+                return websocket;
+            }
+        }
+
+        private sealed class ControllableWebsocket : IWebsocket
+        {
+            private readonly WebsocketConfiguration _config;
+            private readonly Action? _disconnectOnFirstSend;
+            private bool _didDisconnectOnSend;
+
+            public readonly List<string> CallSend = new List<string>();
+            public WebsocketState MockState = WebsocketState.Closed;
+
+            public ControllableWebsocket(
+                WebsocketConfiguration config,
+                Action? disconnectOnFirstSend
+            )
+            {
+                _config = config;
+                _disconnectOnFirstSend = disconnectOnFirstSend;
+            }
+
+            public WebsocketState State => MockState;
+
+            public void Connect()
+            {
+                MockState = WebsocketState.Connecting;
+            }
+
+            public void Open()
+            {
+                MockState = WebsocketState.Open;
+                _config.onOpenCallback(this);
+            }
+
+            public void Send(string message)
+            {
+                CallSend.Add(message);
+                if (_disconnectOnFirstSend != null && !_didDisconnectOnSend)
+                {
+                    _didDisconnectOnSend = true;
+                    MockState = WebsocketState.Closed;
+                    _disconnectOnFirstSend();
+                }
+            }
+
+            public void Close(ushort? code = null, string? reason = null)
+            {
+                MockState = WebsocketState.Closed;
+                _config.onCloseCallback(this, code ?? 0, reason ?? "");
+            }
+        }
     }
 }

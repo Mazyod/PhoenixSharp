@@ -41,8 +41,10 @@ namespace Phoenix
         private readonly IWebsocketFactory _websocketFactory;
         internal readonly Options Opts;
 
-        internal readonly List<Action> SendBuffer = new List<Action>();
+        internal readonly List<Func<bool>> SendBuffer = new List<Func<bool>>();
         private readonly object _sendBufferLock = new object();
+        private bool _isFlushingSendBuffer;
+        private bool _sendBufferFlushRequested;
 
         private bool _closeWasClean;
 
@@ -480,26 +482,55 @@ namespace Phoenix
                 Log(LogLevel.Debug, "push", $"Pushing {message}");
             }
 
-            void EncodeThenSend()
+            bool EncodeThenSend()
             {
-                Conn!.Send(Opts.MessageSerializer.Serialize(message));
+                var conn = Conn;
+                if (conn == null)
+                {
+                    return false;
+                }
+
+                conn.Send(Opts.MessageSerializer.Serialize(message));
+                return true;
             }
 
             if (IsConnected())
             {
-                EncodeThenSend();
+                if (!EncodeThenSend())
+                {
+                    BufferSend(EncodeThenSend);
+                }
             }
             else
             {
-                lock (_sendBufferLock)
+                BufferSend(EncodeThenSend);
+            }
+        }
+
+        private void BufferSend(Func<bool> callback)
+        {
+            bool flushAfterBuffering;
+            lock (_sendBufferLock)
+            {
+                SendBuffer.Add(callback);
+                if (_isFlushingSendBuffer)
                 {
-                    SendBuffer.Add(EncodeThenSend);
+                    _sendBufferFlushRequested = true;
+                    return;
                 }
+
+                flushAfterBuffering = IsConnected();
+            }
+
+            if (flushAfterBuffering)
+            {
+                FlushSendBuffer();
             }
         }
 
         internal string MakeRef()
         {
+            // Must remain lock-free: Push calls this while holding Push._stateLock.
             // A long counter makes wraparound impractical; Interlocked keeps concurrent refs unique.
             return Interlocked.Increment(ref _ref).ToString();
         }
@@ -537,19 +568,59 @@ namespace Phoenix
 
         internal void FlushSendBuffer()
         {
-            List<Action> bufferCopy;
+            List<Func<bool>> bufferCopy;
             lock (_sendBufferLock)
             {
+                if (_isFlushingSendBuffer)
+                {
+                    _sendBufferFlushRequested = true;
+                    return;
+                }
+
                 if (!IsConnected() || SendBuffer.Count <= 0)
                 {
                     return;
                 }
 
-                bufferCopy = new List<Action>(SendBuffer);
+                _isFlushingSendBuffer = true;
+                bufferCopy = new List<Func<bool>>(SendBuffer);
                 SendBuffer.Clear();
             }
 
-            bufferCopy.ForEach(callback => callback());
+            bool flushAgain;
+            try
+            {
+                for (var index = 0; index < bufferCopy.Count; index++)
+                {
+                    if (bufferCopy[index]())
+                    {
+                        continue;
+                    }
+
+                    lock (_sendBufferLock)
+                    {
+                        SendBuffer.InsertRange(
+                            0,
+                            bufferCopy.GetRange(index, bufferCopy.Count - index)
+                        );
+                    }
+                    break;
+                }
+            }
+            finally
+            {
+                lock (_sendBufferLock)
+                {
+                    _isFlushingSendBuffer = false;
+                    flushAgain = _sendBufferFlushRequested;
+                    _sendBufferFlushRequested = false;
+                }
+            }
+
+            if (flushAgain)
+            {
+                FlushSendBuffer();
+            }
         }
 
         private void OnConnMessage(IWebsocket websocket, string rawMessage)
