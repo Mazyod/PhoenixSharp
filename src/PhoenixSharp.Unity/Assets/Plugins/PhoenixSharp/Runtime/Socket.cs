@@ -107,7 +107,9 @@ namespace Phoenix
                 throw new ArgumentNullException(nameof(opts));
 
             _endPoint = endPoint;
-            _params = @params;
+            _params = @params == null
+                ? null
+                : new Dictionary<string, string>(@params, @params.Comparer);
             _websocketFactory = websocketFactory;
             Opts = opts;
 
@@ -132,12 +134,14 @@ namespace Phoenix
 
         private Uri EndPointUrl()
         {
-            // very primitive query string builder
-            var @params = _params ?? new Dictionary<string, string>();
+            var @params = _params == null
+                ? new Dictionary<string, string>()
+                : new Dictionary<string, string>(_params, _params.Comparer);
             @params["vsn"] = Opts.Vsn;
 
             var stringParams = @params
-                .Select(pair => $"{pair.Key}={pair.Value}")
+                .Select(pair =>
+                    $"{Uri.EscapeDataString(pair.Key)}={Uri.EscapeDataString(pair.Value ?? string.Empty)}")
                 .ToArray();
 
             var builder = new UriBuilder($"{_endPoint}/websocket")

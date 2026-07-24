@@ -50,6 +50,163 @@ namespace PhoenixTests
 
         #endregion
 
+        #region Endpoint URL Tests
+
+        [Test]
+        public void ConnectEscapesConnectionParameterKeysAndValuesTest()
+        {
+            const string key = "auth token";
+            const string token = "abc+def==&x#y";
+            var factory = new CapturingWebsocketFactory();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                new Dictionary<string, string>
+                {
+                    { key, token }
+                },
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+            );
+
+            socket.Connect();
+
+            var endpoint = factory.LastUri
+                ?? throw new AssertionException("Expected the websocket factory to capture a URI.");
+            var query = ParseQuery(endpoint);
+            var expectedPair =
+                $"{Uri.EscapeDataString(key)}={Uri.EscapeDataString(token)}";
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(query, Does.ContainKey(key));
+                Assert.That(query.GetValueOrDefault(key), Is.EqualTo(token));
+                Assert.That(endpoint.Query, Does.Contain(expectedPair));
+                Assert.That(endpoint.AbsoluteUri, Does.Contain(expectedPair));
+                Assert.That(endpoint.Fragment, Is.Empty);
+            });
+        }
+
+        [Test]
+        public void ConnectDoesNotAddVsnToCallerParametersTest()
+        {
+            var callerParams = new Dictionary<string, string>
+            {
+                { "token", "secret" }
+            };
+            var socket = new Socket(
+                "ws://localhost:1234",
+                callerParams,
+                new MockWebsocketFactory(),
+                new Socket.Options(new JsonMessageSerializer())
+            );
+
+            socket.Connect();
+
+            Assert.That(callerParams, Does.Not.ContainKey("vsn"));
+        }
+
+        [Test]
+        public void ConstructorSnapshotsConnectionParametersTest()
+        {
+            var callerParams = new Dictionary<string, string>
+            {
+                { "token", "initial" }
+            };
+            var factory = new CapturingWebsocketFactory();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                callerParams,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+            );
+
+            callerParams["token"] = "changed";
+            callerParams["added-later"] = "unexpected";
+            socket.Connect();
+
+            var endpoint = factory.LastUri
+                ?? throw new AssertionException("Expected the websocket factory to capture a URI.");
+            var query = ParseQuery(endpoint);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(query.GetValueOrDefault("token"), Is.EqualTo("initial"));
+                Assert.That(query, Does.Not.ContainKey("added-later"));
+            });
+        }
+
+        [Test]
+        public void ConnectTreatsNullConnectionParameterValueAsEmptyTest()
+        {
+            var factory = new CapturingWebsocketFactory();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                new Dictionary<string, string>
+                {
+                    { "token", null! }
+                },
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    ReconnectAfter = null
+                }
+            );
+
+            socket.Connect();
+
+            var endpoint = factory.LastUri;
+            Assert.That(
+                endpoint,
+                Is.Not.Null,
+                "A null parameter value must not prevent the websocket factory from being invoked."
+            );
+            if (endpoint == null)
+            {
+                return;
+            }
+
+            var query = ParseQuery(endpoint);
+            Assert.Multiple(() =>
+            {
+                Assert.That(query.GetValueOrDefault("token"), Is.Empty);
+                Assert.That(endpoint.Query, Does.Contain("token="));
+            });
+        }
+
+        [Test]
+        public void OptionsVsnOverridesCallerSuppliedVsnTest()
+        {
+            var callerParams = new Dictionary<string, string>
+            {
+                { "vsn", "caller-version" }
+            };
+            var factory = new CapturingWebsocketFactory();
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                Vsn = "options-version"
+            };
+            var socket = new Socket(
+                "ws://localhost:1234",
+                callerParams,
+                factory,
+                options
+            );
+
+            socket.Connect();
+
+            var endpoint = factory.LastUri
+                ?? throw new AssertionException("Expected the websocket factory to capture a URI.");
+            var query = ParseQuery(endpoint);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(query.GetValueOrDefault("vsn"), Is.EqualTo("options-version"));
+                Assert.That(callerParams["vsn"], Is.EqualTo("caller-version"));
+            });
+        }
+
+        #endregion
+
         #region Send Buffer Tests
 
         [Test]
@@ -565,6 +722,46 @@ namespace PhoenixTests
         }
 
         #endregion
+
+        private static Dictionary<string, string> ParseQuery(Uri uri)
+        {
+            var parsed = new Dictionary<string, string>();
+            var query = uri.Query.TrimStart('?');
+            if (query.Length == 0)
+            {
+                return parsed;
+            }
+
+            foreach (var pair in query.Split('&'))
+            {
+                var separatorIndex = pair.IndexOf('=');
+                var key = separatorIndex >= 0
+                    ? pair.Substring(0, separatorIndex)
+                    : pair;
+                var value = separatorIndex >= 0
+                    ? pair.Substring(separatorIndex + 1)
+                    : string.Empty;
+                parsed[DecodeQueryComponent(key)] = DecodeQueryComponent(value);
+            }
+
+            return parsed;
+        }
+
+        private static string DecodeQueryComponent(string value)
+        {
+            return Uri.UnescapeDataString(value.Replace("+", " "));
+        }
+
+        private sealed class CapturingWebsocketFactory : IWebsocketFactory
+        {
+            public Uri? LastUri { get; private set; }
+
+            public IWebsocket Build(WebsocketConfiguration config)
+            {
+                LastUri = config.uri;
+                return new MockWebsocketAdapter(config);
+            }
+        }
 
         private sealed class ControllableWebsocketFactory : IWebsocketFactory
         {
