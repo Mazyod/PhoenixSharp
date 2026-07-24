@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 using Phoenix;
 using PhoenixTests.TestDoubles;
@@ -412,6 +413,56 @@ namespace PhoenixTests
             Assert.IsTrue(channel.OnMessageCalled);
         }
 
+        [Test]
+        public void TriggerContinuesAfterNonLeaveStateChangeTest()
+        {
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                DelayedExecutor = new TrackingDelayedExecutor(),
+                HeartbeatInterval = null,
+                ReconnectAfter = null,
+                RejoinAfter = null
+            };
+            var (socket, _) = CreateConnectedSocketWithOptions(options);
+            var channel = socket.Channel("test");
+            var firstCalled = false;
+            var secondCalled = false;
+
+            channel.On("custom_event", _ =>
+            {
+                firstCalled = true;
+                channel.Trigger(Message.InBoundEvent.Error);
+            });
+            channel.On("custom_event", _ => secondCalled = true);
+
+            channel.Trigger(new Message(@event: "custom_event", topic: "test"));
+
+            Assert.That(firstCalled, Is.True);
+            Assert.That(channel.State, Is.EqualTo(ChannelState.Errored));
+            Assert.That(secondCalled, Is.True);
+        }
+
+        [Test]
+        public void TriggerStopsRemainingCallbacksWhenLeaveOccursTest()
+        {
+            var socket = CreateConnectedSocket();
+            var channel = socket.Channel("test");
+            var firstCalled = false;
+            var secondCalled = false;
+
+            channel.On("custom_event", _ =>
+            {
+                firstCalled = true;
+                channel.Leave();
+            });
+            channel.On("custom_event", _ => secondCalled = true);
+
+            channel.Trigger(new Message(@event: "custom_event", topic: "test"));
+
+            Assert.That(firstCalled, Is.True);
+            Assert.That(secondCalled, Is.False);
+        }
+
         #endregion
 
         #region Rejoin Behavior Tests
@@ -478,6 +529,84 @@ namespace PhoenixTests
             var leavePush = channel.Leave(TimeSpan.FromSeconds(5));
 
             Assert.IsNotNull(leavePush);
+        }
+
+        [Test]
+        public void LateJoinOkAfterLeaveDoesNotRejoinOrFlushBufferedPushesTest()
+        {
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                DelayedExecutor = new TrackingDelayedExecutor(),
+                HeartbeatInterval = null,
+                ReconnectAfter = null,
+                RejoinAfter = null
+            };
+            var (socket, factory) = CreateConnectedSocketWithOptions(options);
+            var websocket = factory.LastCreatedWebsocket!;
+            var channel = socket.Channel("test");
+            var joinPush = channel.Join();
+            channel.Push("buffered_event");
+
+            channel.Leave();
+            var sendsAfterLeave = websocket.CallSend.Count;
+            Assert.That(channel.State, Is.EqualTo(ChannelState.Closed));
+
+            joinPush.Trigger(ReplyStatus.Ok);
+
+            Assert.That(channel.State, Is.EqualTo(ChannelState.Closed));
+            Assert.That(websocket.CallSend, Has.Count.EqualTo(sendsAfterLeave));
+            Assert.That(websocket.CallSend, Has.None.Contains("\"buffered_event\""));
+        }
+
+        [Test]
+        public void JoinTimeoutCommittedBeforeLeaveDoesNotReviveClosedChannelTest()
+        {
+            var executor = new ReentrantCancelDelayedExecutor();
+            var rejoinDelay = TimeSpan.FromMilliseconds(1);
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                DelayedExecutor = executor,
+                HeartbeatInterval = null,
+                ReconnectAfter = null,
+                RejoinAfter = _ => rejoinDelay
+            };
+            var (socket, factory) = CreateConnectedSocketWithOptions(options);
+            var websocket = factory.LastCreatedWebsocket!;
+            var channel = socket.Channel("test");
+            var joinPush = channel.Join();
+            var joinTimeout = executor.Executions.Single(
+                execution => execution.Delay == options.Timeout
+            );
+            var sendsAfterLeave = -1;
+            joinTimeout.OnCancel = () =>
+            {
+                channel.Leave();
+                sendsAfterLeave = websocket.CallSend.Count;
+            };
+
+            // MatchReceive commits Timeout before cancelling its delayed execution.
+            // Reentrant cancellation makes Leave complete before timeout hooks dispatch.
+            joinPush.Trigger(ReplyStatus.Timeout);
+            var stateAfterTimeoutHook = channel.State;
+            var scheduledRejoins = executor.Executions
+                .Where(execution =>
+                    execution.Delay == rejoinDelay
+                    && !execution.IsCancelled
+                )
+                .ToList();
+
+            // If a stale timeout scheduled a rejoin, expose its outbound join as well.
+            scheduledRejoins.ForEach(execution => execution.Execute());
+            var messagesAfterLeave = websocket.CallSend.Skip(sendsAfterLeave).ToList();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(stateAfterTimeoutHook, Is.EqualTo(ChannelState.Closed));
+                Assert.That(channel.State, Is.EqualTo(ChannelState.Closed));
+                Assert.That(scheduledRejoins, Is.Empty);
+                Assert.That(messagesAfterLeave, Has.None.Contains("\"phx_leave\""));
+                Assert.That(messagesAfterLeave, Has.None.Contains("\"phx_join\""));
+            });
         }
 
         #endregion
@@ -713,6 +842,49 @@ namespace PhoenixTests
         }
 
         #endregion
+
+        private sealed class ReentrantCancelDelayedExecutor : IDelayedExecutor
+        {
+            public List<ReentrantCancelDelayedExecution> Executions { get; } = new();
+
+            public IDelayedExecution Execute(Action action, TimeSpan delay)
+            {
+                var execution = new ReentrantCancelDelayedExecution(action, delay);
+                Executions.Add(execution);
+                return execution;
+            }
+        }
+
+        private sealed class ReentrantCancelDelayedExecution : IDelayedExecution
+        {
+            private readonly Action _action;
+
+            public Action? OnCancel { get; set; }
+            public TimeSpan Delay { get; }
+            public bool IsCancelled { get; private set; }
+
+            public ReentrantCancelDelayedExecution(Action action, TimeSpan delay)
+            {
+                _action = action;
+                Delay = delay;
+            }
+
+            public void Cancel()
+            {
+                IsCancelled = true;
+                var onCancel = OnCancel;
+                OnCancel = null;
+                onCancel?.Invoke();
+            }
+
+            public void Execute()
+            {
+                if (!IsCancelled)
+                {
+                    _action();
+                }
+            }
+        }
     }
 
     /// <summary>

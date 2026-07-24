@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using NUnit.Framework;
 using Phoenix;
 using PhoenixTests.TestDoubles;
@@ -150,6 +151,40 @@ namespace PhoenixTests
 
             // Verify no connection was made (Connect checks _disposed first)
             Assert.IsNull(socket.Conn);
+        }
+
+        [Test]
+        public void DisposeInvalidatesCapturedHeartbeatTimeoutTest()
+        {
+            var mockExecutor = new TrackingDelayedExecutor();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                DelayedExecutor = mockExecutor,
+                HeartbeatInterval = TimeSpan.FromSeconds(30),
+                ReconnectAfter = _ => TimeSpan.FromMilliseconds(100)
+            };
+            var socket = new Socket("ws://localhost:1234", null, factory, options);
+            socket.Connect();
+            var connection = factory.LastCreatedWebsocket!;
+            var heartbeat = mockExecutor.Executions
+                .Single(execution => execution.Delay == TimeSpan.FromSeconds(30));
+            heartbeat.Execute();
+            var heartbeatTimeout = mockExecutor.Executions.Last();
+
+            // Avoid an on-close callback so Dispose itself must invalidate the generation.
+            connection.MockState = WebsocketState.Closed;
+            socket.Dispose();
+            var executionCountAfterDispose = mockExecutor.Executions.Count;
+
+            // Invoke the action directly to model cancellation losing the timer race.
+            heartbeatTimeout.Action!();
+
+            Assert.That(heartbeatTimeout.IsCancelled, Is.True);
+            Assert.That(
+                mockExecutor.Executions,
+                Has.Count.EqualTo(executionCountAfterDispose)
+            );
         }
     }
 }

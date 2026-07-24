@@ -137,6 +137,56 @@ namespace PhoenixTests
             Assert.That(socket.SendBuffer, Is.Empty);
         }
 
+        [Test]
+        public void FlushSendBufferRerunsWhenBufferingIsRequestedDuringFlushTest()
+        {
+            var factory = new ControllableWebsocketFactory();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+            );
+            factory.DisconnectOnFirstSend = () =>
+            {
+                socket.Push(new Message("topic", "second"));
+                factory.Connections[0].MockState = WebsocketState.Open;
+            };
+
+            socket.Push(new Message("topic", "first"));
+            socket.Connect();
+            var connection = factory.Connections[0];
+
+            connection.Open();
+
+            Assert.That(connection.CallSend, Has.Count.EqualTo(2));
+            Assert.That(connection.CallSend[0], Does.Contain("\"first\""));
+            Assert.That(connection.CallSend[1], Does.Contain("\"second\""));
+            Assert.That(socket.SendBuffer, Is.Empty);
+        }
+
+        [Test]
+        public void BufferSendFlushesWhenConnectionOpensBetweenStateChecksTest()
+        {
+            var factory = new ControllableWebsocketFactory();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+            );
+            socket.Connect();
+            var connection = factory.Connections[0];
+            connection.Open();
+            connection.ReportClosedOnNextStateRead();
+
+            socket.Push(new Message("topic", "raced"));
+
+            Assert.That(connection.CallSend, Has.Count.EqualTo(1));
+            Assert.That(connection.CallSend[0], Does.Contain("\"raced\""));
+            Assert.That(socket.SendBuffer, Is.Empty);
+        }
+
         #endregion
 
         #region Connection State Tests
@@ -539,6 +589,7 @@ namespace PhoenixTests
             private readonly WebsocketConfiguration _config;
             private readonly Action? _disconnectOnFirstSend;
             private bool _didDisconnectOnSend;
+            private bool _reportClosedOnNextStateRead;
 
             public readonly List<string> CallSend = new List<string>();
             public WebsocketState MockState = WebsocketState.Closed;
@@ -552,7 +603,24 @@ namespace PhoenixTests
                 _disconnectOnFirstSend = disconnectOnFirstSend;
             }
 
-            public WebsocketState State => MockState;
+            public WebsocketState State
+            {
+                get
+                {
+                    if (_reportClosedOnNextStateRead)
+                    {
+                        _reportClosedOnNextStateRead = false;
+                        return WebsocketState.Closed;
+                    }
+
+                    return MockState;
+                }
+            }
+
+            public void ReportClosedOnNextStateRead()
+            {
+                _reportClosedOnNextStateRead = true;
+            }
 
             public void Connect()
             {

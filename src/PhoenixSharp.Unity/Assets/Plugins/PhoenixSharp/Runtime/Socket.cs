@@ -9,7 +9,7 @@ namespace Phoenix
 {
     public sealed class Socket : IDisposable
     {
-        private bool _disposed;
+        private volatile bool _disposed;
         public delegate void OnClosedDelegate(ushort code, string message);
 
         public delegate void OnErrorDelegate(string message);
@@ -858,19 +858,26 @@ namespace Phoenix
             _disposed = true;
 
             // Cancel all timers
-            _heartbeatTimer?.Cancel();
-            _heartbeatTimer = null;
+            StopHeartbeat();
             _reconnectTimer?.Reset();
 
-            // Cleanup all channels (unsubscribes their event handlers)
-            foreach (var channel in _channels.ToList())
+            List<Channel> channelsCopy;
+            lock (_channelsLock)
+            {
+                channelsCopy = _channels.ToList();
+                _channels.Clear();
+            }
+
+            // Cleanup calls timer/executor code, so run it outside the socket lock.
+            foreach (var channel in channelsCopy)
             {
                 ((IChannelCleanup)channel).Cleanup();
             }
-            _channels.Clear();
 
-            // Clear send buffer
-            SendBuffer.Clear();
+            lock (_sendBufferLock)
+            {
+                SendBuffer.Clear();
+            }
 
             // Clear delegates to prevent any lingering references
             OnOpen = null;

@@ -50,10 +50,10 @@ namespace Phoenix
 
         /// <summary>
         /// Lock for state transitions and bindings access.
-        /// Epoch is incremented on every state change to detect concurrent modifications.
+        /// The leave epoch changes only when Leave or Cleanup invalidates user callbacks.
         /// </summary>
         private readonly object _stateLock = new object();
-        private long _epoch;
+        private long _leaveEpoch;
         private ChannelState _state = ChannelState.Closed;
 
         public readonly Socket Socket;
@@ -75,15 +75,36 @@ namespace Phoenix
         }
 
         /// <summary>
-        /// Sets the channel state and increments the epoch counter.
-        /// Must be called to ensure epoch is always incremented on state changes.
+        /// Sets the channel state.
         /// </summary>
         private void SetState(ChannelState newState)
         {
             lock (_stateLock)
             {
                 _state = newState;
-                _epoch++;
+            }
+        }
+
+        private bool TrySetStateFromJoinReply(ChannelState newState, out long leaveEpoch)
+        {
+            lock (_stateLock)
+            {
+                leaveEpoch = _leaveEpoch;
+                if (_state == ChannelState.Leaving || _state == ChannelState.Closed)
+                {
+                    return false;
+                }
+
+                _state = newState;
+                return true;
+            }
+        }
+
+        private bool HasLeaveEpochChanged(long expectedLeaveEpoch)
+        {
+            lock (_stateLock)
+            {
+                return _leaveEpoch != expectedLeaveEpoch;
             }
         }
 
@@ -128,7 +149,11 @@ namespace Phoenix
 
             _joinPush.Receive(ReplyStatus.Ok, _ =>
             {
-                SetState(ChannelState.Joined);
+                if (!TrySetStateFromJoinReply(ChannelState.Joined, out var leaveEpoch))
+                {
+                    return;
+                }
+
                 _rejoinTimer?.Reset();
                 List<Push> bufferCopy;
                 lock (_pushBufferLock)
@@ -137,12 +162,24 @@ namespace Phoenix
                     _pushBuffer.Clear();
                 }
 
-                bufferCopy.ForEach(push => push.Send());
+                foreach (var push in bufferCopy)
+                {
+                    if (HasLeaveEpochChanged(leaveEpoch))
+                    {
+                        return;
+                    }
+
+                    push.Send();
+                }
             });
 
-            _joinPush.Receive(ReplyStatus.Error, _ =>
+            _joinPush.Receive(ReplyStatus.Error, _reply =>
             {
-                SetState(ChannelState.Errored);
+                if (!TrySetStateFromJoinReply(ChannelState.Errored, out _))
+                {
+                    return;
+                }
+
                 if (socket.IsConnected())
                 {
                     _rejoinTimer?.ScheduleTimeout();
@@ -185,8 +222,13 @@ namespace Phoenix
                 }
             });
 
-            _joinPush.Receive(ReplyStatus.Timeout, _ =>
+            _joinPush.Receive(ReplyStatus.Timeout, _reply =>
             {
+                if (!TrySetStateFromJoinReply(ChannelState.Errored, out _))
+                {
+                    return;
+                }
+
                 if (socket.HasLogger())
                 {
                     socket.Log(LogLevel.Debug, "channel", $"timeout {topic} ({JoinRef})");
@@ -196,7 +238,6 @@ namespace Phoenix
                 var leavePush = new Push(this, leaveEvent, null, _timeout);
                 leavePush.Send();
 
-                SetState(ChannelState.Errored);
                 _joinPush.Reset();
 
                 if (socket.IsConnected())
@@ -394,7 +435,7 @@ namespace Phoenix
             lock (_stateLock)
             {
                 _state = ChannelState.Leaving;
-                _epoch++;
+                _leaveEpoch++;
                 ClearUserBindingsUnsafe();
             }
 
@@ -628,7 +669,7 @@ namespace Phoenix
         internal void Trigger(Message message)
         {
             List<ChannelSubscription>? callbacks = null;
-            long epochWhenWeStarted;
+            long leaveEpochWhenWeStarted;
             bool isInternalEvent = message.Event?.StartsWith("phx_") == true
                 || message.Event?.StartsWith(Reply.ReplyEventPrefix) == true;
 
@@ -641,7 +682,7 @@ namespace Phoenix
                     return;
                 }
 
-                epochWhenWeStarted = _epoch;
+                leaveEpochWhenWeStarted = _leaveEpoch;
 
                 // Get callbacks copy while holding lock (if event exists and has bindings)
                 if (message.Event != null && _bindings.TryGetValue(message.Event, out var bindings))
@@ -669,19 +710,19 @@ namespace Phoenix
                 JoinRef = message.JoinRef ?? JoinRef
             };
 
-            // Execute callbacks, checking epoch before each for non-internal events only
+            // Execute callbacks, checking the leave epoch for non-internal events only
             // Internal events (phx_*, chan_reply_*) should always be processed
             foreach (var subscription in callbacks)
             {
-                // For non-internal events, check if Leave() was called (epoch changed)
-                // This prevents user callbacks from firing after Leave()
+                // A general state change must not truncate dispatch. Only Leave/Cleanup
+                // invalidates the remaining user callbacks from this snapshot.
                 if (!isInternalEvent)
                 {
                     lock (_stateLock)
                     {
-                        if (_epoch != epochWhenWeStarted)
+                        if (_leaveEpoch != leaveEpochWhenWeStarted)
                         {
-                            return; // Leave() was called, abort remaining callbacks
+                            return;
                         }
                     }
                 }
@@ -768,9 +809,13 @@ namespace Phoenix
             lock (_stateLock)
             {
                 _bindings.Clear();
-                _pushBuffer.Clear();
                 _state = ChannelState.Closed;
-                _epoch++;
+                _leaveEpoch++;
+            }
+
+            lock (_pushBufferLock)
+            {
+                _pushBuffer.Clear();
             }
         }
     }
