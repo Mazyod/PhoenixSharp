@@ -46,8 +46,9 @@ namespace Phoenix
         private bool _isFlushingSendBuffer;
         private bool _sendBufferFlushRequested;
 
+        private readonly object _heartbeatStateLock = new object();
         private bool _closeWasClean;
-
+        private long _heartbeatGeneration;
         private IDelayedExecution? _heartbeatTimer;
         private string? _pendingHeartbeatRef;
         private long _ref;
@@ -121,7 +122,7 @@ namespace Phoenix
         public void Disconnect(Action? callback = null, ushort? code = null, string? reason = null)
         {
             // connectClock++;
-            _closeWasClean = true;
+            Volatile.Write(ref _closeWasClean, true);
             _reconnectTimer?.Reset();
             Teardown(callback, code, reason);
         }
@@ -135,7 +136,7 @@ namespace Phoenix
                 return;
             }
 
-            _closeWasClean = false;
+            Volatile.Write(ref _closeWasClean, false);
 
             var config = new WebsocketConfiguration
             {
@@ -250,7 +251,7 @@ namespace Phoenix
                 Log(LogLevel.Debug, "transport", $"Connected to {EndPointUrl()}");
             }
 
-            _closeWasClean = false;
+            Volatile.Write(ref _closeWasClean, false);
             // establishedConnections++;
             FlushSendBuffer();
             _reconnectTimer?.Reset();
@@ -269,14 +270,20 @@ namespace Phoenix
             }
         }
 
-        private void HeartbeatTimeout()
+        private void HeartbeatTimeout(long generation)
         {
-            if (_pendingHeartbeatRef == null)
+            lock (_heartbeatStateLock)
             {
-                return;
+                if (generation != _heartbeatGeneration || _pendingHeartbeatRef == null)
+                {
+                    return;
+                }
+
+                _heartbeatGeneration++;
+                _pendingHeartbeatRef = null;
+                _heartbeatTimer = null;
             }
 
-            _pendingHeartbeatRef = null;
             if (HasLogger())
             {
                 Log(LogLevel.Debug, "transport", "heartbeat timeout. Attempting to re-establish connection");
@@ -286,7 +293,7 @@ namespace Phoenix
             // that explicitly schedules reconnection. This bypasses OnConnClose's
             // code != 1000 check, which would otherwise block reconnection.
             TriggerChanError();
-            _closeWasClean = false;
+            Volatile.Write(ref _closeWasClean, false);
             Teardown(() => _reconnectTimer?.ScheduleTimeout(), 1_000, "heartbeat timeout");
         }
 
@@ -294,15 +301,102 @@ namespace Phoenix
         {
             // we don't check skipHeartbeat on conn since we always use websocket transport
             // however, we do check if heartbeatInterval is set
-            if (Opts.HeartbeatInterval == null)
+            var heartbeatInterval = Opts.HeartbeatInterval;
+            if (!heartbeatInterval.HasValue)
             {
                 return;
             }
 
-            _pendingHeartbeatRef = null;
-            _heartbeatTimer?.Cancel();
+            IDelayedExecution? previousExecution;
+            long generation;
+            lock (_heartbeatStateLock)
+            {
+                generation = ++_heartbeatGeneration;
+                _pendingHeartbeatRef = null;
+                previousExecution = _heartbeatTimer;
+                _heartbeatTimer = null;
+            }
 
-            _heartbeatTimer = Opts.DelayedExecutor.Execute(SendHeartbeat, Opts.HeartbeatInterval.Value);
+            previousExecution?.Cancel();
+            ScheduleHeartbeatSend(generation, heartbeatInterval.Value);
+        }
+
+        private void AcknowledgeHeartbeat(string? messageRef)
+        {
+            var heartbeatInterval = Opts.HeartbeatInterval;
+            if (messageRef == null || !heartbeatInterval.HasValue)
+            {
+                return;
+            }
+
+            IDelayedExecution? timeoutExecution;
+            long generation;
+            lock (_heartbeatStateLock)
+            {
+                if (messageRef != _pendingHeartbeatRef)
+                {
+                    return;
+                }
+
+                generation = ++_heartbeatGeneration;
+                _pendingHeartbeatRef = null;
+                timeoutExecution = _heartbeatTimer;
+                _heartbeatTimer = null;
+            }
+
+            timeoutExecution?.Cancel();
+            ScheduleHeartbeatSend(generation, heartbeatInterval.Value);
+        }
+
+        private void ScheduleHeartbeatSend(long generation, TimeSpan delay)
+        {
+            ScheduleHeartbeatTimer(
+                generation,
+                () => SendHeartbeat(generation),
+                delay
+            );
+        }
+
+        private void ScheduleHeartbeatTimeout(long generation, TimeSpan delay)
+        {
+            ScheduleHeartbeatTimer(
+                generation,
+                () => HeartbeatTimeout(generation),
+                delay
+            );
+        }
+
+        private void ScheduleHeartbeatTimer(long generation, Action action, TimeSpan delay)
+        {
+            var execution = Opts.DelayedExecutor.Execute(action, delay);
+            bool keepExecution;
+            lock (_heartbeatStateLock)
+            {
+                keepExecution = generation == _heartbeatGeneration;
+                if (keepExecution)
+                {
+                    _heartbeatTimer = execution;
+                }
+            }
+
+            if (!keepExecution)
+            {
+                execution.Cancel();
+            }
+        }
+
+        private void StopHeartbeat()
+        {
+            IDelayedExecution? execution;
+            lock (_heartbeatStateLock)
+            {
+                _heartbeatGeneration++;
+                _pendingHeartbeatRef = null;
+                execution = _heartbeatTimer;
+                _heartbeatTimer = null;
+            }
+
+            execution?.Cancel();
         }
 
         private void Teardown(Action? callback = null, ushort? code = null, string? reason = null)
@@ -373,15 +467,16 @@ namespace Phoenix
 
         private void OnConnClose(IWebsocket websocket, ushort code, string reason)
         {
+            StopHeartbeat();
+
             if (HasLogger())
             {
                 Log(LogLevel.Debug, "transport", $"Close {code} {reason}");
             }
 
             TriggerChanError();
-            _heartbeatTimer?.Cancel();
 
-            if (!_closeWasClean && code != 1_000)
+            if (!Volatile.Read(ref _closeWasClean) && code != 1_000)
             {
                 _reconnectTimer?.ScheduleTimeout();
             }
@@ -535,31 +630,76 @@ namespace Phoenix
             return Interlocked.Increment(ref _ref).ToString();
         }
 
-        private void SendHeartbeat()
+        private void SendHeartbeat(long generation)
         {
-            if (_disposed) return;
-            if (!Opts.HeartbeatInterval.HasValue
-                || (_pendingHeartbeatRef != null && !IsConnected()))
+            long sendGeneration;
+            lock (_heartbeatStateLock)
+            {
+                if (generation != _heartbeatGeneration)
+                {
+                    return;
+                }
+
+                _heartbeatTimer = null;
+                sendGeneration = ++_heartbeatGeneration;
+            }
+
+            var heartbeatInterval = Opts.HeartbeatInterval;
+            if (_disposed || !heartbeatInterval.HasValue || !IsConnected())
             {
                 return;
             }
 
-            _pendingHeartbeatRef = MakeRef();
+            var heartbeatRef = MakeRef();
+            lock (_heartbeatStateLock)
+            {
+                if (sendGeneration != _heartbeatGeneration)
+                {
+                    return;
+                }
+
+                _pendingHeartbeatRef = heartbeatRef;
+            }
+
+            if (!IsConnected())
+            {
+                lock (_heartbeatStateLock)
+                {
+                    if (sendGeneration == _heartbeatGeneration
+                        && _pendingHeartbeatRef == heartbeatRef)
+                    {
+                        _heartbeatGeneration++;
+                        _pendingHeartbeatRef = null;
+                    }
+                }
+
+                return;
+            }
+
             Push(new Message(
                 "phoenix",
                 "heartbeat",
-                @ref: _pendingHeartbeatRef
+                @ref: heartbeatRef
             ));
 
-            _heartbeatTimer = Opts.DelayedExecutor.Execute(
-                HeartbeatTimeout,
-                Opts.HeartbeatInterval.Value
-            );
+            long timeoutGeneration;
+            lock (_heartbeatStateLock)
+            {
+                if (sendGeneration != _heartbeatGeneration
+                    || _pendingHeartbeatRef != heartbeatRef)
+                {
+                    return;
+                }
+
+                timeoutGeneration = ++_heartbeatGeneration;
+            }
+
+            ScheduleHeartbeatTimeout(timeoutGeneration, heartbeatInterval.Value);
         }
 
         internal void AbnormalClose(string reason)
         {
-            _closeWasClean = false;
+            Volatile.Write(ref _closeWasClean, false);
             if (IsConnected())
             {
                 Conn!.Close(1_000, reason);
@@ -650,12 +790,7 @@ namespace Phoenix
                 return;
             }
 
-            if (message.Ref != null && message.Ref == _pendingHeartbeatRef && Opts.HeartbeatInterval.HasValue)
-            {
-                _heartbeatTimer?.Cancel();
-                _pendingHeartbeatRef = null;
-                _heartbeatTimer = Opts.DelayedExecutor.Execute(SendHeartbeat, Opts.HeartbeatInterval.Value);
-            }
+            AcknowledgeHeartbeat(message.Ref);
 
             if (HasLogger())
             {

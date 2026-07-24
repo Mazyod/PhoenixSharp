@@ -74,7 +74,7 @@ namespace PhoenixTests
         }
 
         [Test]
-        public void HeartbeatResponseClearsPendingHeartbeatRefTest()
+        public void HeartbeatResponseClearsPendingRefAndSchedulesExactlyOnceTest()
         {
             var mockExecutor = new TrackingDelayedExecutor();
             var factory = new MockWebsocketFactoryWithCallbackTracking();
@@ -96,21 +96,29 @@ namespace PhoenixTests
             Assert.IsNotNull(heartbeatExecution);
             heartbeatExecution!.Execute();
 
-            // Get the ref from the sent message
-            var sentMessage = conn.CallSend[0];
-            // Parse ref from message: [null,"1","phoenix","heartbeat",{}]
-            // The ref should be "1" since it's the first message
-            var msgRef = "1";
-
-            // Capture initial pending count
-            var pendingBeforeResponse = mockExecutor.PendingCount;
+            var timeoutExecution = mockExecutor.Executions.Last();
+            var executionCountBeforeResponse = mockExecutor.Executions.Count;
 
             // Simulate heartbeat response from server
-            conn.SimulateMessage(BuildHeartbeatReply(msgRef));
+            conn.SimulateMessage(BuildHeartbeatReply("1"));
 
-            // After response, a new heartbeat should be scheduled (not a timeout handler)
-            // The timeout should have been cancelled and a new heartbeat scheduled
-            Assert.GreaterOrEqual(mockExecutor.PendingCount, 1);
+            Assert.That(timeoutExecution.IsCancelled, Is.True);
+            Assert.That(
+                mockExecutor.Executions,
+                Has.Count.EqualTo(executionCountBeforeResponse + 1)
+            );
+            var nextHeartbeatExecution = mockExecutor.Executions.Last();
+            Assert.That(nextHeartbeatExecution.IsCancelled, Is.False);
+
+            // A duplicate acknowledgement no longer matches the cleared pending ref.
+            conn.SimulateMessage(BuildHeartbeatReply("1"));
+            Assert.That(
+                mockExecutor.Executions,
+                Has.Count.EqualTo(executionCountBeforeResponse + 1)
+            );
+
+            nextHeartbeatExecution.Execute();
+            Assert.That(conn.CallSend, Has.Count.EqualTo(2));
         }
 
         [Test]
@@ -151,9 +159,17 @@ namespace PhoenixTests
 
             // The timeout should trigger an abnormal close
             Assert.AreEqual(1, conn.CallCloseCount, "Connection should be closed on heartbeat timeout");
+            Assert.That(conn.LastCloseCode, Is.EqualTo(1_000));
+            Assert.That(conn.LastCloseReason, Is.EqualTo("heartbeat timeout"));
 
             // Reconnect should be scheduled after heartbeat timeout
             Assert.IsTrue(reconnectCalled, "Reconnect should be scheduled after heartbeat timeout");
+            Assert.That(
+                mockExecutor.Executions.Count(
+                    execution => execution.Delay == TimeSpan.FromMilliseconds(100)
+                ),
+                Is.EqualTo(1)
+            );
         }
 
         [Test]
@@ -270,7 +286,7 @@ namespace PhoenixTests
         }
 
         [Test]
-        public void HeartbeatNotSentWhenNotConnectedTest()
+        public void StaleHeartbeatTimerAfterDisconnectDoesNotBufferMessageTest()
         {
             var mockExecutor = new TrackingDelayedExecutor();
             var factory = new MockWebsocketFactoryWithCallbackTracking();
@@ -291,26 +307,65 @@ namespace PhoenixTests
                 .FirstOrDefault(e => e.Delay == TimeSpan.FromSeconds(30) && !e.IsCancelled);
             Assert.IsNotNull(heartbeatExecution);
 
-            // Simulate connection close
-            conn.SimulateClose(1006, "Lost");
+            conn.SimulateClose(1_000, "Normal closure");
+            Assert.That(heartbeatExecution!.IsCancelled, Is.True);
 
-            // Clear sent messages
-            conn.CallSend.Clear();
+            // Invoke the captured action directly to simulate cancellation losing the race.
+            heartbeatExecution.Action!();
 
-            // Try to trigger heartbeat - it should check connection state
-            // The SendHeartbeat method checks if (_pendingHeartbeatRef != null && !IsConnected())
-            // Since there's no pending ref yet, it would try to send but push to buffer
-            // Let's verify the heartbeat is not sent directly
+            Assert.That(conn.CallSend, Is.Empty);
+            Assert.That(socket.SendBuffer, Is.Empty);
+            Assert.That(mockExecutor.Executions, Has.Count.EqualTo(1));
+        }
 
-            // Actually, let's test that heartbeat timer was cancelled on close
-            var pendingHeartbeats = mockExecutor.Executions
-                .Where(e => e.Delay == TimeSpan.FromSeconds(30) && !e.IsCancelled)
-                .ToList();
+        [Test]
+        public void StaleHeartbeatTimerAfterReconnectResetIsNoOpTest()
+        {
+            var mockExecutor = new TrackingDelayedExecutor();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var options = new Socket.Options(new JsonMessageSerializer())
+            {
+                DelayedExecutor = mockExecutor,
+                HeartbeatInterval = TimeSpan.FromSeconds(30),
+                ReconnectAfter = _ => TimeSpan.FromMilliseconds(100)
+            };
 
-            // After close, heartbeat timers should be cancelled
-            // The OnConnClose method calls _heartbeatTimer?.Cancel()
-            // However, the scheduled executions in our mock are separate instances
-            // The key test is that new heartbeats aren't scheduled after close
+            var socket = new Socket("ws://localhost:1234", null, factory, options);
+            socket.Connect();
+
+            var firstConnection = factory.LastCreatedWebsocket;
+            Assert.That(firstConnection, Is.Not.Null);
+            var staleHeartbeatExecution = mockExecutor.Executions
+                .Single(execution => execution.Delay == TimeSpan.FromSeconds(30));
+
+            firstConnection!.SimulateClose(1_006, "Connection lost");
+            var reconnectExecution = mockExecutor.Executions
+                .Single(execution =>
+                    execution.Delay == TimeSpan.FromMilliseconds(100)
+                    && !execution.IsCancelled
+                );
+            reconnectExecution.Execute();
+
+            var secondConnection = factory.LastCreatedWebsocket;
+            Assert.That(secondConnection, Is.Not.Null);
+            Assert.That(secondConnection, Is.Not.SameAs(firstConnection));
+            var currentHeartbeatExecution = mockExecutor.Executions
+                .Last(execution =>
+                    execution.Delay == TimeSpan.FromSeconds(30)
+                    && !execution.IsCancelled
+                );
+            var executionCountAfterReset = mockExecutor.Executions.Count;
+
+            // Invoke the old action even though reconnect/reset cancelled its execution.
+            staleHeartbeatExecution.Action!();
+
+            Assert.That(secondConnection!.CallSend, Is.Empty);
+            Assert.That(socket.SendBuffer, Is.Empty);
+            Assert.That(mockExecutor.Executions, Has.Count.EqualTo(executionCountAfterReset));
+            Assert.That(currentHeartbeatExecution.IsCancelled, Is.False);
+
+            currentHeartbeatExecution.Execute();
+            Assert.That(secondConnection.CallSend, Has.Count.EqualTo(1));
         }
 
         [Test]
