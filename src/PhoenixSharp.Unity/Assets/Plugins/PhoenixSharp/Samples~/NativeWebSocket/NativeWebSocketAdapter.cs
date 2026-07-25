@@ -36,7 +36,7 @@ namespace Phoenix {
 
             var websocket = new NativeWebSocket.WebSocket(config.uri.ToString());
 
-            var adapter = new NativeWebSocketAdapter(websocket);
+            var adapter = new NativeWebSocketAdapter(websocket, config);
 
             websocket.OnOpen += () => config.onOpenCallback(adapter);
             websocket.OnClose += (code) => config.onCloseCallback(adapter, (ushort)code, code.ToString());
@@ -50,6 +50,7 @@ namespace Phoenix {
     public sealed class NativeWebSocketAdapter : IWebsocket {
 
         private readonly NativeWebSocket.WebSocket _ws;
+        private readonly WebsocketConfiguration _config;
 
         public WebsocketState State {
             get {
@@ -64,6 +65,14 @@ namespace Phoenix {
 
         public NativeWebSocketAdapter(NativeWebSocket.WebSocket ws) {
             _ws = ws;
+            _config = default;
+        }
+
+        public NativeWebSocketAdapter(
+            NativeWebSocket.WebSocket ws,
+            WebsocketConfiguration config
+        ) : this(ws) {
+            _config = config;
         }
 
         /// <summary>
@@ -84,14 +93,56 @@ namespace Phoenix {
             #endif
         }
 
-        public async void Connect() => await _ws.Connect();
-        public async void Send(string message) => await _ws.SendText(message);
+        public async void Connect() {
+            try {
+                await _ws.Connect();
+            } catch (Exception exception) {
+                ReportError("connect", exception);
+            }
+        }
+
+        public async void Send(string message) {
+            try {
+                await _ws.SendText(message);
+            } catch (Exception exception) {
+                ReportError("send", exception);
+            }
+        }
+
         public async void Close(ushort? code = null, string message = null) {
             // NativeWebSocket's non-WebGL Close() does not accept parameters —
             // it always performs a normal (1000) close. The WebGL JS interop
             // variant does accept a code, but we use the parameterless version
             // for cross-platform consistency.
-            await _ws.Close();
+            try {
+                await _ws.Close();
+            } catch (Exception exception) {
+                // Socket teardown polls the transport and force-completes even
+                // when NativeWebSocket cannot finish its close handshake.
+                // Reporting this through onErrorCallback while the adapter is
+                // still current would incorrectly error every channel during
+                // an otherwise clean disconnect.
+                UnityEngine.Debug.LogException(exception);
+            }
+        }
+
+        private void ReportError(string operation, Exception exception) {
+            if (_config.onErrorCallback == null) {
+                UnityEngine.Debug.LogException(exception);
+                return;
+            }
+
+            try {
+                _config.onErrorCallback(
+                    this,
+                    $"NativeWebSocket {operation} failed: {exception.Message}"
+                );
+            } catch (Exception callbackException) {
+                // Keep async-void failures contained even if a non-Phoenix
+                // consumer supplies a throwing configuration callback.
+                UnityEngine.Debug.LogException(exception);
+                UnityEngine.Debug.LogException(callbackException);
+            }
         }
     }
 }
