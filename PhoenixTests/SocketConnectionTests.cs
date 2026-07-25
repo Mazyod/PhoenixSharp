@@ -1888,7 +1888,7 @@ namespace PhoenixTests
 
             public IWebsocket Build(WebsocketConfiguration config)
             {
-                LastUri = config.uri;
+                LastUri = config.Uri;
                 return new MockWebsocketAdapter(config);
             }
         }
@@ -1901,7 +1901,7 @@ namespace PhoenixTests
 
             public IWebsocket Build(WebsocketConfiguration config)
             {
-                BuildUris.Add(config.uri);
+                BuildUris.Add(config.Uri);
                 var connection = new MockWebsocketAdapterWithCallbacks(config);
                 Connections.Add(connection);
                 return connection;
@@ -1984,7 +1984,7 @@ namespace PhoenixTests
             public void Open()
             {
                 MockState = WebsocketState.Open;
-                _config.onOpenCallback(this);
+                _config.OnOpenCallback(this);
             }
 
             public void Send(string message)
@@ -2009,7 +2009,7 @@ namespace PhoenixTests
             public void Close(ushort? code = null, string? reason = null)
             {
                 MockState = WebsocketState.Closed;
-                _config.onCloseCallback(this, code ?? 0, reason ?? "");
+                _config.OnCloseCallback(this, code ?? 0, reason ?? "");
             }
         }
     }

@@ -325,7 +325,7 @@ namespace PhoenixTests
             {
                 CloseCalled = true;
                 State = WebsocketState.Closed;
-                _config.onCloseCallback(this, code ?? 1_000, message ?? "closed");
+                _config.OnCloseCallback(this, code ?? 1_000, message ?? "closed");
             }
         }
     }

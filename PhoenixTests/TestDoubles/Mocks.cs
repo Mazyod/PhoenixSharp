@@ -168,7 +168,7 @@ namespace PhoenixTests.TestDoubles
         {
             CallConnectCount += 1;
             MockState = WebsocketState.Open;
-            _config.onOpenCallback?.Invoke(this);
+            _config.OnOpenCallback(this);
         }
 
         public void Send(string message)
@@ -183,23 +183,23 @@ namespace PhoenixTests.TestDoubles
             LastCloseCode = code;
             LastCloseReason = message;
             MockState = WebsocketState.Closed;
-            _config.onCloseCallback?.Invoke(this, code ?? 0, message ?? "");
+            _config.OnCloseCallback(this, code ?? 0, message ?? "");
         }
 
         public void SimulateError(string error)
         {
-            _config.onErrorCallback?.Invoke(this, error);
+            _config.OnErrorCallback(this, error);
         }
 
         public void SimulateClose(ushort code, string reason)
         {
             MockState = WebsocketState.Closed;
-            _config.onCloseCallback?.Invoke(this, code, reason);
+            _config.OnCloseCallback(this, code, reason);
         }
 
         public void SimulateMessage(string message)
         {
-            _config.onMessageCallback?.Invoke(this, message);
+            _config.OnMessageCallback(this, message);
         }
     }
 
@@ -295,7 +295,7 @@ namespace PhoenixTests.TestDoubles
 
         public void Connect()
         {
-            _config.onErrorCallback?.Invoke(this, _errorMessage);
+            _config.OnErrorCallback(this, _errorMessage);
         }
 
         public void Send(string message) { }
@@ -350,7 +350,7 @@ namespace PhoenixTests.TestDoubles
         public void Close(ushort? code = null, string? message = null)
         {
             _state = WebsocketState.Closed;
-            _config.onCloseCallback?.Invoke(this, code ?? 0, message ?? "");
+            _config.OnCloseCallback(this, code ?? 0, message ?? "");
         }
     }
 

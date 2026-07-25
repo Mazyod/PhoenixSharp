@@ -6,40 +6,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Restore dependencies
-dotnet restore
+dotnet restore Phoenix.sln
 
 # Build the solution
-dotnet build
+dotnet build Phoenix.sln --no-restore
 
-# Run all tests
-dotnet test
+# Run the offline suite, including allocation-guarded performance tests
+dotnet test PhoenixTests/PhoenixTests.csproj --no-build --filter "Category!=Integration"
+
+# Exclude performance tests when iterating
+dotnet test PhoenixTests/PhoenixTests.csproj --no-build --filter "Category!=Integration&Category!=Performance"
 
 # Run a specific test
-dotnet test --filter "FullyQualifiedName~IntegrationTests.GeneralIntegrationTest"
+dotnet test PhoenixTests/PhoenixTests.csproj --no-build --filter "FullyQualifiedName~SocketConnectionTests"
 
-# Run tests with verbose output
-dotnet test --verbosity normal
+# Integration tests require network access to phoenix-sharp.level3.io
+dotnet test PhoenixTests/PhoenixTests.csproj --no-build --filter "Category=Integration"
 
 # Check formatting (CI uses this)
-dotnet format --verify-no-changes
+dotnet format Phoenix.sln --no-restore --verify-no-changes
 
 # Auto-fix formatting issues
-dotnet format
+dotnet format Phoenix.sln --no-restore
 ```
 
 ## Project Structure
 
-- **Phoenix/** - Main library (netstandard2.0, C# 9.0, nullable enabled)
-- **PhoenixTests/** - NUnit tests (net9.0)
-- **Reference/** - Reference implementations for Unity (BestHTTP websocket, coroutine-based delayed executor)
-- **src/PhoenixSharp.Unity/** - Unity package project (published to OpenUPM as `io.level3.phoenixsharp`)
+- **src/PhoenixSharp.Unity/Assets/Plugins/PhoenixSharp/Runtime/** - Source of truth for the library
+- **Phoenix/Phoenix.csproj** - netstandard2.0/C# 9 project that links `Runtime/**/*.cs` for NuGet
+- **Runtime/PhoenixSharp.asmdef** - Engine-free Unity core assembly; **Runtime/Unity/Phoenix.UnityLogger.asmdef** is the nested engine-enabled logger assembly
+- **src/PhoenixSharp.Unity/Assets/Plugins/PhoenixSharp/Samples~/** - Unity package samples; these are not compiled by CI and require manual review
+- **PhoenixUnityCompile/** - CI fixtures that compile the engine-free core and nested Unity assembly boundaries
+- **PhoenixTests/** - NUnit net9.0 tests; `Category=Performance` is optional locally, while `Category=Integration` requires network access
+- **server/** - The Phoenix (Elixir) integration-test server, merged into this monorepo; has its own CLAUDE.md
 
 ## Publishing
 
 The library is distributed via two channels: **NuGet** (`PhoenixSharp`) and **OpenUPM** (`io.level3.phoenixsharp`). Both are published from a single trigger.
 
 **To release:**
-1. Create a GitHub release with a version tag (e.g., `v1.2.3`)
+1. Create a GitHub release with a version tag (for 2.0, `v2.0.0`)
 2. The `publish.yml` workflow:
    - Updates the Unity `package.json` version at `src/PhoenixSharp.Unity/Assets/Plugins/PhoenixSharp/package.json`
    - Updates the README manifest example
@@ -47,7 +53,7 @@ The library is distributed via two channels: **NuGet** (`PhoenixSharp`) and **Op
    - Builds and pushes the NuGet package via trusted publishing (OIDC)
 3. OpenUPM automatically detects the new git tag and publishes the Unity package from the `package.json`
 
-**Version management:** Version is set via git tag at release time. The `<Version>` in `Phoenix.csproj` is a fallback for local builds.
+**Version management:** Version is set via git tag at release time. The `<Version>` in `Phoenix.csproj` is the local-build fallback and should match the release line.
 
 ## Code Style
 
@@ -91,7 +97,8 @@ The library decouples from specific implementations via interfaces:
 
 ### Key Patterns
 
-- Parameters are passed at construction time (socket address, channel params), not at connect/join time
+- Static parameters are snapshotted at construction; `Options.ParamsProvider` supplies refreshable parameters per connection attempt
+- Channel parameters are passed at construction, not at join time
 - Event callbacks use C# delegates instead of JS-style callback references
 - Reply handling uses fluent `.Receive(ReplyStatus.Ok, callback)` pattern
 - Automatic reconnect/rejoin via configurable `ReconnectAfter` / `RejoinAfter` functions in `Socket.Options`

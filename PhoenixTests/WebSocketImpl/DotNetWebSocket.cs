@@ -43,15 +43,15 @@ namespace PhoenixTests.WebSocketImpl
         {
             try
             {
-                var task = _ws.ConnectAsync(_config.uri, CancellationToken.None);
+                var task = _ws.ConnectAsync(_config.Uri, CancellationToken.None);
                 task.Wait();
                 _receiveTask = Receive();
 
-                _config.onOpenCallback(this);
+                _config.OnOpenCallback(this);
             }
             catch (Exception ex)
             {
-                _config.onErrorCallback(this, ex.Message);
+                _config.OnErrorCallback(this, ex.Message);
             }
         }
 
@@ -73,7 +73,7 @@ namespace PhoenixTests.WebSocketImpl
             }
             catch (Exception e)
             {
-                _config.onErrorCallback(this, e.Message);
+                _config.OnErrorCallback(this, e.Message);
             }
         }
 
@@ -95,12 +95,12 @@ namespace PhoenixTests.WebSocketImpl
             }
             catch (Exception ex)
             {
-                _config.onErrorCallback(this, ex.Message);
+                _config.OnErrorCallback(this, ex.Message);
             }
             finally
             {
                 _ws.Dispose();
-                _config.onCloseCallback(this, code ?? 0, message);
+                _config.OnCloseCallback(this, code ?? 0, message ?? "");
             }
         }
 
@@ -118,7 +118,7 @@ namespace PhoenixTests.WebSocketImpl
             }
             else
             {
-                _config.onMessageCallback(this, Encoding.Default.GetString(buffer));
+                _config.OnMessageCallback(this, Encoding.Default.GetString(buffer));
                 _receiveTask = Receive();
             }
 
@@ -140,7 +140,7 @@ namespace PhoenixTests.WebSocketImpl
                 return true;
             }
 
-            _config.onErrorCallback(this, "Could not send message because websocket is closed.");
+            _config.OnErrorCallback(this, "Could not send message because websocket is closed.");
             return false;
         }
     }

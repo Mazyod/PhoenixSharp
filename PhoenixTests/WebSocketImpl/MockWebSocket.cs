@@ -28,7 +28,7 @@ namespace PhoenixTests.WebSocketImpl
             CallConnectCount += 1;
 
             MockState = WebsocketState.Open;
-            _config.onOpenCallback?.Invoke(this);
+            _config.OnOpenCallback(this);
         }
 
         public void Send(string message)
@@ -40,7 +40,7 @@ namespace PhoenixTests.WebSocketImpl
         {
             CallCloseCount += 1;
 
-            _config.onCloseCallback?.Invoke(this, code ?? 0, message);
+            _config.OnCloseCallback(this, code ?? 0, message ?? "");
         }
     }
 

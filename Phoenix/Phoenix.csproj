@@ -26,7 +26,7 @@
 
         <!-- NuGet Package Metadata -->
         <PackageId>PhoenixSharp</PackageId>
-        <Version>1.0.0</Version>
+        <Version>2.0.0</Version>
         <Authors>Maz Jaleel</Authors>
         <Description>A C# Phoenix Channels client for real-time communication with Phoenix (Elixir) servers. Unity compatible. Supports automatic reconnection, presence tracking, and pluggable websocket/serializer implementations.</Description>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>

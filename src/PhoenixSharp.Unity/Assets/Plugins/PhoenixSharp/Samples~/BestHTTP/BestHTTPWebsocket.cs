@@ -9,15 +9,15 @@ namespace Phoenix {
 
         public IWebsocket Build(WebsocketConfiguration config) {
 
-            var websocket = new WebSocket(config.uri);
+            var websocket = new WebSocket(config.Uri);
             websocket.InternalRequest.ConnectTimeout = TimeSpan.FromSeconds(8);
 
             var adapter = new BestHTTPWebsocketAdapter(websocket);
 
-            websocket.OnOpen += (_) => config.onOpenCallback(adapter);
-            websocket.OnClosed += (_, code, message) => config.onCloseCallback(adapter, code, message);
-            websocket.OnError += (_, message) => config.onErrorCallback(adapter, message);
-            websocket.OnMessage += (_, msg) => config.onMessageCallback(adapter, msg);
+            websocket.OnOpen += (_) => config.OnOpenCallback(adapter);
+            websocket.OnClosed += (_, code, message) => config.OnCloseCallback(adapter, code, message);
+            websocket.OnError += (_, message) => config.OnErrorCallback(adapter, message);
+            websocket.OnMessage += (_, msg) => config.OnMessageCallback(adapter, msg);
 
             return adapter;
         }

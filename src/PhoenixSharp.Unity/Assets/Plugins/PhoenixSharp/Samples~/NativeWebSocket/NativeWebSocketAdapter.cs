@@ -1,9 +1,15 @@
+#nullable enable
+
 // NativeWebSocket Adapter for PhoenixSharp
 //
-// IMPORTANT: NativeWebSocket queues received messages internally on ALL platforms
-// (not just WebGL). You MUST call Tick() every frame from your MonoBehaviour's
-// Update() method, otherwise OnMessage callbacks will never fire and channels
-// will timeout and rejoin in an infinite loop.
+// REQUIRES NativeWebSocket 2.x (Close(code, reason) does not exist in 1.x).
+//
+// IMPORTANT: You MUST call Tick() every frame, even on 2.x. NativeWebSocket 2.x
+// auto-dispatches callbacks only through the SynchronizationContext captured
+// when the WebSocket is CONSTRUCTED - and PhoenixSharp constructs a fresh
+// transport on every automatic reconnect from a thread-pool timer, where no
+// Unity context exists. Without Tick(), the socket works until the first
+// reconnect and then silently stops receiving (infinite timeout/rejoin loop).
 //
 // Example usage:
 //
@@ -16,7 +22,8 @@
 //   }
 //
 //   void Update() {
-//       // Required: pump NativeWebSocket's internal message queue every frame.
+//       // Required: pumps messages whenever the transport lacks a Unity
+//       // SynchronizationContext (always after an automatic reconnect).
 //       if (_socket?.Conn is NativeWebSocketAdapter adapter) {
 //           adapter.Tick();
 //       }
@@ -34,14 +41,14 @@ namespace Phoenix {
 
         public IWebsocket Build(WebsocketConfiguration config) {
 
-            var websocket = new NativeWebSocket.WebSocket(config.uri.ToString());
+            var websocket = new NativeWebSocket.WebSocket(config.Uri.ToString());
 
             var adapter = new NativeWebSocketAdapter(websocket, config);
 
-            websocket.OnOpen += () => config.onOpenCallback(adapter);
-            websocket.OnClose += (code) => config.onCloseCallback(adapter, (ushort)code, code.ToString());
-            websocket.OnError += (error) => config.onErrorCallback(adapter, error);
-            websocket.OnMessage += (data) => config.onMessageCallback(adapter, Encoding.UTF8.GetString(data));
+            websocket.OnOpen += () => config.OnOpenCallback(adapter);
+            websocket.OnClose += (code) => config.OnCloseCallback(adapter, (ushort)code, code.ToString());
+            websocket.OnError += (error) => config.OnErrorCallback(adapter, error);
+            websocket.OnMessage += (data) => config.OnMessageCallback(adapter, Encoding.UTF8.GetString(data));
 
             return adapter;
         }
@@ -50,7 +57,7 @@ namespace Phoenix {
     public sealed class NativeWebSocketAdapter : IWebsocket {
 
         private readonly NativeWebSocket.WebSocket _ws;
-        private readonly WebsocketConfiguration _config;
+        private readonly WebsocketConfiguration? _config;
 
         public WebsocketState State {
             get {
@@ -65,7 +72,6 @@ namespace Phoenix {
 
         public NativeWebSocketAdapter(NativeWebSocket.WebSocket ws) {
             _ws = ws;
-            _config = default;
         }
 
         public NativeWebSocketAdapter(
@@ -78,14 +84,12 @@ namespace Phoenix {
         /// <summary>
         /// Dispatches queued messages from NativeWebSocket's internal buffer.
         ///
-        /// NativeWebSocket receives data on a background thread but does NOT invoke
-        /// OnMessage directly. Instead, it queues messages and waits for you to call
-        /// DispatchMessageQueue(). Without this call, received messages are silently
-        /// buffered, OnMessage never fires, and PhoenixSharp channels will timeout
-        /// waiting for server replies — causing an infinite rejoin loop.
-        ///
-        /// Call this every frame from your MonoBehaviour's Update() method.
-        /// Performance cost is negligible (lock + list copy, typically 0-2 items).
+        /// Call this every frame from a MonoBehaviour's Update() method.
+        /// NativeWebSocket 2.x auto-dispatches only via the
+        /// SynchronizationContext captured at construction; transports built
+        /// during automatic reconnects are constructed on thread-pool timers
+        /// (no Unity context), so without this pump the socket silently stops
+        /// receiving after the first reconnect.
         /// </summary>
         public void Tick() {
             #if !UNITY_WEBGL || UNITY_EDITOR
@@ -109,17 +113,16 @@ namespace Phoenix {
             }
         }
 
-        public async void Close(ushort? code = null, string message = null) {
-            // NativeWebSocket's non-WebGL Close() does not accept parameters —
-            // it always performs a normal (1000) close. The WebGL JS interop
-            // variant does accept a code, but we use the parameterless version
-            // for cross-platform consistency.
+        public async void Close(ushort? code = null, string? reason = null) {
             try {
-                await _ws.Close();
+                var closeCode = code.HasValue
+                    ? (NativeWebSocket.WebSocketCloseCode)code.Value
+                    : NativeWebSocket.WebSocketCloseCode.Normal;
+                await _ws.Close(closeCode, reason);
             } catch (Exception exception) {
                 // Socket teardown polls the transport and force-completes even
                 // when NativeWebSocket cannot finish its close handshake.
-                // Reporting this through onErrorCallback while the adapter is
+                // Reporting this through OnErrorCallback while the adapter is
                 // still current would incorrectly error every channel during
                 // an otherwise clean disconnect.
                 UnityEngine.Debug.LogException(exception);
@@ -127,13 +130,13 @@ namespace Phoenix {
         }
 
         private void ReportError(string operation, Exception exception) {
-            if (_config.onErrorCallback == null) {
+            if (_config == null) {
                 UnityEngine.Debug.LogException(exception);
                 return;
             }
 
             try {
-                _config.onErrorCallback(
+                _config.OnErrorCallback(
                     this,
                     $"NativeWebSocket {operation} failed: {exception.Message}"
                 );

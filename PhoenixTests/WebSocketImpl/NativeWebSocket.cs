@@ -30,18 +30,18 @@ namespace PhoenixTests.WebSocketImpl
             _ws = ws;
             _config = config;
 
-            _ws.OnOpen += () => config.onOpenCallback(this);
+            _ws.OnOpen += () => config.OnOpenCallback(this);
             _ws.OnClose += (code) =>
             {
                 // When Close() is called by the caller, it handles the callback
                 // directly to pass the caller-provided code (matching DotNet adapter).
                 if (!_closeHandled)
                 {
-                    config.onCloseCallback(this, (ushort)code, code.ToString());
+                    config.OnCloseCallback(this, (ushort)code, code.ToString());
                 }
             };
-            _ws.OnError += (error) => config.onErrorCallback(this, error);
-            _ws.OnMessage += (data) => config.onMessageCallback(this, Encoding.UTF8.GetString(data));
+            _ws.OnError += (error) => config.OnErrorCallback(this, error);
+            _ws.OnMessage += (data) => config.OnMessageCallback(this, Encoding.UTF8.GetString(data));
         }
 
         public void Connect()
@@ -71,7 +71,7 @@ namespace PhoenixTests.WebSocketImpl
             // event is queued internally. Give the background thread time to enqueue it.
             Thread.Sleep(50);
 
-            // Dispatch the queued OnOpen event (fires onOpenCallback synchronously)
+            // Dispatch the queued OnOpen event (fires OnOpenCallback synchronously)
             _ws.DispatchMessageQueue();
 
             // Start a background loop to dispatch future message/close events.
@@ -103,7 +103,7 @@ namespace PhoenixTests.WebSocketImpl
 
         public void Close(ushort? code = null, string? message = null)
         {
-            // Suppress the OnClose event handler — we call onCloseCallback directly
+            // Suppress the OnClose event handler — we call OnCloseCallback directly
             // to pass the caller-provided code, matching DotNet adapter behavior.
             _closeHandled = true;
             try
@@ -121,7 +121,7 @@ namespace PhoenixTests.WebSocketImpl
             {
                 _dispatchCts?.Cancel();
                 _dispatchCts?.Dispose();
-                _config.onCloseCallback(this, code ?? 0, message);
+                _config.OnCloseCallback(this, code ?? 0, message ?? "");
             }
         }
     }
@@ -130,7 +130,7 @@ namespace PhoenixTests.WebSocketImpl
     {
         public IWebsocket Build(WebsocketConfiguration config)
         {
-            var websocket = new NativeWebSocket.WebSocket(config.uri.ToString());
+            var websocket = new NativeWebSocket.WebSocket(config.Uri.ToString());
             return new NativeWebSocketAdapter(websocket, config);
         }
     }

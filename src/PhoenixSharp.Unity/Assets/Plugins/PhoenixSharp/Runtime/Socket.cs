@@ -386,38 +386,37 @@ namespace Phoenix
             {
                 var endPointUrl = EndPointUrl(SnapshotConnectionParams());
                 var callbacksEnabled = 0;
-                var config = new WebsocketConfiguration
-                {
-                    uri = endPointUrl,
-                    onOpenCallback = websocket =>
+                var config = new WebsocketConfiguration(
+                    endPointUrl,
+                    websocket =>
                     {
                         if (Volatile.Read(ref callbacksEnabled) != 0)
                         {
                             OnConnOpen(websocket, endPointUrl);
                         }
                     },
-                    onCloseCallback = (websocket, code, reason) =>
+                    (websocket, code, reason) =>
                     {
                         if (Volatile.Read(ref callbacksEnabled) != 0)
                         {
                             OnConnClose(websocket, code, reason);
                         }
                     },
-                    onErrorCallback = (websocket, error) =>
+                    (websocket, error) =>
                     {
                         if (Volatile.Read(ref callbacksEnabled) != 0)
                         {
                             OnConnError(websocket, error);
                         }
                     },
-                    onMessageCallback = (websocket, message) =>
+                    (websocket, message) =>
                     {
                         if (Volatile.Read(ref callbacksEnabled) != 0)
                         {
                             OnConnMessage(websocket, message);
                         }
                     }
-                };
+                );
 
                 connection = _websocketFactory.Build(config);
                 var existingConnection = Interlocked.CompareExchange(

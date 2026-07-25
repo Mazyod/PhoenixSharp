@@ -900,7 +900,7 @@ namespace PhoenixTests
             public void Open()
             {
                 State = WebsocketState.Open;
-                _config.onOpenCallback(this);
+                _config.OnOpenCallback(this);
             }
 
             public void Send(string data)
@@ -920,7 +920,7 @@ namespace PhoenixTests
             public void CompleteClose(ushort code = 1_000, string reason = "closed by test")
             {
                 State = WebsocketState.Closed;
-                _config.onCloseCallback(this, code, reason);
+                _config.OnCloseCallback(this, code, reason);
             }
 
             public void MarkClosedWithoutCallback()
@@ -988,7 +988,7 @@ namespace PhoenixTests
             {
                 CloseCalled = true;
                 State = WebsocketState.Closed;
-                _config.onCloseCallback(
+                _config.OnCloseCallback(
                     this,
                     code ?? 1_000,
                     reason ?? "closed by losing build compensation"

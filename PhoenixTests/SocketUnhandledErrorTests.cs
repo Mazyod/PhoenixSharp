@@ -633,7 +633,7 @@ namespace PhoenixTests
             public void Connect()
             {
                 _state = WebsocketState.Open;
-                _config.onOpenCallback(this);
+                _config.OnOpenCallback(this);
             }
 
             public void Send(string message)

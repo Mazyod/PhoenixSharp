@@ -50,22 +50,22 @@ namespace PhoenixTests.WebSocketImpl
 
         private void OnWebsocketOpen(object? sender, EventArgs args)
         {
-            _config.onOpenCallback(this);
+            _config.OnOpenCallback(this);
         }
 
         private void OnWebsocketClose(object? sender, CloseEventArgs args)
         {
-            _config.onCloseCallback(this, args.Code, args.Reason);
+            _config.OnCloseCallback(this, args.Code, args.Reason);
         }
 
         private void OnWebsocketError(object? sender, ErrorEventArgs args)
         {
-            _config.onErrorCallback(this, args.Message);
+            _config.OnErrorCallback(this, args.Message);
         }
 
         private void OnWebsocketMessage(object? sender, MessageEventArgs args)
         {
-            _config.onMessageCallback(this, args.Data);
+            _config.OnMessageCallback(this, args.Data);
         }
     }
 
@@ -73,7 +73,7 @@ namespace PhoenixTests.WebSocketImpl
     {
         public IWebsocket Build(WebsocketConfiguration config)
         {
-            var socket = new WebSocket(config.uri.AbsoluteUri);
+            var socket = new WebSocket(config.Uri.AbsoluteUri);
             return new WebsocketSharpAdapter(socket, config);
         }
     }
