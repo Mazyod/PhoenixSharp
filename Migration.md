@@ -1,16 +1,417 @@
 
 # Migration Guide
 
-## Reply message identity (July 2026)
+## 2.0 Hardening Effort (July 2026)
 
-Reply values and dispatch order are unchanged: `Channel.OnMessage` still sees
-the wire `phx_reply` followed by its `chan_reply_{ref}` remap. To avoid
-redundant record clones, PhoenixSharp may now pass the same immutable `Message`
-instance from an `OnMessage` call to that event's reply subscriber when the
-hook leaves the payload and join ref unchanged.
+Version 2.0 tightens the library's failure, threading, presence, and transport
+contracts. Start with the compile-time changes below, then review the runtime
+changes even if your application builds without edits.
 
-Code should not rely on reference inequality between those messages. Compare
+### What breaks at compile time
+
+#### `ILogger` implementations
+
+`ILogger` used to have one write method:
+
+```csharp
+// Before 2.0
+public sealed class AppLogger : ILogger
+{
+    public void Log(LogLevel level, string source, string message)
+    {
+        Console.Error.WriteLine($"[{level}] [{source}] {message}");
+    }
+}
+```
+
+In 2.0, the sink owns filtering and receives the original exception separately:
+
+```csharp
+// 2.0
+public sealed class AppLogger : ILogger
+{
+    public bool IsEnabled(LogLevel level, string source)
+    {
+        return level >= LogLevel.Info;
+    }
+
+    public void Log(
+        LogLevel level,
+        string source,
+        string message,
+        Exception? exception
+    )
+    {
+        try
+        {
+            Console.Error.WriteLine($"[{level}] [{source}] {message}");
+            if (exception != null)
+            {
+                Console.Error.WriteLine(exception);
+            }
+        }
+        catch
+        {
+            // ILogger implementations must not throw.
+        }
+    }
+}
+```
+
+`IsEnabled` should be fast; neither method may throw. PhoenixSharp calls it
+before formatting suppressed entries. If either method throws, that sink
+instance is disabled for that socket and PhoenixSharp attempts one fail-safe
+`Console.Error` diagnostic naming the sink. Use the `LogSource` constants
+instead of matching source strings yourself. In particular, the old
+`"Channel"` source is now `LogSource.Channel`, whose value is `"channel"`;
+the other constants are `Transport`, `Push`, `Socket`, and `Receive`.
+
+#### `Socket.OnError`
+
+The error callback used to receive only a message:
+
+```csharp
+// Before 2.0
+socket.OnError += message => Console.Error.WriteLine(message);
+```
+
+It now receives a structured `PhoenixError`:
+
+```csharp
+// 2.0
+socket.OnError += error =>
+{
+    Console.Error.WriteLine($"{error.Kind}: {error.Message}");
+    if (error.Exception != null)
+    {
+        Console.Error.WriteLine(error.Exception);
+    }
+};
+```
+
+`PhoenixError` exposes `Message`, `Kind`, and an optional `Exception`.
+`PhoenixErrorKind` has the concrete values `Transport`, `Send`, `Heartbeat`,
+`Serialization`, and `Dispatch`. `Dispatch` on this callback means a
+delivery-blocking channel `OnMessage` hook failed; contained failures after
+delivery use `OnUnhandledError` instead. A heartbeat timeout now emits a
+`Heartbeat` error before teardown. Calling `Disconnect()` from that error
+handler is honored and prevents the timeout path from scheduling a reconnect.
+
+#### Custom WebSocket adapters
+
+`WebsocketConfiguration` used to be a mutable struct with lower-case fields:
+
+```csharp
+// Before 2.0
+public IWebsocket Build(WebsocketConfiguration config)
+{
+    var transport = new MyWebsocket(config.uri);
+    transport.Opened += () => config.onOpenCallback(transport);
+    transport.Closed += (code, reason) =>
+        config.onCloseCallback(transport, code, reason);
+    transport.Failed += message =>
+        config.onErrorCallback(transport, message);
+    transport.MessageReceived += message =>
+        config.onMessageCallback(transport, message);
+    return transport;
+}
+```
+
+It is now a sealed immutable class with Pascal-case properties:
+
+```csharp
+// 2.0
+public IWebsocket Build(WebsocketConfiguration config)
+{
+    var transport = new MyWebsocket(config.Uri);
+    transport.Opened += () => config.OnOpenCallback(transport);
+    transport.Closed += (code, reason) =>
+        config.OnCloseCallback(transport, code, reason);
+    transport.Failed += message =>
+        config.OnErrorCallback(transport, message);
+    transport.MessageReceived += message =>
+        config.OnMessageCallback(transport, message);
+    return transport;
+}
+```
+
+Code that constructs configurations directly must replace object initializers
+with `new WebsocketConfiguration(uri, onOpen, onClose, onError, onMessage)`.
+`IWebsocketFactory.Build` must not invoke a configuration callback before
+`Connect()` is called on the returned transport. Callbacks may run
+synchronously from `Connect()` or later from any thread, `State` must be safe
+to read from any thread, and adapters should preserve close codes and reasons
+when their underlying transport exposes them.
+
+#### `Presence.State` writers
+
+`State` used to be a public field, so callers could replace it or take it by
+reference:
+
+```csharp
+// Before 2.0
+presence.State = restoredState;
+ref var writableState = ref presence.State;
+writableState[userId] = replacement;
+```
+
+It is now a get-only snapshot property. Keep application-owned state separately
+if it must be edited:
+
+```csharp
+// 2.0
+var snapshot = presence.State;
+var applicationState =
+    new Dictionary<string, PresencePayload>(snapshot);
+applicationState[userId] = replacement;
+```
+
+There is no supported setter for the presence instance. Treat the returned
+dictionary as immutable even though its concrete type is `Dictionary`;
+mutating it is not a supported write-back path and must not be expected to feed
+into later presence state. Presence updates publish a fresh dictionary rather
+than updating a previously published snapshot. Reflection that expected a
+field must also be changed to read the property.
+
+### What behaves differently at runtime
+
+#### Send and buffering policy
+
+Previously, transport and wire-serialization failures could escape the socket
+send path, disturb channel/rejoin state, strand or grow the send buffer, or
+prevent later buffered entries from being attempted. In 2.0, transport
+`Send` and wire-serialization exceptions no longer escape synchronously from
+that path. Normal pushes use a contained at-least-once retry policy: a buffered
+entry is dropped after its fifth failed transport send and failures surface
+through `OnError` as `Send`; a serialization-poisoned entry surfaces as
+`Serialization`, is dropped immediately, and does not block the remaining
+buffer. Heartbeats are sent once or dropped and are never buffered. Send
+failures do not error channels, reset rejoin backoff, or fault connection
+waiters. Subscribe to `OnError` and make non-idempotent server operations
+deduplicatable: if a transport partially transmits a frame and then throws,
+PhoenixSharp cannot detect that delivery and a retry can execute the operation
+twice.
+
+#### Connection parameters
+
+Previously, connection parameters were appended without per-key/value
+escaping, the caller's dictionary remained live and was mutated to add
+`vsn`, and later dictionary edits could affect reconnects. In 2.0, the static
+dictionary is snapshotted when `Socket` is constructed, each key and value is
+URL-escaped exactly once when a connection URI is built, a null value becomes
+an empty string, and `Socket.Options.Vsn` always replaces a caller-supplied
+`vsn`. Pass raw parameter text now; callers that keep pre-escaping values will
+double-encode percent sequences. Use `ParamsProvider`, described below, when a
+token or other parameter must be refreshed for each connection attempt.
+
+#### Reply statuses and payloads
+
+Previously, reading `Reply.ReplyStatus` for an unfamiliar wire status could
+throw and leave reply waiters or hooks unfinished. In 2.0, the getter never
+throws: unknown values such as `"partial"` map to `ReplyStatus.Error`, while
+the original atom remains in `Reply.Status`; `Receive(ReplyStatus.Error, ...)`
+and the async push/join failure paths therefore run for custom statuses.
+Error responses are not required to have the same shape as successful
+responses. Check `Status` or `ReplyStatus` before unboxing `Response`, and use
+the raw `Status` when your protocol gives a custom error atom its own meaning.
+
+#### Channel join, leave, and dispatch
+
+Previously, late join lifecycle replies could move a leaving or closed channel,
+`LeaveAsync` could wait forever on an error reply, and an unrelated state
+change during event dispatch could prevent later subscribers from running. In
+2.0, join `ok`, `error`, and `timeout` lifecycle hooks refuse
+`Leaving`/`Closed` channels; leave closes locally on any reply, including
+error, custom-error, or timeout, so `LeaveAsync` completes; and only
+`Leave()` or cleanup aborts the remaining user callbacks in a captured
+dispatch. One inconsistency remains: if `Leave()` wins locally and the server
+later accepts the already-sent join, `JoinAsync` can still return a successful
+`JoinResult` while the channel remains `Closed`. Treat channel state as
+authoritative after a leave, and do not use a successful late join task to
+resume work on that channel instance.
+
+#### Presence callbacks and snapshots
+
+Previously, the third `OnJoin` argument was the merged presence, the remaining
+presence passed to `OnLeave` lost its `Payload`, and callbacks could observe
+the old `State`. In 2.0, `OnJoin` receives the unmerged presence from the
+incoming join diff (matching phoenix.js), the remaining-presence argument to
+`OnLeave` retains its payload, and the new snapshot is fully published before
+`OnJoin`, `OnLeave`, or `OnSync` runs. Audit callbacks that treated the third
+join argument as the user's full accumulated presence; read `presence.State`
+inside the callback when the merged value is needed, and continue to treat
+every published snapshot as read-only.
+
+#### `Presence.SyncDiff`
+
+Previously, diff synchronization was a private, mutating implementation
+detail. `Presence.SyncDiff` is now public and returns a fresh top-level
+dictionary without mutating the supplied state, so assign or otherwise use its
+return value. The copy is intentionally shallow: when a diff introduces a new
+key, that key's `PresencePayload` is stored by reference. Do not mutate diff
+payload objects or their metadata after calling `SyncDiff`, or those changes
+can also appear in the returned state.
+
+#### Threading and `SynchronizationContext`
+
+Previously, the default `TaskDelayedExecutor` could capture the caller's
+`SynchronizationContext`, which sometimes moved reconnect, timeout, or rejoin
+work back to a Unity/UI thread; cancellation only marked the timer and retained
+its closure until the delay expired. In 2.0, its callbacks always run on the
+thread pool, pending cancellation releases the timer immediately, and
+PhoenixSharp protects its internal state without promising a thread for user
+code. Socket delegates, channel subscriptions, reply hooks, presence events,
+and log sinks may all run on any thread. Marshal explicitly before touching
+Unity or UI objects, and wrap callback bodies because an exception escaping
+thread-pool user code bypasses UI-context unhandled-exception hooks. Public
+delegate fields still use normal `+=`/`-=` mutation; add or remove
+`OnJoin`, `OnLeave`, `OnSync`, and socket handlers before connecting or from
+the socket callback thread.
+
+#### Async socket and channel lifecycle
+
+Previously, `ConnectAsync` and `DisconnectAsync` had state and overlap paths
+that could leave their tasks pending forever, and leave error replies had the
+same problem. In 2.0, already-open, never-connected, closing, failed, disposed,
+and connect/disconnect overlap paths settle with success, cancellation, or a
+typed fault, with disconnect winning an overlap. There is one intentional
+unbounded case: when `ReconnectAfter` is configured, `ConnectAsync` remains
+pending while the retry chain is active and can wait indefinitely if no
+attempt ever succeeds. Pass a cancellation token with an application-level
+deadline, handle the exception types described below, and expect operations
+that reject disposed socket use, such as `ConnectAsync` and `Channel`, to
+surface `ObjectDisposedException`.
+
+#### Wait helpers and cancellation cleanup
+
+Previously, `WaitForUserAsync` could miss a join between its state check and
+subscription, and calling `WaitForInitialSyncAsync` after the first sync waited
+for another sync. In 2.0, the user lookup and subscription are atomic, and
+`WaitForInitialSyncAsync` completes immediately once that `Presence` instance
+has ever synchronized, including after a later disconnect. Use `OnSync` when
+you need fresh state after every reconnect rather than initial-readiness
+semantics. Async join, leave, push, receive, event, and presence wrappers also
+dispose their cancellation registrations after completion; consumers should
+still supply cancellation or timeout bounds where the underlying operation is
+allowed to wait.
+
+#### Inbound Phoenix V2 frames
+
+Previously, the JSON converter assumed an array and indexed its fields
+directly, so short frames failed incidentally and extra elements were ignored.
+In 2.0, an inbound V2 frame must be a JSON array with exactly five elements;
+both truncated and extended frames are rejected with a descriptive
+deserialization error. This is deliberately stricter than phoenix.js's
+tolerant array destructuring. Ensure custom servers and serializers emit
+`[join_ref, ref, topic, event, payload]` exactly; malformed inbound frames are
+dropped and reported as contained `Serialization` errors through
+`OnUnhandledError`.
+
+#### Reply `Message` identity
+
+Previously, code could happen to observe separate record instances as a
+`phx_reply` moved through dispatch. Reply values and dispatch order are
+unchanged in 2.0: `Channel.OnMessage` still sees the wire `phx_reply` followed
+by its `chan_reply_{ref}` remap. To avoid redundant record clones, PhoenixSharp
+may now pass the same immutable `Message` instance from an `OnMessage` call to
+that event's reply subscriber when the hook leaves the payload and join ref
+unchanged. Do not rely on reference inequality between those messages; compare
 their record values or fields instead.
+
+### What's new
+
+#### Typed exceptions
+
+2.0 adds `PhoenixException` and its
+`PhoenixConnectionException` subclass. Terminal `ConnectAsync` failures now
+fault with `PhoenixConnectionException` and preserve the original exception as
+`InnerException`; a transport close failure during `DisconnectAsync` faults
+with `PhoenixException`. API misuse that previously threw a bare `Exception`,
+such as joining twice or pushing before joining, now throws
+`InvalidOperationException`. A `Channel.OnMessage` override that returns null
+for a non-null payload is also an `InvalidOperationException`. Catch these
+types instead of matching exception message text, and keep
+`OperationCanceledException` and `ObjectDisposedException` handling separate
+from transport failure handling.
+
+#### Refreshable connection parameters
+
+Set `Socket.Options.ParamsProvider` before constructing the socket when
+credentials must be refreshed:
+
+```csharp
+var options = new Socket.Options(new JsonMessageSerializer())
+{
+    ParamsProvider = () => new Dictionary<string, string>
+    {
+        ["token"] = tokenProvider.GetAccessToken()
+    }
+};
+
+var socket = new Socket(endpoint, null, factory, options);
+```
+
+The provider is invoked immediately before each genuine transport build,
+including reconnects, and its returned dictionary is snapshotted immediately.
+It may be called concurrently, so it and the token source must be thread-safe.
+Return raw values; the socket performs escaping. A null result is treated as an
+empty caller-parameter dictionary, after which `vsn` is still added, and
+`Options.Vsn` always wins. Passing a non-null static parameter dictionary to
+the `Socket` constructor while also configuring `ParamsProvider` throws
+`ArgumentException`.
+
+#### Shipped loggers
+
+PhoenixSharp now includes `ConsoleLogger` for .NET and `UnityLogger` in its own
+auto-referenced `Phoenix.UnityLogger` Unity assembly. Neither is enabled
+automatically; assign one to `Socket.Options.Logger`. Both default to
+`LogLevel.Info` and accept a minimum level in their constructor:
+
+```csharp
+var options = new Socket.Options(new JsonMessageSerializer())
+{
+    Logger = new ConsoleLogger(LogLevel.Info)
+    // In Unity, use: Logger = new UnityLogger(LogLevel.Info)
+};
+```
+
+#### `Socket.OnUnhandledError`
+
+`OnUnhandledError` exposes failures PhoenixSharp deliberately contains so
+processing can continue, including per-subscriber callback exceptions,
+dropped inbound messages, void `Connect()` failures, and teardown/disposal
+close failures. This differs from `OnError`, which carries operational errors
+and delivery-blocking channel hook failures:
+
+```csharp
+socket.OnUnhandledError += error =>
+    Console.Error.WriteLine(
+        $"Contained {error.Kind}: {error.Message}"
+    );
+```
+
+If no handler and no usable logger is configured, the first unobserved
+contained failure for that socket attempts a one-line warning on
+`Console.Error`; active reconnect attempts suppress the redundant connect
+warning. Exceptions thrown by an `OnUnhandledError` handler are themselves
+contained and are not recursively reported to the handler.
+
+#### Diagnostics and package contents
+
+`JsonBox.ToString()` now returns compact diagnostic JSON bounded to
+`JsonBox.MaximumToStringLength` (4,096 UTF-16 characters). Longer output ends
+with `...[truncated]` and is not guaranteed to remain valid JSON, so use
+`Unbox<T>()` rather than `ToString()` for data processing. The NuGet build now
+includes generated XML documentation and produces a SourceLink-enabled
+`.snupkg` with portable symbols. The Unity logger assembly is isolated from the
+engine-free core assembly.
+
+#### Removed interim and internal names
+
+The final error taxonomy has no `PhoenixErrorKind.Unknown`; code that used an
+intermediate 2.0 build must switch to one of the five concrete kinds listed
+above. The dead internal `Socket.AbnormalClose` helper was also removed and
+requires no migration for supported consumer code.
 
 ## Json Refactoring Effort (May 2023)
 
