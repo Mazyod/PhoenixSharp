@@ -1,7 +1,6 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DiffList = System.Collections.Generic.List<Phoenix.Presence.Diff>;
@@ -276,9 +275,12 @@ namespace Phoenix
             var joins = new State();
             var leaves = new State();
 
-            foreach (var key in currentState.Keys.Where(key => !newState.ContainsKey(key)))
+            foreach (var key in currentState.Keys)
             {
-                leaves[key] = currentState[key];
+                if (!newState.ContainsKey(key))
+                {
+                    leaves[key] = currentState[key];
+                }
             }
 
             foreach (var key in newState.Keys)
@@ -287,10 +289,26 @@ namespace Phoenix
                 var found = currentState.TryGetValue(key, out var currentPresence);
                 if (found && currentPresence != null)
                 {
-                    var newRefs = newPresence.Metas.Select(m => m.PhxRef).ToList();
-                    var curRefs = currentPresence.Metas.Select(m => m.PhxRef).ToList();
-                    var joinedMetas = newPresence.Metas.Where(m => curRefs.IndexOf(m.PhxRef) < 0).ToList();
-                    var leftMetas = currentPresence.Metas.Where(m => !newRefs.Contains(m.PhxRef)).ToList();
+                    var newRefs = MetaRefs(newPresence.Metas);
+                    var currentRefs = MetaRefs(currentPresence.Metas);
+                    var joinedMetas = new List<PresenceMeta>();
+                    foreach (var meta in newPresence.Metas)
+                    {
+                        if (!currentRefs.Contains(meta.PhxRef))
+                        {
+                            joinedMetas.Add(meta);
+                        }
+                    }
+
+                    var leftMetas = new List<PresenceMeta>();
+                    foreach (var meta in currentPresence.Metas)
+                    {
+                        if (!newRefs.Contains(meta.PhxRef))
+                        {
+                            leftMetas.Add(meta);
+                        }
+                    }
+
                     if (joinedMetas.Count > 0)
                     {
                         joins[key] = new PresencePayload { Metas = joinedMetas };
@@ -333,14 +351,24 @@ namespace Phoenix
                 var syncedPresence = newPresence;
                 if (found && currentPresence != null)
                 {
+                    var joinedRefs = MetaRefs(newPresence.Metas);
+                    var syncedMetas = new List<PresenceMeta>(
+                        currentPresence.Metas.Count + newPresence.Metas.Count
+                    );
+                    foreach (var meta in currentPresence.Metas)
+                    {
+                        if (!joinedRefs.Contains(meta.PhxRef))
+                        {
+                            syncedMetas.Add(meta);
+                        }
+                    }
+
+                    syncedMetas.AddRange(newPresence.Metas);
                     syncedPresence = new PresencePayload
                     {
-                        Metas = new List<PresenceMeta>(newPresence.Metas),
+                        Metas = syncedMetas,
                         Payload = newPresence.Payload
                     };
-                    var joinedRefs = syncedPresence.Metas.Select(m => m.PhxRef).ToList();
-                    var curMetas = currentPresence.Metas.Where(m => joinedRefs.IndexOf(m.PhxRef) < 0).ToList();
-                    syncedPresence.Metas.InsertRange(0, curMetas);
                 }
 
                 syncedState[key] = syncedPresence;
@@ -356,9 +384,15 @@ namespace Phoenix
                     continue;
                 }
 
-                var refsToRemove = leftPresence.Metas.Select(m => m.PhxRef).ToList();
-                var filteredMetas = currentPresence.Metas.Where(
-                    m => refsToRemove.IndexOf(m.PhxRef) < 0).ToList();
+                var refsToRemove = MetaRefs(leftPresence.Metas);
+                var filteredMetas = new List<PresenceMeta>();
+                foreach (var meta in currentPresence.Metas)
+                {
+                    if (!refsToRemove.Contains(meta.PhxRef))
+                    {
+                        filteredMetas.Add(meta);
+                    }
+                }
 
                 var newPresence = new PresencePayload
                 {
@@ -377,6 +411,17 @@ namespace Phoenix
             }
 
             return syncedState;
+        }
+
+        private static HashSet<string> MetaRefs(List<PresenceMeta> metas)
+        {
+            var refs = new HashSet<string>();
+            foreach (var meta in metas)
+            {
+                refs.Add(meta.PhxRef);
+            }
+
+            return refs;
         }
 
         /// <summary>

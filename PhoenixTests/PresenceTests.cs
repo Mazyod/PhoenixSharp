@@ -74,6 +74,16 @@ namespace PhoenixTests
             )!;
         }
 
+        private static PresencePayload PresencePayloadWithRefs(params string[] refs)
+        {
+            return new PresencePayload
+            {
+                Metas = refs
+                    .Select(phxRef => new PresenceMeta { PhxRef = phxRef })
+                    .ToList()
+            };
+        }
+
         private static (Presence presence, Channel channel) CreateSyncedPresence()
         {
             var options = new Socket.Options(new JsonMessageSerializer())
@@ -134,6 +144,171 @@ namespace PhoenixTests
 
             state = Presence.SyncState(state, newState);
             CollectionAssert.AreEqual(newState, state);
+        }
+
+        [Test]
+        public void SyncStatePreservesDuplicateMetaMembershipAndOrderTest()
+        {
+            var currentPresence = PresencePayloadWithRefs(
+                "retained-twice",
+                "retained-twice",
+                "incoming-twice",
+                "left",
+                "left"
+            );
+            var incomingPresence = PresencePayloadWithRefs(
+                "retained-twice",
+                "incoming-twice",
+                "incoming-twice",
+                "joined",
+                "joined"
+            );
+            var currentState = new Dictionary<string, PresencePayload>
+            {
+                {"u1", currentPresence}
+            };
+            var newState = new Dictionary<string, PresencePayload>
+            {
+                {"u1", incomingPresence}
+            };
+            var callbackOrder = new List<string>();
+            PresencePayload? joinedPresence = null;
+            PresencePayload? leftPresence = null;
+
+            var result = Presence.SyncState(
+                currentState,
+                newState,
+                (_, _, presence) =>
+                {
+                    callbackOrder.Add("join");
+                    joinedPresence = presence;
+                },
+                (_, _, presence) =>
+                {
+                    callbackOrder.Add("leave");
+                    leftPresence = presence;
+                }
+            );
+
+            Assert.That(callbackOrder, Is.EqualTo(new[] { "join", "leave" }));
+            Assert.That(
+                joinedPresence!.Metas.Select(meta => meta.PhxRef),
+                Is.EqualTo(new[] { "joined", "joined" })
+            );
+            Assert.That(
+                leftPresence!.Metas.Select(meta => meta.PhxRef),
+                Is.EqualTo(new[] { "left", "left" })
+            );
+            Assert.That(
+                result["u1"].Metas.Select(meta => meta.PhxRef),
+                Is.EqualTo(new[]
+                {
+                    "retained-twice",
+                    "retained-twice",
+                    "incoming-twice",
+                    "joined",
+                    "joined"
+                })
+            );
+            Assert.That(
+                currentPresence.Metas.Select(meta => meta.PhxRef),
+                Is.EqualTo(new[]
+                {
+                    "retained-twice",
+                    "retained-twice",
+                    "incoming-twice",
+                    "left",
+                    "left"
+                })
+            );
+            Assert.That(
+                incomingPresence.Metas.Select(meta => meta.PhxRef),
+                Is.EqualTo(new[]
+                {
+                    "retained-twice",
+                    "incoming-twice",
+                    "incoming-twice",
+                    "joined",
+                    "joined"
+                })
+            );
+        }
+
+        [Test]
+        public void SyncDiffPreservesDuplicateMetaMembershipAndOrderTest()
+        {
+            var currentPresence = PresencePayloadWithRefs(
+                "current",
+                "current",
+                "shared"
+            );
+            var joinedPresence = PresencePayloadWithRefs(
+                "shared",
+                "shared",
+                "joined",
+                "joined"
+            );
+            var leftPresence = PresencePayloadWithRefs(
+                "current"
+            );
+            var currentState = new Dictionary<string, PresencePayload>
+            {
+                {"u1", currentPresence}
+            };
+            var diff = new Presence.Diff
+            {
+                Joins = new Dictionary<string, PresencePayload>
+                {
+                    {"u1", joinedPresence}
+                },
+                Leaves = new Dictionary<string, PresencePayload>
+                {
+                    {"u1", leftPresence}
+                }
+            };
+            var callbackOrder = new List<string>();
+            PresencePayload? callbackJoinCurrent = null;
+            PresencePayload? callbackJoinPresence = null;
+            PresencePayload? callbackLeaveCurrent = null;
+            PresencePayload? callbackLeavePresence = null;
+
+            var result = Presence.SyncDiff(
+                currentState,
+                diff,
+                (_, current, joined) =>
+                {
+                    callbackOrder.Add("join");
+                    callbackJoinCurrent = current;
+                    callbackJoinPresence = joined;
+                },
+                (_, current, left) =>
+                {
+                    callbackOrder.Add("leave");
+                    callbackLeaveCurrent = current;
+                    callbackLeavePresence = left;
+                }
+            );
+
+            Assert.That(callbackOrder, Is.EqualTo(new[] { "join", "leave" }));
+            Assert.That(callbackJoinCurrent, Is.SameAs(currentPresence));
+            Assert.That(callbackJoinPresence, Is.SameAs(joinedPresence));
+            Assert.That(callbackLeavePresence, Is.SameAs(leftPresence));
+            Assert.That(
+                callbackLeaveCurrent!.Metas.Select(meta => meta.PhxRef),
+                Is.EqualTo(new[] { "shared", "shared", "joined", "joined" })
+            );
+            Assert.That(
+                result["u1"].Metas.Select(meta => meta.PhxRef),
+                Is.EqualTo(new[] { "shared", "shared", "joined", "joined" })
+            );
+            Assert.That(
+                currentPresence.Metas.Select(meta => meta.PhxRef),
+                Is.EqualTo(new[] { "current", "current", "shared" })
+            );
+            Assert.That(
+                joinedPresence.Metas.Select(meta => meta.PhxRef),
+                Is.EqualTo(new[] { "shared", "shared", "joined", "joined" })
+            );
         }
 
         [Test]
