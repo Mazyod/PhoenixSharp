@@ -100,7 +100,7 @@ namespace PhoenixTests.WebSocketImpl
             finally
             {
                 _ws.Dispose();
-                _config.OnCloseCallback(this, code ?? 0, message ?? "");
+                _config.OnCloseCallback(this, code ?? 0, message);
             }
         }
 

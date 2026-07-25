@@ -29,7 +29,7 @@ namespace Phoenix
         /// <summary>
         /// Gets the callback to invoke when the transport closes.
         /// </summary>
-        public Action<IWebsocket, ushort, string> OnCloseCallback { get; }
+        public Action<IWebsocket, ushort, string?> OnCloseCallback { get; }
 
         /// <summary>
         /// Gets the callback to invoke when the transport reports an error.
@@ -47,7 +47,7 @@ namespace Phoenix
         public WebsocketConfiguration(
             Uri uri,
             Action<IWebsocket> onOpenCallback,
-            Action<IWebsocket, ushort, string> onCloseCallback,
+            Action<IWebsocket, ushort, string?> onCloseCallback,
             Action<IWebsocket, string> onErrorCallback,
             Action<IWebsocket, string> onMessageCallback
         )

@@ -160,6 +160,12 @@ that directly assigned a handler with `=`, invoked a callback externally, or
 read its delegate value now fails to compile; retain your own delegate when
 you need to remove or invoke it.
 
+`OnClosedDelegate`'s reason parameter is now annotated `string?`: the close
+reason is genuinely absent (`null`) for unexpected disconnections, matching
+1.x runtime behavior. Handlers written with an explicit non-nullable `string`
+parameter type get a nullable-reference warning; transports must not coalesce
+an absent reason into an empty string.
+
 #### `ChannelSubscription` construction and mutation
 
 `ChannelSubscription` instances are created only by `Channel.On(...)` in 2.0.

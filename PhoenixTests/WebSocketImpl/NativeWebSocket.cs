@@ -121,7 +121,7 @@ namespace PhoenixTests.WebSocketImpl
             {
                 _dispatchCts?.Cancel();
                 _dispatchCts?.Dispose();
-                _config.OnCloseCallback(this, code ?? 0, message ?? "");
+                _config.OnCloseCallback(this, code ?? 0, message);
             }
         }
     }

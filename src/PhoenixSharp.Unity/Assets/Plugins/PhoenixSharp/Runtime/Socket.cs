@@ -11,7 +11,7 @@ namespace Phoenix
     {
         private const int MaxSendAttempts = 5;
         private volatile bool _disposed;
-        public delegate void OnClosedDelegate(ushort code, string message);
+        public delegate void OnClosedDelegate(ushort code, string? message);
 
         /// <summary>
         /// Handles operational protocol, transport, and dispatch-blocking
@@ -621,7 +621,7 @@ namespace Phoenix
                 );
             }
 
-            void OnCloseHandler(ushort code, string reason)
+            void OnCloseHandler(ushort code, string? reason)
             {
                 if (ShouldReconnectAfterClose(code))
                 {
@@ -1408,7 +1408,7 @@ namespace Phoenix
             );
         }
 
-        private void OnConnClose(IWebsocket websocket, ushort code, string reason)
+        private void OnConnClose(IWebsocket websocket, ushort code, string? reason)
         {
             if (!IsCurrentConnection(websocket))
             {

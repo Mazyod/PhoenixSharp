@@ -40,7 +40,7 @@ namespace PhoenixTests.WebSocketImpl
         {
             CallCloseCount += 1;
 
-            _config.OnCloseCallback(this, code ?? 0, message ?? "");
+            _config.OnCloseCallback(this, code ?? 0, message);
         }
     }
 

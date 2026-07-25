@@ -183,7 +183,7 @@ namespace PhoenixTests.TestDoubles
             LastCloseCode = code;
             LastCloseReason = message;
             MockState = WebsocketState.Closed;
-            _config.OnCloseCallback(this, code ?? 0, message ?? "");
+            _config.OnCloseCallback(this, code ?? 0, message);
         }
 
         public void SimulateError(string error)
@@ -350,7 +350,7 @@ namespace PhoenixTests.TestDoubles
         public void Close(ushort? code = null, string? message = null)
         {
             _state = WebsocketState.Closed;
-            _config.OnCloseCallback(this, code ?? 0, message ?? "");
+            _config.OnCloseCallback(this, code ?? 0, message);
         }
     }
 

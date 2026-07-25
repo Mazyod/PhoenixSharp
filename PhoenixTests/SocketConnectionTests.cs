@@ -2009,8 +2009,35 @@ namespace PhoenixTests
             public void Close(ushort? code = null, string? reason = null)
             {
                 MockState = WebsocketState.Closed;
-                _config.OnCloseCallback(this, code ?? 0, reason ?? "");
+                _config.OnCloseCallback(this, code ?? 0, reason);
             }
+        }
+
+        [Test]
+        public void OnClosePreservesNullReasonForUnexpectedDisconnectsTest()
+        {
+            // The 1.x integration suite pins that the close reason is NULL for
+            // unexpected disconnections. Adapters must not coalesce an absent
+            // reason into string.Empty on its way through the transport contract.
+            using var socket = CreateSocket();
+            socket.Connect();
+            ((MockWebsocketAdapter)socket.Conn!).MockState = WebsocketState.Open;
+
+            var onCloseFired = false;
+            string? capturedReason = "sentinel";
+            socket.OnClose += (_, reason) =>
+            {
+                onCloseFired = true;
+                capturedReason = reason;
+            };
+
+            socket.Conn!.Close();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(onCloseFired, Is.True);
+                Assert.That(capturedReason, Is.Null);
+            });
         }
     }
 }
