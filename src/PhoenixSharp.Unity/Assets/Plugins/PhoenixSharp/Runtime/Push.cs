@@ -362,9 +362,29 @@ namespace Phoenix
                 return Task.FromResult(receivedResponse.Value);
             }
 
-            cancellationToken.Register(() => tcs.TrySetCanceled());
+            var cancellationRegistration = cancellationToken.Register(
+                () => tcs.TrySetCanceled()
+            );
 
-            return tcs.Task;
+            return AwaitAndDisposeCancellationRegistrationAsync(
+                tcs.Task,
+                cancellationRegistration
+            );
+        }
+
+        private static async Task<T> AwaitAndDisposeCancellationRegistrationAsync<T>(
+            Task<T> task,
+            CancellationTokenRegistration cancellationRegistration
+        )
+        {
+            try
+            {
+                return await task.ConfigureAwait(false);
+            }
+            finally
+            {
+                cancellationRegistration.Dispose();
+            }
         }
 
         //private bool sent = false;

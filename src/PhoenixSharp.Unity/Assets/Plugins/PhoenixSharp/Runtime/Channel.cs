@@ -514,9 +514,14 @@ namespace Phoenix
             push.Receive(ReplyStatus.Error, reply => tcs.TrySetResult(JoinResult.Failure(reply)));
             push.Receive(ReplyStatus.Timeout, _ => tcs.TrySetResult(JoinResult.Timeout()));
 
-            cancellationToken.Register(() => tcs.TrySetCanceled());
+            var cancellationRegistration = cancellationToken.Register(
+                () => tcs.TrySetCanceled()
+            );
 
-            return tcs.Task;
+            return AwaitAndDisposeCancellationRegistrationAsync(
+                tcs.Task,
+                cancellationRegistration
+            );
         }
 
         /// <summary>
@@ -532,9 +537,14 @@ namespace Phoenix
             push.Receive(ReplyStatus.Error, reply => tcs.TrySetResult(PushResult.Failure(reply, ReplyStatus.Error)));
             push.Receive(ReplyStatus.Timeout, _ => tcs.TrySetResult(PushResult.Timeout()));
 
-            cancellationToken.Register(() => tcs.TrySetCanceled());
+            var cancellationRegistration = cancellationToken.Register(
+                () => tcs.TrySetCanceled()
+            );
 
-            return tcs.Task;
+            return AwaitAndDisposeCancellationRegistrationAsync(
+                tcs.Task,
+                cancellationRegistration
+            );
         }
 
         /// <summary>
@@ -561,9 +571,14 @@ namespace Phoenix
             push.Receive(ReplyStatus.Error, reply => tcs.TrySetResult(PushResult<T>.Failure(reply, ReplyStatus.Error)));
             push.Receive(ReplyStatus.Timeout, _ => tcs.TrySetResult(PushResult<T>.Timeout()));
 
-            cancellationToken.Register(() => tcs.TrySetCanceled());
+            var cancellationRegistration = cancellationToken.Register(
+                () => tcs.TrySetCanceled()
+            );
 
-            return tcs.Task;
+            return AwaitAndDisposeCancellationRegistrationAsync(
+                tcs.Task,
+                cancellationRegistration
+            );
         }
 
         /// <summary>
@@ -579,9 +594,29 @@ namespace Phoenix
             push.Receive(ReplyStatus.Error, _ => tcs.TrySetResult(true));
             push.Receive(ReplyStatus.Timeout, _ => tcs.TrySetResult(true)); // Leave completes even on timeout
 
-            cancellationToken.Register(() => tcs.TrySetCanceled());
+            var cancellationRegistration = cancellationToken.Register(
+                () => tcs.TrySetCanceled()
+            );
 
-            return tcs.Task;
+            return AwaitAndDisposeCancellationRegistrationAsync(
+                tcs.Task,
+                cancellationRegistration
+            );
+        }
+
+        private static async Task<T> AwaitAndDisposeCancellationRegistrationAsync<T>(
+            Task<T> task,
+            CancellationTokenRegistration cancellationRegistration
+        )
+        {
+            try
+            {
+                return await task.ConfigureAwait(false);
+            }
+            finally
+            {
+                cancellationRegistration.Dispose();
+            }
         }
 
         /// <summary>
