@@ -672,7 +672,7 @@ namespace PhoenixTests
             Assert.IsNotNull(heartbeatTimeout);
             heartbeatTimeout!.Execute();
 
-            // AbnormalClose should have closed the connection
+            // Heartbeat timeout should have closed the connection
             Assert.AreEqual(1, conn1.CallCloseCount, "Connection should be closed on heartbeat timeout");
 
             // Reconnect should have been scheduled

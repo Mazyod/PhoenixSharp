@@ -284,7 +284,7 @@ namespace PhoenixTests
         #region Connection Loss Handling Tests
 
         [Test]
-        public void OnCloseTriggersReconnectLogicForAbnormalCloseTest()
+        public void TransportCloseWithNonNormalCodeSchedulesReconnectTest()
         {
             var mockExecutor = new TrackingDelayedExecutor();
             var factory = new MockWebsocketFactoryWithCallbackTracking();
@@ -308,17 +308,24 @@ namespace PhoenixTests
 
             var executionsBeforeClose = mockExecutor.Executions.Count;
 
-            // Simulate abnormal close (code != 1000)
-            conn.SimulateClose(1006, "Abnormal closure");
+            // Simulate transport loss (code != 1000)
+            conn.SimulateClose(1006, "Connection lost");
 
             // Verify reconnect was scheduled
             var executionsAfterClose = mockExecutor.Executions.Count;
-            Assert.Greater(executionsAfterClose, executionsBeforeClose,
-                "Reconnect should be scheduled after abnormal close");
+            Assert.Multiple(() =>
+            {
+                Assert.IsTrue(reconnectScheduled);
+                Assert.Greater(
+                    executionsAfterClose,
+                    executionsBeforeClose,
+                    "Reconnect should be scheduled after transport loss"
+                );
+            });
         }
 
         [Test]
-        public void OnCloseDoesNotTriggerReconnectForNormalCloseTest()
+        public void DisconnectMarksCloseCleanAndDoesNotScheduleReconnectTest()
         {
             var mockExecutor = new TrackingDelayedExecutor();
             var factory = new MockWebsocketFactoryWithCallbackTracking();
@@ -350,7 +357,7 @@ namespace PhoenixTests
         }
 
         [Test]
-        public void AbnormalCloseVsNormalCloseHandlingTest()
+        public void TransportCloseWithNormalCodeDoesNotScheduleReconnectTest()
         {
             var mockExecutor = new TrackingDelayedExecutor();
             var factory = new MockWebsocketFactoryWithCallbackTracking();
@@ -366,28 +373,21 @@ namespace PhoenixTests
                 }
             };
 
-            // Test abnormal close (code != 1000)
-            var socket1 = new Socket("ws://localhost:1234", null, factory, options);
-            socket1.Connect();
-            var conn1 = factory.LastCreatedWebsocket;
-            Assert.IsNotNull(conn1);
+            var socket = new Socket("ws://localhost:1234", null, factory, options);
+            socket.Connect();
+            var conn = factory.LastCreatedWebsocket;
+            Assert.IsNotNull(conn);
+            var executionsBeforeClose = mockExecutor.Executions.Count;
 
-            conn1.SimulateClose(1006, "Abnormal");
-            var reconnectAfterAbnormal = reconnectCalls;
+            // This is an unsolicited transport callback: closeWasClean is false,
+            // so the normal close code itself must suppress reconnection.
+            conn.SimulateClose(1000, "Normal closure");
 
-            // Trigger reconnect to reset state
-            var reconnect = mockExecutor.Executions.LastOrDefault(e => !e.IsCancelled);
-            reconnect?.Execute();
-
-            // Test normal close via Disconnect (which sets closeWasClean)
-            var socket2 = new Socket("ws://localhost:1234", null, new MockWebsocketFactoryWithCallbackTracking(), options);
-            var reconnectBefore = reconnectCalls;
-            socket2.Connect();
-            socket2.Disconnect(); // This sets closeWasClean = true
-
-            // Reconnect should not have been scheduled for clean disconnect
-            Assert.AreEqual(reconnectBefore, reconnectCalls,
-                "Reconnect should not be called for clean disconnect");
+            Assert.Multiple(() =>
+            {
+                Assert.AreEqual(0, reconnectCalls);
+                Assert.AreEqual(executionsBeforeClose, mockExecutor.Executions.Count);
+            });
         }
 
         #endregion

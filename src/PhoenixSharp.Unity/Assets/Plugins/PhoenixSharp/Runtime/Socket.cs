@@ -1810,15 +1810,6 @@ namespace Phoenix
             ScheduleHeartbeatTimeout(timeoutGeneration, heartbeatInterval.Value);
         }
 
-        internal void AbnormalClose(string reason)
-        {
-            Volatile.Write(ref _closeWasClean, false);
-            if (IsConnected())
-            {
-                Conn!.Close(1_000, reason);
-            }
-        }
-
         internal void FlushSendBuffer()
         {
             if (!IsConnected())
