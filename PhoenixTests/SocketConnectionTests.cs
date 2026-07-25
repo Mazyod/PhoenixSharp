@@ -1505,6 +1505,53 @@ namespace PhoenixTests
             Assert.AreEqual("topic1", channel1Message?.Topic);
         }
 
+        [Test]
+        public void ChannelAddedDuringDispatchStartsWithNextMessageTest()
+        {
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    HeartbeatInterval = null,
+                    ReconnectAfter = null,
+                    RejoinAfter = null
+                }
+            );
+            socket.Connect();
+            var connection = factory.LastCreatedWebsocket!;
+            var firstChannel = socket.Channel("shared:topic");
+            Channel? addedChannel = null;
+            var addedChannelCount = 0;
+            firstChannel.On("custom_event", _ =>
+            {
+                if (addedChannel == null)
+                {
+                    addedChannel = socket.Channel("shared:topic");
+                    addedChannel.On(
+                        "custom_event",
+                        _ => addedChannelCount++
+                    );
+                }
+            });
+            var rawMessage = BuildPhxMessage(
+                null,
+                null,
+                "shared:topic",
+                "custom_event"
+            );
+
+            connection.SimulateMessage(rawMessage);
+
+            Assert.That(addedChannelCount, Is.Zero);
+
+            connection.SimulateMessage(rawMessage);
+
+            Assert.That(addedChannelCount, Is.EqualTo(1));
+        }
+
         #endregion
 
         #region Parameter Validation Tests
@@ -1630,10 +1677,22 @@ namespace PhoenixTests
 
         private static void AddChannelFirst(Socket socket, Channel channel)
         {
-            var channels = (List<Channel>)typeof(Socket)
-                .GetField("_channels", BindingFlags.Instance | BindingFlags.NonPublic)!
-                .GetValue(socket)!;
-            channels.Insert(0, channel);
+            var channelsField = typeof(Socket)
+                .GetField(
+                    "_channels",
+                    BindingFlags.Instance | BindingFlags.NonPublic
+                )!;
+            var channels = (Channel[])channelsField.GetValue(socket)!;
+            var updatedChannels = new Channel[channels.Length + 1];
+            updatedChannels[0] = channel;
+            Array.Copy(
+                channels,
+                0,
+                updatedChannels,
+                1,
+                channels.Length
+            );
+            channelsField.SetValue(socket, updatedChannels);
         }
 
         private static (

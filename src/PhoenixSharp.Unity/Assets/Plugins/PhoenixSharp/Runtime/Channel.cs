@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using SubscriptionTable = System.Collections.Generic.Dictionary<
-    string, System.Collections.Generic.List<Phoenix.ChannelSubscription>>;
+    string, Phoenix.ChannelSubscription[]>;
 
 namespace Phoenix
 {
@@ -283,6 +283,15 @@ namespace Phoenix
 
         internal string? JoinRef => _joinPush.Ref;
 
+        internal void MakeMessageRefs(
+            Push sender,
+            out string messageRef,
+            out string? joinRef
+        )
+        {
+            _joinPush.MakeMessageRefs(sender, out messageRef, out joinRef);
+        }
+
 
         public Push Join(TimeSpan? timeout = null)
         {
@@ -332,11 +341,19 @@ namespace Phoenix
             {
                 if (!_bindings.TryGetValue(anyEvent, out var subscriptions))
                 {
-                    subscriptions = new List<ChannelSubscription>();
-                    _bindings[anyEvent] = subscriptions;
+                    _bindings[anyEvent] = new[] { subscription };
+                    return subscription;
                 }
 
-                subscriptions.Add(subscription);
+                var updatedSubscriptions =
+                    new ChannelSubscription[subscriptions.Length + 1];
+                Array.Copy(
+                    subscriptions,
+                    updatedSubscriptions,
+                    subscriptions.Length
+                );
+                updatedSubscriptions[subscriptions.Length] = subscription;
+                _bindings[anyEvent] = updatedSubscriptions;
             }
 
             return subscription;
@@ -436,8 +453,53 @@ namespace Phoenix
 
             lock (_stateLock)
             {
-                return _bindings.TryGetValue(subscription.Event, out var subscriptions) &&
-                       subscriptions.Remove(subscription);
+                if (!_bindings.TryGetValue(
+                    subscription.Event,
+                    out var subscriptions
+                ))
+                {
+                    return false;
+                }
+
+                var index = Array.IndexOf(subscriptions, subscription);
+                if (index < 0)
+                {
+                    return false;
+                }
+
+                if (subscriptions.Length == 1)
+                {
+                    _bindings[subscription.Event] =
+                        Array.Empty<ChannelSubscription>();
+                    return true;
+                }
+
+                var updatedSubscriptions =
+                    new ChannelSubscription[subscriptions.Length - 1];
+                if (index > 0)
+                {
+                    Array.Copy(
+                        subscriptions,
+                        0,
+                        updatedSubscriptions,
+                        0,
+                        index
+                    );
+                }
+
+                if (index < subscriptions.Length - 1)
+                {
+                    Array.Copy(
+                        subscriptions,
+                        index + 1,
+                        updatedSubscriptions,
+                        index,
+                        subscriptions.Length - index - 1
+                    );
+                }
+
+                _bindings[subscription.Event] = updatedSubscriptions;
+                return true;
             }
         }
 
@@ -853,9 +915,12 @@ namespace Phoenix
 
         internal void Trigger(Message message)
         {
-            List<ChannelSubscription>? callbacks = null;
+            ChannelSubscription[]? callbacks = null;
             long leaveEpochWhenWeStarted;
             bool isInternalEvent = message.Event?.StartsWith("phx_") == true
+                || message.Event?.StartsWith(Reply.ReplyEventPrefix) == true;
+            bool isReplyEvent =
+                message.Event == Message.InBoundEvent.Reply.Serialized()
                 || message.Event?.StartsWith(Reply.ReplyEventPrefix) == true;
 
             lock (_stateLock)
@@ -869,10 +934,10 @@ namespace Phoenix
 
                 leaveEpochWhenWeStarted = _leaveEpoch;
 
-                // Get callbacks copy while holding lock (if event exists and has bindings)
+                // Capture the immutable callbacks snapshot for this dispatch.
                 if (message.Event != null && _bindings.TryGetValue(message.Event, out var bindings))
                 {
-                    callbacks = new List<ChannelSubscription>(bindings);
+                    callbacks = bindings;
                 }
             }
 
@@ -891,11 +956,24 @@ namespace Phoenix
                 return;
             }
 
-            var callbackMessage = message with
+            var callbackJoinRef = message.JoinRef ?? JoinRef;
+            Message callbackMessage;
+            if (isReplyEvent
+                && ReferenceEquals(handledPayload, message.Payload)
+                && callbackJoinRef == message.JoinRef)
             {
-                Payload = handledPayload,
-                JoinRef = message.JoinRef ?? JoinRef
-            };
+                // The phx_reply remap supplies the one final clone. Reuse reply
+                // messages whose hook and join-ref handling left them unchanged.
+                callbackMessage = message;
+            }
+            else
+            {
+                callbackMessage = message with
+                {
+                    Payload = handledPayload,
+                    JoinRef = callbackJoinRef
+                };
+            }
 
             // Execute callbacks, checking the leave epoch for non-internal events only
             // Internal events (phx_*, chan_reply_*) should always be processed

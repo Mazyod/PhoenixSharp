@@ -386,6 +386,51 @@ namespace PhoenixTests
         }
 
         [Test]
+        public void SendPinsJoinRefBeforePayloadFactoryCanRejoinTest()
+        {
+            var serializer = new JsonMessageSerializer();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(serializer)
+                {
+                    DelayedExecutor = new MockDelayedExecutor()
+                }
+            );
+            socket.Connect();
+            var websocket = factory.LastCreatedWebsocket!;
+            var channel = socket.Channel("test");
+            var joinPush = channel.Join();
+            joinPush.Trigger(ReplyStatus.Ok);
+            var initialJoinRef = channel.JoinRef;
+            var push = new Push(
+                channel,
+                "test_event",
+                () =>
+                {
+                    joinPush.Resend(TimeSpan.FromSeconds(10));
+                    return serializer.Box(new Dictionary<string, object>());
+                },
+                TimeSpan.FromSeconds(10)
+            );
+            websocket.CallSend.Clear();
+
+            push.Send();
+
+            var sentMessage = serializer.Deserialize<Message>(
+                websocket.CallSend[websocket.CallSend.Count - 1]
+            ) ?? throw new AssertionException("Expected an outbound message.");
+            Assert.Multiple(() =>
+            {
+                Assert.That(joinPush.Ref, Is.Not.EqualTo(initialJoinRef));
+                Assert.That(sentMessage.Ref, Is.EqualTo(push.Ref));
+                Assert.That(sentMessage.JoinRef, Is.EqualTo(initialJoinRef));
+            });
+        }
+
+        [Test]
         public void SendDoesNotResendAfterTimeoutTest()
         {
             var mockExecutor = new MockDelayedExecutor();

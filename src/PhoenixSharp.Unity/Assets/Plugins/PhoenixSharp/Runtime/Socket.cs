@@ -156,7 +156,7 @@ namespace Phoenix
          * we simple use delegate +=, -= to subscribe and unsubscribe.
          */
         // private readonly Dictionary<Event, List<Subscription>> stateChangeCallbacks = new();
-        private readonly List<Channel> _channels = new List<Channel>();
+        private Channel[] _channels = Array.Empty<Channel>();
         private readonly object _channelsLock = new object();
         private readonly HashSet<PendingConnectWaiter> _pendingConnectWaiters =
             new HashSet<PendingConnectWaiter>();
@@ -1553,14 +1553,10 @@ namespace Phoenix
 
         private void TriggerChanError()
         {
-            List<Channel> channelsCopy;
-            lock (_channelsLock)
-            {
-                channelsCopy = new List<Channel>(_channels);
-            }
+            var channels = Volatile.Read(ref _channels);
 
             var message = new Message(@event: Message.InBoundEvent.Error.Serialized());
-            foreach (var channel in channelsCopy)
+            foreach (var channel in channels)
             {
                 if (channel.IsErrored() || channel.IsLeaving() || channel.IsClosed())
                 {
@@ -1582,7 +1578,43 @@ namespace Phoenix
             // this.off(channel.stateChangeRefs)
             lock (_channelsLock)
             {
-                _channels.Remove(channel);
+                var channels = _channels;
+                var index = Array.IndexOf(channels, channel);
+                if (index < 0)
+                {
+                    return;
+                }
+
+                if (channels.Length == 1)
+                {
+                    Volatile.Write(ref _channels, Array.Empty<Channel>());
+                    return;
+                }
+
+                var updatedChannels = new Channel[channels.Length - 1];
+                if (index > 0)
+                {
+                    Array.Copy(
+                        channels,
+                        0,
+                        updatedChannels,
+                        0,
+                        index
+                    );
+                }
+
+                if (index < channels.Length - 1)
+                {
+                    Array.Copy(
+                        channels,
+                        index + 1,
+                        updatedChannels,
+                        index,
+                        channels.Length - index - 1
+                    );
+                }
+
+                Volatile.Write(ref _channels, updatedChannels);
             }
         }
 
@@ -1606,7 +1638,11 @@ namespace Phoenix
                 disposed = _disposed;
                 if (!disposed)
                 {
-                    _channels.Add(chan);
+                    var channels = _channels;
+                    var updatedChannels = new Channel[channels.Length + 1];
+                    Array.Copy(channels, updatedChannels, channels.Length);
+                    updatedChannels[channels.Length] = chan;
+                    Volatile.Write(ref _channels, updatedChannels);
                 }
             }
 
@@ -1967,14 +2003,9 @@ namespace Phoenix
                 );
             }
 
-            // copy channels before triggering callbacks, since they might modify the channels list
-            List<Channel> channelsCopy;
-            lock (_channelsLock)
-            {
-                channelsCopy = new List<Channel>(_channels);
-            }
+            var channels = Volatile.Read(ref _channels);
 
-            foreach (var channel in channelsCopy)
+            foreach (var channel in channels)
             {
                 // violates tell don't ask, but that's how Phoenix JS is implemented
                 if (!channel.IsMember(message))
@@ -2059,7 +2090,7 @@ namespace Phoenix
             Channel? dupChannel;
             lock (_channelsLock)
             {
-                dupChannel = _channels.Find(channel =>
+                dupChannel = Array.Find(_channels, channel =>
                     channel.Topic == topic && (channel.IsJoined() || channel.IsJoining()));
             }
 
@@ -2114,15 +2145,15 @@ namespace Phoenix
             StopHeartbeat();
             _reconnectTimer?.Reset();
 
-            List<Channel> channelsCopy;
+            Channel[] channels;
             lock (_channelsLock)
             {
-                channelsCopy = _channels.ToList();
-                _channels.Clear();
+                channels = _channels;
+                Volatile.Write(ref _channels, Array.Empty<Channel>());
             }
 
             // Cleanup calls timer/executor code, so run it outside the socket lock.
-            foreach (var channel in channelsCopy)
+            foreach (var channel in channels)
             {
                 ((IChannelCleanup)channel).Cleanup();
             }

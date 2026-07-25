@@ -54,6 +54,23 @@ namespace Phoenix
             }
         }
 
+        internal void MakeMessageRefs(
+            Push sender,
+            out string messageRef,
+            out string? joinRef
+        )
+        {
+            lock (_stateLock)
+            {
+                // Keep the join generation pinned while allocating the message
+                // ref so the pair represents one consistent channel view.
+                messageRef = _channel.Socket.MakeRef();
+                joinRef = ReferenceEquals(sender, this)
+                    ? messageRef
+                    : _ref;
+            }
+        }
+
         public void Resend(TimeSpan timeout)
         {
             Reset(timeout);
@@ -62,7 +79,11 @@ namespace Phoenix
 
         public void Send()
         {
-            if (!StartTimeout(true, out var messageRef))
+            if (!StartTimeout(
+                true,
+                out var messageRef,
+                out var joinRef
+            ))
             {
                 return;
             }
@@ -73,7 +94,7 @@ namespace Phoenix
                 _event,
                 _payload?.Invoke(),
                 messageRef,
-                _channel.JoinRef
+                joinRef
             ));
         }
 
@@ -204,10 +225,14 @@ namespace Phoenix
 
         internal void StartTimeout()
         {
-            StartTimeout(false, out _);
+            StartTimeout(false, out _, out _);
         }
 
-        private bool StartTimeout(bool stopAfterTimeout, out string? messageRef)
+        private bool StartTimeout(
+            bool stopAfterTimeout,
+            out string? messageRef,
+            out string? joinRef
+        )
         {
             ChannelSubscription? previousSubscription;
             IDelayedExecution? previousExecution;
@@ -219,6 +244,7 @@ namespace Phoenix
                 if (stopAfterTimeout && HasReceivedUnsafe(ReplyStatus.Timeout))
                 {
                     messageRef = _ref;
+                    joinRef = null;
                     return false;
                 }
 
@@ -228,7 +254,12 @@ namespace Phoenix
                 _delayedExecution = null;
 
                 attempt = ++_attempt;
-                messageRef = _channel.Socket.MakeRef();
+                _channel.MakeMessageRefs(
+                    this,
+                    out var nextMessageRef,
+                    out joinRef
+                );
+                messageRef = nextMessageRef;
                 _ref = messageRef;
                 refEvent = Channel.ReplyEventName(messageRef);
                 _refEvent = refEvent;

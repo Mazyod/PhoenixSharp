@@ -231,6 +231,52 @@ namespace PhoenixTests
         }
 
         [Test]
+        public void SubscriptionAddedDuringDispatchStartsWithNextMessageTest()
+        {
+            var socket = CreateConnectedSocket();
+            var channel = socket.Channel("test");
+            var addedCallbackCount = 0;
+            var added = false;
+
+            channel.On("custom_event", _ =>
+            {
+                if (!added)
+                {
+                    added = true;
+                    channel.On("custom_event", _ => addedCallbackCount++);
+                }
+            });
+
+            channel.Trigger(new Message(@event: "custom_event", topic: "test"));
+
+            Assert.That(addedCallbackCount, Is.Zero);
+
+            channel.Trigger(new Message(@event: "custom_event", topic: "test"));
+
+            Assert.That(addedCallbackCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void SubscriptionRemovedDuringDispatchFinishesCurrentMessageTest()
+        {
+            var socket = CreateConnectedSocket();
+            var channel = socket.Channel("test");
+            var removedCallbackCount = 0;
+            ChannelSubscription? removedSubscription = null;
+
+            channel.On("custom_event", _ => channel.Off(removedSubscription!));
+            removedSubscription = channel.On(
+                "custom_event",
+                _ => removedCallbackCount++
+            );
+
+            channel.Trigger(new Message(@event: "custom_event", topic: "test"));
+            channel.Trigger(new Message(@event: "custom_event", topic: "test"));
+
+            Assert.That(removedCallbackCount, Is.EqualTo(1));
+        }
+
+        [Test]
         public void OffRemovesSpecificSubscriptionTest()
         {
             var socket = CreateConnectedSocket();
@@ -411,6 +457,94 @@ namespace PhoenixTests
             channel.Trigger(new Message(@event: "custom_event", topic: "test", payload: payload));
 
             Assert.IsTrue(channel.OnMessageCalled);
+        }
+
+        [Test]
+        public void ReplyInvokesOnMessageWithWireThenRemappedShapeTest()
+        {
+            var socket = CreateConnectedSocket();
+            var channel = new ReplyShapeChannel("test", socket);
+
+            channel.Trigger(new Message(
+                topic: "test",
+                @event: Message.InBoundEvent.Reply.Serialized(),
+                @ref: "7",
+                joinRef: "3"
+            ));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(channel.Messages, Has.Count.EqualTo(2));
+                Assert.That(
+                    channel.Messages[0].Event,
+                    Is.EqualTo(Message.InBoundEvent.Reply.Serialized())
+                );
+                Assert.That(
+                    channel.Messages[1].Event,
+                    Is.EqualTo(Channel.ReplyEventName("7"))
+                );
+                Assert.That(channel.Messages[1].Ref, Is.EqualTo("7"));
+                Assert.That(channel.Messages[1].JoinRef, Is.EqualTo("3"));
+            });
+        }
+
+        [Test]
+        public void ReplyOnMessagePayloadTransformsFlowThroughRemapTest()
+        {
+            var socket = CreateConnectedSocket();
+            var serializer = new JsonMessageSerializer();
+            var wirePayload = serializer.Box(
+                new Dictionary<string, object> { { "step", "wire" } }
+            );
+            var remappedPayload = serializer.Box(
+                new Dictionary<string, object> { { "step", "remapped" } }
+            );
+            var callbackPayload = serializer.Box(
+                new Dictionary<string, object> { { "step", "callback" } }
+            );
+            var channel = new ReplyShapeChannel("test", socket)
+            {
+                MessageHandler = message =>
+                    message.Event == Message.InBoundEvent.Reply.Serialized()
+                        ? remappedPayload
+                        : callbackPayload
+            };
+            Message? receivedMessage = null;
+            channel.On(
+                Channel.ReplyEventName("7"),
+                message => receivedMessage = message
+            );
+
+            channel.Trigger(new Message(
+                topic: "test",
+                @event: Message.InBoundEvent.Reply.Serialized(),
+                payload: wirePayload,
+                @ref: "7",
+                joinRef: "3"
+            ));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(channel.Messages, Has.Count.EqualTo(2));
+                Assert.That(
+                    channel.Messages[0].Payload,
+                    Is.SameAs(wirePayload)
+                );
+                Assert.That(
+                    channel.Messages[1].Payload,
+                    Is.SameAs(remappedPayload)
+                );
+                Assert.That(receivedMessage, Is.Not.Null);
+                Assert.That(
+                    receivedMessage?.Event,
+                    Is.EqualTo(Channel.ReplyEventName("7"))
+                );
+                Assert.That(
+                    receivedMessage?.Payload,
+                    Is.SameAs(callbackPayload)
+                );
+                Assert.That(receivedMessage?.JoinRef, Is.EqualTo("3"));
+            });
         }
 
         [Test]
@@ -937,6 +1071,23 @@ namespace PhoenixTests
         public override IJsonBox? OnMessage(Message message)
         {
             return null;
+        }
+    }
+
+    public class ReplyShapeChannel : Channel
+    {
+        public List<Message> Messages { get; } = new List<Message>();
+        public Func<Message, IJsonBox?>? MessageHandler { get; set; }
+
+        public ReplyShapeChannel(string topic, Socket socket)
+            : base(topic, null, socket)
+        {
+        }
+
+        public override IJsonBox? OnMessage(Message message)
+        {
+            Messages.Add(message);
+            return MessageHandler?.Invoke(message) ?? base.OnMessage(message);
         }
     }
 }

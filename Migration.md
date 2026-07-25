@@ -1,6 +1,17 @@
 
 # Migration Guide
 
+## Reply message identity (July 2026)
+
+Reply values and dispatch order are unchanged: `Channel.OnMessage` still sees
+the wire `phx_reply` followed by its `chan_reply_{ref}` remap. To avoid
+redundant record clones, PhoenixSharp may now pass the same immutable `Message`
+instance from an `OnMessage` call to that event's reply subscriber when the
+hook leaves the payload and join ref unchanged.
+
+Code should not rely on reference inequality between those messages. Compare
+their record values or fields instead.
+
 ## Json Refactoring Effort (May 2023)
 
 The library was missing the ability to expose the full JSON response from the presence payload. This limitation exposed a major weakness in the library's design, which was the lack of a unified JSON response interface.
