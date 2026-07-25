@@ -263,7 +263,7 @@ The default `TaskDelayedExecutor` runs timer callbacks on the thread pool and do
 
 Unity consumers must marshal to the main thread before touching `UnityEngine` objects. The UniTask executor sample keeps PhoenixSharp's delayed callbacks on Unity's PlayerLoop, but it does not change the threading contract for transport and subscription callbacks. Queue work to a PlayerLoop or `MonoBehaviour` dispatcher, or use `UniTask.SwitchToMainThread()` in an async flow.
 
-Public delegate fields use normal `+=`/`-=` mutation. Add or remove handlers such as `OnError`, `OnUnhandledError`, `OnJoin`, `OnLeave`, and `OnSync` before connecting or from the socket callback thread.
+Socket and Presence callbacks (`OnError`, `OnUnhandledError`, `OnJoin`, `OnLeave`, `OnSync`, and friends) are C# events with thread-safe `+=`/`-=`, so handlers can be added or removed from any thread at any time. Handlers themselves may still fire on any thread, and a handler removed concurrently with a dispatch may run one final time.
 
 ## Unity Notes
 

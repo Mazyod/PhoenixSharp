@@ -43,6 +43,10 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "Publishing version: $VERSION"
 
+      # Since the 2.0.0 release flow, the manifest is bumped BEFORE tagging
+      # (OpenUPM requires the tagged package.json to match the tag), so this
+      # step is normally an idempotent no-op safety net; it still matters for
+      # workflow_dispatch republishing.
       - name: Update Unity package version
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
