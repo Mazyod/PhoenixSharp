@@ -182,6 +182,7 @@ namespace Phoenix
         private readonly object _heartbeatStateLock = new object();
         private bool _closeWasClean;
         private IWebsocket? _conn;
+        private long _connectionAttemptEpoch;
         private long _heartbeatGeneration;
         private IDelayedExecution? _heartbeatTimer;
         private GuardedLogger? _guardedLogger;
@@ -191,13 +192,13 @@ namespace Phoenix
         private long _ref;
         private int _unhandledWarningEmitted;
 
-        public OnClosedDelegate? OnClose;
+        public event OnClosedDelegate? OnClose;
 
         /// <summary>
         /// Receives operational errors, including transport and protocol
         /// failures and dispatch-blocking channel-hook exceptions.
         /// </summary>
-        public OnErrorDelegate? OnError;
+        public event OnErrorDelegate? OnError;
 
         /// <summary>
         /// Receives failures that PhoenixSharp deliberately contains, such as
@@ -212,11 +213,11 @@ namespace Phoenix
         /// this delegate is contained, logged without re-reporting, and does
         /// not recursively invoke it.
         /// </remarks>
-        public OnUnhandledErrorDelegate? OnUnhandledError;
+        public event OnUnhandledErrorDelegate? OnUnhandledError;
 
-        public OnMessageDelegate? OnMessage;
+        public event OnMessageDelegate? OnMessage;
 
-        public OnOpenDelegate? OnOpen;
+        public event OnOpenDelegate? OnOpen;
 
         public Socket(
             string endPoint,
@@ -314,7 +315,7 @@ namespace Phoenix
             Action<Exception>? closeFailureCallback
         )
         {
-            // connectClock++;
+            Interlocked.Increment(ref _connectionAttemptEpoch);
             List<PendingConnectWaiter> connectWaiters;
             lock (_pendingConnectWaitersLock)
             {
@@ -359,7 +360,9 @@ namespace Phoenix
                 return new ObjectDisposedException(nameof(Socket), "Cannot connect disposed socket");
             }
 
-            // connectClock++;
+            var connectionAttemptEpoch = Volatile.Read(
+                ref _connectionAttemptEpoch
+            );
             var connection = Conn;
             if (connection != null)
             {
@@ -434,28 +437,50 @@ namespace Phoenix
                     return null;
                 }
 
-                if (_disposed)
+                if (_disposed
+                    || connectionAttemptEpoch != Volatile.Read(
+                        ref _connectionAttemptEpoch
+                    ))
                 {
                     if (TryClearConnection(connection))
                     {
                         CloseUnclaimedConnection(
                             connection,
-                            "Socket disposed before connection attempt started"
+                            "Connection attempt invalidated by socket teardown"
                         );
                     }
 
-                    return new ObjectDisposedException(
-                        nameof(Socket),
-                        "Cannot connect disposed socket"
-                    );
+                    return _disposed
+                        ? new ObjectDisposedException(
+                            nameof(Socket),
+                            "Cannot connect disposed socket"
+                        )
+                        : null;
                 }
 
                 Volatile.Write(ref callbacksEnabled, 1);
-                // Residual: Dispose can run after the post-CAS check above but before
-                // Connect(). Dispose clears and closes this transport first, but an
-                // implementation that subsequently reopens in Connect() can remain
-                // live and unclosed; its events are suppressed by the identity guard.
                 connection.Connect();
+
+                if (_disposed
+                    || connectionAttemptEpoch != Volatile.Read(
+                        ref _connectionAttemptEpoch
+                    ))
+                {
+                    Volatile.Write(ref callbacksEnabled, 0);
+                    TryClearConnection(connection);
+                    CloseUnclaimedConnection(
+                        connection,
+                        "Connection attempt invalidated by socket teardown"
+                    );
+
+                    return _disposed
+                        ? new ObjectDisposedException(
+                            nameof(Socket),
+                            "Cannot connect disposed socket"
+                        )
+                        : null;
+                }
+
                 return null;
             }
             catch (Exception ex)
@@ -934,6 +959,7 @@ namespace Phoenix
             }
             catch
             {
+                // Exception.Message getters can throw; diagnostics must not.
                 return "<message unavailable>";
             }
         }
@@ -1011,29 +1037,23 @@ namespace Phoenix
             _reconnectTimer?.Reset();
             ResetHeartbeat();
 
-            try
+            var handlers = OnOpen;
+            if (handlers == null)
             {
-                OnOpen?.Invoke();
+                return;
             }
-            catch (Exception ex)
+
+            foreach (OnOpenDelegate handler in handlers.GetInvocationList())
             {
-                ReportUnhandledError(
-                    new PhoenixError(
-                        "OnOpen callback threw exception",
-                        PhoenixErrorKind.Dispatch,
-                        ex
-                    )
-                );
-                logger = GetEnabledLogger(
-                    LogLevel.Error,
-                    LogSource.Socket
-                );
-                if (logger != null)
+                try
                 {
-                    logger.Log(
-                        LogLevel.Error,
-                        LogSource.Socket,
+                    handler();
+                }
+                catch (Exception ex)
+                {
+                    ReportContainedCallbackException(
                         "OnOpen callback threw exception",
+                        LogSource.Socket,
                         ex
                     );
                 }
@@ -1270,8 +1290,6 @@ namespace Phoenix
 
             WaitForSocketClosed(connection, () =>
             {
-                // TODO: not sure if this is important at all?
-                // this.conn.onclose = function (){ } // noop
                 CompleteTeardown(connection, callback);
             });
 
@@ -1420,29 +1438,23 @@ namespace Phoenix
                 _reconnectTimer?.ScheduleTimeout();
             }
 
-            try
+            var handlers = OnClose;
+            if (handlers == null)
             {
-                OnClose?.Invoke(code, reason);
+                return;
             }
-            catch (Exception ex)
+
+            foreach (OnClosedDelegate handler in handlers.GetInvocationList())
             {
-                ReportUnhandledError(
-                    new PhoenixError(
-                        "OnClose callback threw exception",
-                        PhoenixErrorKind.Dispatch,
-                        ex
-                    )
-                );
-                logger = GetEnabledLogger(
-                    LogLevel.Error,
-                    LogSource.Socket
-                );
-                if (logger != null)
+                try
                 {
-                    logger.Log(
-                        LogLevel.Error,
-                        LogSource.Socket,
+                    handler(code, reason);
+                }
+                catch (Exception ex)
+                {
+                    ReportContainedCallbackException(
                         "OnClose callback threw exception",
+                        LogSource.Socket,
                         ex
                     );
                 }
@@ -1474,34 +1486,56 @@ namespace Phoenix
             TriggerChanError();
         }
 
-        private void ReportError(PhoenixError error)
+        internal void ReportError(PhoenixError error)
         {
-            try
+            var handlers = OnError;
+            if (handlers == null)
             {
-                OnError?.Invoke(error);
+                return;
             }
-            catch (Exception ex)
+
+            foreach (OnErrorDelegate handler in handlers.GetInvocationList())
             {
-                ReportUnhandledError(
-                    new PhoenixError(
-                        "OnError callback threw exception",
-                        PhoenixErrorKind.Dispatch,
-                        ex
-                    )
-                );
-                var logger = GetEnabledLogger(
-                    LogLevel.Error,
-                    LogSource.Socket
-                );
-                if (logger != null)
+                try
                 {
-                    logger.Log(
-                        LogLevel.Error,
-                        LogSource.Socket,
+                    handler(error);
+                }
+                catch (Exception ex)
+                {
+                    ReportContainedCallbackException(
                         "OnError callback threw exception",
+                        LogSource.Socket,
                         ex
                     );
                 }
+            }
+        }
+
+        internal void ReportContainedCallbackException(
+            string message,
+            string logSource,
+            Exception exception
+        )
+        {
+            ReportUnhandledError(
+                new PhoenixError(
+                    message,
+                    PhoenixErrorKind.Dispatch,
+                    exception
+                )
+            );
+            var logger = GetEnabledLogger(
+                LogLevel.Error,
+                logSource
+            );
+            if (logger != null)
+            {
+                logger.Log(
+                    LogLevel.Error,
+                    logSource,
+                    message,
+                    exception
+                );
             }
         }
 
@@ -1527,25 +1561,29 @@ namespace Phoenix
                 return;
             }
 
-            try
+            foreach (OnUnhandledErrorDelegate callback
+                in handler.GetInvocationList())
             {
-                handler.Invoke(error);
-            }
-            catch (Exception ex)
-            {
-                var logger = GetEnabledLogger(
-                    LogLevel.Error,
-                    LogSource.Socket
-                );
-                if (logger != null)
+                try
                 {
-                    WriteLog(
-                        logger,
+                    callback(error);
+                }
+                catch (Exception ex)
+                {
+                    var logger = GetEnabledLogger(
                         LogLevel.Error,
-                        LogSource.Socket,
-                        "OnUnhandledError callback threw exception",
-                        ex
+                        LogSource.Socket
                     );
+                    if (logger != null)
+                    {
+                        WriteLog(
+                            logger,
+                            LogLevel.Error,
+                            LogSource.Socket,
+                            "OnUnhandledError callback threw exception",
+                            ex
+                        );
+                    }
                 }
             }
         }
@@ -2015,36 +2053,30 @@ namespace Phoenix
                 TriggerChannel(channel, message);
             }
 
-            try
+            var handlers = OnMessage;
+            if (handlers == null)
             {
-                OnMessage?.Invoke(message);
+                return;
             }
-            catch (Exception ex)
+
+            foreach (OnMessageDelegate handler in handlers.GetInvocationList())
             {
-                ReportUnhandledError(
-                    new PhoenixError(
-                        "OnMessage callback threw exception",
-                        PhoenixErrorKind.Dispatch,
-                        ex
-                    )
-                );
-                var logger = GetEnabledLogger(
-                    LogLevel.Error,
-                    LogSource.Socket
-                );
-                if (logger != null)
+                try
                 {
-                    logger.Log(
-                        LogLevel.Error,
-                        LogSource.Socket,
+                    handler(message);
+                }
+                catch (Exception ex)
+                {
+                    ReportContainedCallbackException(
                         "OnMessage callback threw exception",
+                        LogSource.Socket,
                         ex
                     );
                 }
             }
         }
 
-        private void TriggerChannel(Channel channel, Message message)
+        internal void TriggerChannel(Channel channel, Message message)
         {
             try
             {
@@ -2130,6 +2162,7 @@ namespace Phoenix
                 }
 
                 _disposed = true;
+                Interlocked.Increment(ref _connectionAttemptEpoch);
                 connectWaiters = ClaimPendingConnectWaitersLocked();
             }
 

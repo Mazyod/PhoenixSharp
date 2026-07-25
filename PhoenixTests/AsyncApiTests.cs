@@ -31,9 +31,7 @@ namespace PhoenixTests
             await connectTask;
 
             Assert.AreEqual(WebsocketState.Open, socket.State);
-            Assert.That(socket.OnOpen, Is.Null);
-            Assert.That(socket.OnError, Is.Null);
-            Assert.That(socket.OnClose, Is.Null);
+            AssertConnectHandlersRemoved(socket);
         }
 
         [Test]
@@ -46,9 +44,7 @@ namespace PhoenixTests
             await AssertCompletesWithin(connectTask);
             await connectTask;
 
-            Assert.That(socket.OnOpen, Is.Null);
-            Assert.That(socket.OnError, Is.Null);
-            Assert.That(socket.OnClose, Is.Null);
+            AssertConnectHandlersRemoved(socket);
         }
 
         [Test]
@@ -116,9 +112,7 @@ namespace PhoenixTests
             );
             Assert.That(exception!.Message, Does.Contain("Connection failed"));
             Assert.That(exception.InnerException, Is.TypeOf<Exception>());
-            Assert.That(socket.OnOpen, Is.Null);
-            Assert.That(socket.OnError, Is.Null);
-            Assert.That(socket.OnClose, Is.Null);
+            AssertConnectHandlersRemoved(socket);
         }
 
         [Test]
@@ -169,9 +163,7 @@ namespace PhoenixTests
             await AssertCompletesWithin(connectTask);
             await connectTask;
             Assert.That(factory.Attempts, Is.EqualTo(2));
-            Assert.That(socket.OnOpen, Is.Null);
-            Assert.That(socket.OnError, Is.Null);
-            Assert.That(socket.OnClose, Is.Null);
+            AssertConnectHandlersRemoved(socket);
         }
 
         [Test]
@@ -214,9 +206,7 @@ namespace PhoenixTests
                 }
 
                 Assert.That(executor.PendingCount, Is.EqualTo(0));
-                Assert.That(socket.OnOpen, Is.Null);
-                Assert.That(socket.OnError, Is.Null);
-                Assert.That(socket.OnClose, Is.Null);
+                AssertConnectHandlersRemoved(socket);
             }
             finally
             {
@@ -278,9 +268,7 @@ namespace PhoenixTests
             await AssertCompletesWithin(allConnectTasks);
             await allConnectTasks;
             Assert.That(factory.Connection.ConnectCount, Is.EqualTo(1));
-            Assert.That(socket.OnOpen, Is.Null);
-            Assert.That(socket.OnError, Is.Null);
-            Assert.That(socket.OnClose, Is.Null);
+            AssertConnectHandlersRemoved(socket);
         }
 
         [Test]
@@ -310,9 +298,7 @@ namespace PhoenixTests
             Assert.That(factory.Connections, Has.Count.EqualTo(2));
             Assert.That(factory.Connection, Is.Not.SameAs(closedConnection));
             Assert.That(factory.Connection.State, Is.EqualTo(WebsocketState.Open));
-            Assert.That(socket.OnOpen, Is.Null);
-            Assert.That(socket.OnError, Is.Null);
-            Assert.That(socket.OnClose, Is.Null);
+            AssertConnectHandlersRemoved(socket);
         }
 
         [Test]
@@ -424,9 +410,7 @@ namespace PhoenixTests
 
             Assert.ThrowsAsync<TaskCanceledException>(async () =>
                 await socket.ConnectAsync(cts.Token));
-            Assert.That(socket.OnOpen, Is.Null);
-            Assert.That(socket.OnError, Is.Null);
-            Assert.That(socket.OnClose, Is.Null);
+            AssertConnectHandlersRemoved(socket);
         }
 
         #endregion
@@ -462,7 +446,13 @@ namespace PhoenixTests
             await AssertCompletesWithin(disconnectTask);
             await disconnectTask;
 
-            Assert.That(socket.OnClose, Is.Null);
+            Assert.That(
+                HasSocketEventSubscribers(
+                    socket,
+                    nameof(Socket.OnClose)
+                ),
+                Is.False
+            );
         }
 
         [Test]
@@ -493,7 +483,13 @@ namespace PhoenixTests
             await AssertCompletesWithin(disconnectTask);
             await disconnectTask;
             Assert.That(socket.Conn, Is.Null);
-            Assert.That(socket.OnClose, Is.Null);
+            Assert.That(
+                HasSocketEventSubscribers(
+                    socket,
+                    nameof(Socket.OnClose)
+                ),
+                Is.False
+            );
         }
 
         [Test]
@@ -620,7 +616,13 @@ namespace PhoenixTests
 
             Assert.ThrowsAsync<TaskCanceledException>(async () =>
                 await socket.DisconnectAsync(cts.Token));
-            Assert.That(socket.OnClose, Is.Null);
+            Assert.That(
+                HasSocketEventSubscribers(
+                    socket,
+                    nameof(Socket.OnClose)
+                ),
+                Is.False
+            );
         }
 
         #endregion
@@ -645,9 +647,7 @@ namespace PhoenixTests
             Assert.ThrowsAsync<PhoenixConnectionException>(
                 async () => await connectTask
             );
-            Assert.That(socket.OnOpen, Is.Null);
-            Assert.That(socket.OnError, Is.Null);
-            Assert.That(socket.OnClose, Is.Null);
+            AssertConnectHandlersRemoved(socket);
         }
 
         [Test]
@@ -673,9 +673,7 @@ namespace PhoenixTests
             executor.ExecuteLast();
             await AssertCompletesWithin(disconnectTask);
             await disconnectTask;
-            Assert.That(socket.OnOpen, Is.Null);
-            Assert.That(socket.OnError, Is.Null);
-            Assert.That(socket.OnClose, Is.Null);
+            AssertConnectHandlersRemoved(socket);
         }
 
         [Test]
@@ -700,9 +698,7 @@ namespace PhoenixTests
             await AssertCompletesWithin(disconnectTask);
             await disconnectTask;
             Assert.That(factory.Connection.ConnectCount, Is.EqualTo(1));
-            Assert.That(socket.OnOpen, Is.Null);
-            Assert.That(socket.OnError, Is.Null);
-            Assert.That(socket.OnClose, Is.Null);
+            AssertConnectHandlersRemoved(socket);
         }
 
         [Test]
@@ -807,6 +803,34 @@ namespace PhoenixTests
                 Is.SameAs(task),
                 "The asynchronous socket operation did not complete within 250 ms."
             );
+        }
+
+        private static void AssertConnectHandlersRemoved(Socket socket)
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(
+                    HasSocketEventSubscribers(
+                        socket,
+                        nameof(Socket.OnOpen)
+                    ),
+                    Is.False
+                );
+                Assert.That(
+                    HasSocketEventSubscribers(
+                        socket,
+                        nameof(Socket.OnError)
+                    ),
+                    Is.False
+                );
+                Assert.That(
+                    HasSocketEventSubscribers(
+                        socket,
+                        nameof(Socket.OnClose)
+                    ),
+                    Is.False
+                );
+            });
         }
 
         private static Socket CreateSocket(

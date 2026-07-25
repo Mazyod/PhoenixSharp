@@ -938,6 +938,141 @@ namespace PhoenixTests
         }
 
         [Test]
+        public void PayloadBoxFailureIsContainedAndPushStillTimesOutTest()
+        {
+            var payload = new object();
+            var boxException = new InvalidOperationException(
+                "payload boxing failed"
+            );
+            var serializer = new ThrowingPayloadBoxSerializer(
+                payload,
+                boxException
+            );
+            var executor = new MockDelayedExecutor();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            using var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(serializer)
+                {
+                    DelayedExecutor = executor,
+                    HeartbeatInterval = null,
+                    ReconnectAfter = null,
+                    RejoinAfter = null
+                }
+            );
+            socket.Connect();
+            var channel = socket.Channel("test");
+            var joinPush = channel.Join();
+            joinPush.Trigger(ReplyStatus.Ok);
+            var websocket = factory.LastCreatedWebsocket!;
+            websocket.CallSend.Clear();
+            PhoenixError? reportedError = null;
+            Reply? timeoutReply = null;
+            socket.OnError += error => reportedError = error;
+
+            Push? push = null;
+            Assert.DoesNotThrow(() =>
+                push = channel.Push("test_event", payload)
+            );
+            push!.Receive(
+                ReplyStatus.Timeout,
+                reply => timeoutReply = reply
+            );
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(reportedError, Is.Not.Null);
+                Assert.That(
+                    reportedError?.Kind,
+                    Is.EqualTo(PhoenixErrorKind.Serialization)
+                );
+                Assert.That(
+                    reportedError?.Exception,
+                    Is.SameAs(boxException)
+                );
+                Assert.That(websocket.CallSend, Is.Empty);
+                Assert.That(timeoutReply, Is.Null);
+            });
+
+            executor.ExecutePending();
+
+            Assert.That(timeoutReply?.ReplyStatus, Is.EqualTo(
+                ReplyStatus.Timeout
+            ));
+        }
+
+        [Test]
+        public void BufferedPayloadBoxFailureIsSerializationNotDispatchTest()
+        {
+            var payload = new object();
+            var boxException = new InvalidOperationException(
+                "buffered payload boxing failed"
+            );
+            var serializer = new ThrowingPayloadBoxSerializer(
+                payload,
+                boxException
+            );
+            var executor = new MockDelayedExecutor();
+            var factory = new MockWebsocketFactoryWithCallbackTracking();
+            using var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(serializer)
+                {
+                    DelayedExecutor = executor,
+                    HeartbeatInterval = null,
+                    ReconnectAfter = null,
+                    RejoinAfter = null
+                }
+            );
+            socket.Connect();
+            var channel = socket.Channel("test");
+            var joinPush = channel.Join();
+            var operationalErrors = new List<PhoenixError>();
+            var containedErrors = new List<PhoenixError>();
+            socket.OnError += operationalErrors.Add;
+            socket.OnUnhandledError += containedErrors.Add;
+            Reply? timeoutReply = null;
+            var push = channel.Push("buffered_poison", payload)
+                .Receive(
+                    ReplyStatus.Timeout,
+                    reply => timeoutReply = reply
+                );
+
+            joinPush.Trigger(ReplyStatus.Ok);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(
+                    operationalErrors.Exists(error =>
+                        error.Kind == PhoenixErrorKind.Serialization
+                        && ReferenceEquals(error.Exception, boxException)
+                    ),
+                    Is.True
+                );
+                Assert.That(
+                    containedErrors.Exists(error =>
+                        error.Kind == PhoenixErrorKind.Dispatch
+                        && ReferenceEquals(error.Exception, boxException)
+                    ),
+                    Is.False
+                );
+                Assert.That(push.Ref, Is.Not.Null);
+                Assert.That(timeoutReply, Is.Null);
+            });
+
+            executor.ExecutePending();
+
+            Assert.That(
+                timeoutReply?.ReplyStatus,
+                Is.EqualTo(ReplyStatus.Timeout)
+            );
+        }
+
+        [Test]
         public void PayloadFunctionIsCalledOnSendTest()
         {
             var (channel, websocket, _) = CreateJoinedChannel();
@@ -1112,6 +1247,44 @@ namespace PhoenixTests
                 }
 
                 return payload;
+            }
+        }
+
+        private sealed class ThrowingPayloadBoxSerializer
+            : IMessageSerializer
+        {
+            private readonly IMessageSerializer _inner =
+                new JsonMessageSerializer();
+            private readonly object _poisonPayload;
+            private readonly Exception _exception;
+
+            public ThrowingPayloadBoxSerializer(
+                object poisonPayload,
+                Exception exception
+            )
+            {
+                _poisonPayload = poisonPayload;
+                _exception = exception;
+            }
+
+            public string Serialize(object? element)
+            {
+                return _inner.Serialize(element);
+            }
+
+            public T Deserialize<T>(string message)
+            {
+                return _inner.Deserialize<T>(message)!;
+            }
+
+            public IJsonBox Box(object? element)
+            {
+                if (ReferenceEquals(element, _poisonPayload))
+                {
+                    throw _exception;
+                }
+
+                return _inner.Box(element);
             }
         }
     }

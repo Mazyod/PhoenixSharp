@@ -74,11 +74,24 @@ namespace Phoenix
                 ?? throw new ArgumentNullException(nameof(getTimestamp));
         }
 
+        /// <summary>
+        /// Returns whether the level meets the configured minimum.
+        /// </summary>
+        /// <param name="level">The severity to test.</param>
+        /// <param name="source">The component producing the entry.</param>
+        /// <returns><see langword="true"/> when the entry would be written.</returns>
         public bool IsEnabled(LogLevel level, string source)
         {
             return level >= MinimumLevel;
         }
 
+        /// <summary>
+        /// Writes an enabled log entry to the process error console.
+        /// </summary>
+        /// <param name="level">The entry severity.</param>
+        /// <param name="source">The component producing the entry.</param>
+        /// <param name="message">The entry message.</param>
+        /// <param name="exception">The related exception, if any.</param>
         public void Log(
             LogLevel level,
             string source,

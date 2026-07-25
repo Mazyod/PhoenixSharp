@@ -648,7 +648,7 @@ namespace PhoenixTests
             conn.CallSend.Clear();
 
             // Simulate socket open (this should trigger rejoin)
-            socket.OnOpen?.Invoke();
+            conn!.Connect();
 
             // Channel should be rejoining
             Assert.AreEqual(ChannelState.Joining, channel.State);

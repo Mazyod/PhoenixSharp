@@ -106,6 +106,14 @@ namespace Phoenix
         /// <summary>
         /// Sends a text message.
         /// </summary>
+        /// <remarks>
+        /// This is a synchronous <see langword="void"/> contract. Adapters that
+        /// wrap an asynchronous send must report failures observed after this
+        /// method returns through the supplied configuration's
+        /// <see cref="WebsocketConfiguration.OnErrorCallback"/>. PhoenixSharp
+        /// surfaces those late failures as transport errors rather than send
+        /// errors. A Task-based transport contract is a 3.0 candidate.
+        /// </remarks>
         void Send(string data);
 
         /// <summary>

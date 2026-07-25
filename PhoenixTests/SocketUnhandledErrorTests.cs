@@ -303,7 +303,13 @@ namespace PhoenixTests
                     unhandledError?.Exception,
                     Is.SameAs(closeException)
                 );
-                Assert.That(socket.OnUnhandledError, Is.Null);
+                Assert.That(
+                    HasSocketEventSubscribers(
+                        socket,
+                        nameof(Socket.OnUnhandledError)
+                    ),
+                    Is.False
+                );
             });
         }
 

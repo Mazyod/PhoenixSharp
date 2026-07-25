@@ -22,8 +22,17 @@ namespace Phoenix
      */
     public sealed class ChannelSubscription
     {
-        public Action<Message> Callback = null!;
-        public string Event = null!;
+        public Action<Message> Callback { get; }
+        public string Event { get; }
+
+        internal ChannelSubscription(
+            string @event,
+            Action<Message> callback
+        )
+        {
+            Event = @event;
+            Callback = callback;
+        }
     }
 
     public enum ChannelState
@@ -60,7 +69,7 @@ namespace Phoenix
         public readonly string Topic;
         private bool _joinedOnce;
         private TimeSpan _timeout;
-        private bool _disposed;
+        private volatile bool _disposed;
 
 
         public ChannelState State
@@ -108,6 +117,14 @@ namespace Phoenix
             }
         }
 
+        private TimeSpan GetTimeout()
+        {
+            lock (_stateLock)
+            {
+                return _timeout;
+            }
+        }
+
         // TODO: possibly support lazy instantiation of payload (same as Phoenix js)
         public Channel(string topic, Dictionary<string, object>? @params, Socket socket)
         {
@@ -121,12 +138,16 @@ namespace Phoenix
             Topic = topic;
             Socket = socket;
 
-            _timeout = socket.Opts.Timeout;
+            var initialTimeout = socket.Opts.Timeout;
+            lock (_stateLock)
+            {
+                _timeout = initialTimeout;
+            }
             _joinPush = new Push(
                 this,
                 Message.OutBoundEvent.Join.Serialized(),
                 () => socket.Opts.MessageSerializer.Box(@params),
-                _timeout
+                initialTimeout
             );
 
             if (socket.Opts.RejoinAfter != null)
@@ -155,22 +176,7 @@ namespace Phoenix
                 }
 
                 _rejoinTimer?.Reset();
-                List<Push> bufferCopy;
-                lock (_pushBufferLock)
-                {
-                    bufferCopy = new List<Push>(_pushBuffer);
-                    _pushBuffer.Clear();
-                }
-
-                foreach (var push in bufferCopy)
-                {
-                    if (HasLeaveEpochChanged(leaveEpoch))
-                    {
-                        return;
-                    }
-
-                    push.Send();
-                }
+                FlushPushBuffer(leaveEpoch);
             });
 
             _joinPush.Receive(ReplyStatus.Error, _reply =>
@@ -262,7 +268,12 @@ namespace Phoenix
                 }
 
                 var leaveEvent = Message.OutBoundEvent.Leave.Serialized();
-                var leavePush = new Push(this, leaveEvent, null, _timeout);
+                var leavePush = new Push(
+                    this,
+                    leaveEvent,
+                    null,
+                    GetTimeout()
+                );
                 leavePush.Send();
 
                 _joinPush.Reset();
@@ -295,15 +306,21 @@ namespace Phoenix
 
         public Push Join(TimeSpan? timeout = null)
         {
-            if (_joinedOnce)
+            TimeSpan joinTimeout;
+            lock (_stateLock)
             {
-                throw new InvalidOperationException(
-                    "tried to join multiple times. 'join' can only be called a single time per channel instance");
+                if (_joinedOnce)
+                {
+                    throw new InvalidOperationException(
+                        "tried to join multiple times. 'join' can only be called a single time per channel instance");
+                }
+
+                joinTimeout = timeout ?? _timeout;
+                _timeout = joinTimeout;
+                _joinedOnce = true;
             }
 
-            _timeout = timeout ?? _timeout;
-            _joinedOnce = true;
-            Rejoin();
+            Rejoin(joinTimeout);
             return _joinPush;
         }
 
@@ -331,11 +348,10 @@ namespace Phoenix
             if (callback == null)
                 throw new ArgumentNullException(nameof(callback));
 
-            var subscription = new ChannelSubscription
-            {
-                Event = anyEvent,
-                Callback = callback
-            };
+            var subscription = new ChannelSubscription(
+                anyEvent,
+                callback
+            );
 
             lock (_stateLock)
             {
@@ -551,7 +567,47 @@ namespace Phoenix
 
         public bool CanPush()
         {
-            return Socket.IsConnected() && IsJoined();
+            return TryCaptureCanPushEpoch(out _);
+        }
+
+        private bool TryCaptureCanPushEpoch(out long leaveEpoch)
+        {
+            if (!Socket.IsConnected())
+            {
+                leaveEpoch = 0;
+                return false;
+            }
+
+            lock (_stateLock)
+            {
+                leaveEpoch = _leaveEpoch;
+                return !_disposed && _state == ChannelState.Joined;
+            }
+        }
+
+        private void FlushPushBuffer(long expectedLeaveEpoch)
+        {
+            List<Push> bufferCopy;
+            lock (_pushBufferLock)
+            {
+                if (_pushBuffer.Count == 0)
+                {
+                    return;
+                }
+
+                bufferCopy = new List<Push>(_pushBuffer);
+                _pushBuffer.Clear();
+            }
+
+            foreach (var push in bufferCopy)
+            {
+                if (HasLeaveEpochChanged(expectedLeaveEpoch))
+                {
+                    return;
+                }
+
+                push.Send();
+            }
         }
 
         public Push Push(string @event, object? payload = null, TimeSpan? timeout = null)
@@ -561,12 +617,18 @@ namespace Phoenix
             if (string.IsNullOrWhiteSpace(@event))
                 throw new ArgumentException("Event name cannot be empty or whitespace.", nameof(@event));
 
-            if (!_joinedOnce)
+            TimeSpan pushTimeout;
+            lock (_stateLock)
             {
-                throw new InvalidOperationException(
-                    $"tried to push '{@event}' to '{Topic}' before joining."
-                    + " Use channel.join() before pushing events"
-                );
+                if (!_joinedOnce)
+                {
+                    throw new InvalidOperationException(
+                        $"tried to push '{@event}' to '{Topic}' before joining."
+                        + " Use channel.join() before pushing events"
+                    );
+                }
+
+                pushTimeout = timeout ?? _timeout;
             }
 
             var serializer = Socket.Opts.MessageSerializer;
@@ -574,7 +636,7 @@ namespace Phoenix
                 this,
                 @event,
                 () => serializer.Box(payload),
-                timeout ?? _timeout
+                pushTimeout
             );
 
             if (CanPush())
@@ -588,6 +650,11 @@ namespace Phoenix
                 {
                     _pushBuffer.Add(pushEvent);
                 }
+
+                if (TryCaptureCanPushEpoch(out var leaveEpoch))
+                {
+                    FlushPushBuffer(leaveEpoch);
+                }
             }
 
             return pushEvent;
@@ -600,10 +667,12 @@ namespace Phoenix
 
             // Set state to Leaving and clear user bindings atomically
             // This ensures no race condition where callbacks can fire after Leave()
+            TimeSpan leaveTimeout;
             lock (_stateLock)
             {
                 _state = ChannelState.Leaving;
                 _leaveEpoch++;
+                leaveTimeout = timeout ?? _timeout;
                 ClearUserBindingsUnsafe();
             }
 
@@ -627,7 +696,12 @@ namespace Phoenix
             }
 
             var leaveEvent = Message.OutBoundEvent.Leave.Serialized();
-            var leavePush = new Push(this, leaveEvent, null, timeout ?? _timeout);
+            var leavePush = new Push(
+                this,
+                leaveEvent,
+                null,
+                leaveTimeout
+            );
             leavePush
                 .Receive(ReplyStatus.Ok, _ => TriggerClose())
                 .Receive(ReplyStatus.Error, _ => TriggerClose())
@@ -904,7 +978,7 @@ namespace Phoenix
 
             Socket.LeaveOpenTopic(Topic);
             SetState(ChannelState.Joining);
-            _joinPush.Resend(timeout ?? _timeout);
+            _joinPush.Resend(timeout ?? GetTimeout());
         }
 
         // Helper method not found in PhoenixJS

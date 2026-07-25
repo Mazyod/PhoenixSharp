@@ -235,6 +235,66 @@ namespace PhoenixTests
         }
 
         [Test]
+        public void SyncStateSyntheticChangesCarryPresencePayloadsTest()
+        {
+            var currentPayload = JsonBox.Serialize(
+                new Dictionary<string, object>
+                {
+                    {"source", "current"}
+                }
+            );
+            var incomingPayload = JsonBox.Serialize(
+                new Dictionary<string, object>
+                {
+                    {"source", "incoming"}
+                }
+            );
+            var currentPresence = PresencePayloadWithRefs(
+                "shared",
+                "left"
+            );
+            currentPresence.Payload = currentPayload;
+            var incomingPresence = PresencePayloadWithRefs(
+                "shared",
+                "joined"
+            );
+            incomingPresence.Payload = incomingPayload;
+            PresencePayload? syntheticJoin = null;
+            PresencePayload? syntheticLeave = null;
+
+            var result = Presence.SyncState(
+                new Dictionary<string, PresencePayload>
+                {
+                    {"u1", currentPresence}
+                },
+                new Dictionary<string, PresencePayload>
+                {
+                    {"u1", incomingPresence}
+                },
+                (_, _, joinedPresence) =>
+                    syntheticJoin = joinedPresence,
+                (_, _, leftPresence) =>
+                    syntheticLeave = leftPresence
+            );
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(
+                    syntheticJoin!.Payload,
+                    Is.SameAs(incomingPayload)
+                );
+                Assert.That(
+                    syntheticLeave!.Payload,
+                    Is.SameAs(currentPayload)
+                );
+                Assert.That(
+                    result["u1"].Payload,
+                    Is.SameAs(incomingPayload)
+                );
+            });
+        }
+
+        [Test]
         public void SyncDiffPreservesDuplicateMetaMembershipAndOrderTest()
         {
             var currentPresence = PresencePayloadWithRefs(

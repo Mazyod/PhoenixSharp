@@ -118,6 +118,10 @@ namespace Phoenix
         private int _disposed;
         private int _state;
 
+        internal TaskExecution()
+        {
+        }
+
         internal bool Cancelled => Volatile.Read(ref _state) == CancelledState;
 
         internal CancellationToken Token => _cancellationSource.Token;

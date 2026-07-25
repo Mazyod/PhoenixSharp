@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using Phoenix;
 using PhoenixTests.TestDoubles;
 using PhoenixTests.WebSocketImpl;
@@ -12,6 +13,18 @@ namespace PhoenixTests
     /// </summary>
     public abstract class PhoenixTestBase
     {
+        protected static bool HasSocketEventSubscribers(
+            Socket socket,
+            string eventName
+        )
+        {
+            var eventField = typeof(Socket).GetField(
+                eventName,
+                BindingFlags.Instance | BindingFlags.NonPublic
+            );
+            return eventField?.GetValue(socket) is Delegate;
+        }
+
         /// <summary>
         /// Creates a socket with a mock factory and default options, then connects it.
         /// </summary>

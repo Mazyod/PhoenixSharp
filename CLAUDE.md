@@ -45,15 +45,15 @@ dotnet format Phoenix.sln --no-restore
 The library is distributed via two channels: **NuGet** (`PhoenixSharp`) and **OpenUPM** (`io.level3.phoenixsharp`). Both are published from a single trigger.
 
 **To release:**
-1. Create a GitHub release with a version tag (for 2.0, `v2.0.0`)
-2. The `publish.yml` workflow:
-   - Updates the Unity `package.json` version at `src/PhoenixSharp.Unity/Assets/Plugins/PhoenixSharp/package.json`
-   - Updates the README manifest example
-   - Commits and pushes the version bump back to `master`
+1. Before tagging, update the Unity `package.json` version at `src/PhoenixSharp.Unity/Assets/Plugins/PhoenixSharp/package.json` and the README manifest example, then commit those changes
+2. Create the version tag from that commit and publish the GitHub release (for 2.0, `v2.0.0`)
+3. The `publish.yml` workflow:
+   - Derives the package version from the tag
+   - Keeps the Unity manifest and README example aligned with that version
    - Builds and pushes the NuGet package via trusted publishing (OIDC)
-3. OpenUPM automatically detects the new git tag and publishes the Unity package from the `package.json`
+4. OpenUPM automatically detects the new git tag and publishes the Unity package from the tagged `package.json`
 
-**Version management:** Version is set via git tag at release time. The `<Version>` in `Phoenix.csproj` is the local-build fallback and should match the release line.
+**Version management:** The git tag sets the NuGet release version, while OpenUPM reads the immutable tagged manifest. The manifest version must therefore be bumped before tagging. The `<Version>` in `Phoenix.csproj` is the local-build fallback and should match the release line.
 
 ## Code Style
 

@@ -54,8 +54,8 @@ namespace Phoenix
      * @param {Object} opts - The options,
      * for example `{events: {state: "state", diff: "diff"}}`
      *
-     * TODO: We are using immutable types since the PhoenixJS implementation uses deep clone.
-     * TODO: Immutable types generate a lot of garbage, so we should consider using a different approach.
+     * Presence DTOs are mutable; internal snapshots are treated as
+     * immutable by convention.
      */
     public sealed class Presence
     {
@@ -95,9 +95,9 @@ namespace Phoenix
         private string? _joinRef;
         private State _state = new State();
 
-        public OnJoinDelegate? OnJoin;
-        public OnLeaveDelegate? OnLeave;
-        public OnSyncDelegate? OnSync;
+        public event OnJoinDelegate? OnJoin;
+        public event OnLeaveDelegate? OnLeave;
+        public event OnSyncDelegate? OnSync;
 
         /// <summary>
         /// Gets the current presence state snapshot.
@@ -181,7 +181,7 @@ namespace Phoenix
             }
 
             InvokePresenceChanges(changes, onJoin, onLeave);
-            onSync?.Invoke();
+            InvokeOnSync(onSync);
         }
 
         private void HandleDiff(Message message)
@@ -222,7 +222,7 @@ namespace Phoenix
             }
 
             InvokePresenceChanges(changes, onJoin, onLeave);
-            onSync?.Invoke();
+            InvokeOnSync(onSync);
         }
 
         private bool InPendingSyncStateUnsafe(string? channelJoinRef)
@@ -230,7 +230,7 @@ namespace Phoenix
             return _joinRef == null || _joinRef != channelJoinRef;
         }
 
-        private static void InvokePresenceChanges(
+        private void InvokePresenceChanges(
             List<PresenceChange> changes,
             OnJoinDelegate? onJoin,
             OnLeaveDelegate? onLeave
@@ -240,7 +240,8 @@ namespace Phoenix
             {
                 if (change.IsJoin)
                 {
-                    onJoin?.Invoke(
+                    InvokeOnJoin(
+                        onJoin,
                         change.Key,
                         change.CurrentPresence,
                         change.ChangedPresence
@@ -248,13 +249,108 @@ namespace Phoenix
                 }
                 else
                 {
-                    onLeave?.Invoke(
+                    InvokeOnLeave(
+                        onLeave,
                         change.Key,
                         change.CurrentPresence,
                         change.ChangedPresence
                     );
                 }
             }
+        }
+
+        private void InvokeOnJoin(
+            OnJoinDelegate? handlers,
+            string key,
+            PresencePayload? currentPresence,
+            PresencePayload newPresence
+        )
+        {
+            if (handlers == null)
+            {
+                return;
+            }
+
+            foreach (OnJoinDelegate handler
+                in handlers.GetInvocationList())
+            {
+                try
+                {
+                    handler(key, currentPresence, newPresence);
+                }
+                catch (Exception ex)
+                {
+                    ReportCallbackException(
+                        "Presence OnJoin callback threw exception",
+                        ex
+                    );
+                }
+            }
+        }
+
+        private void InvokeOnLeave(
+            OnLeaveDelegate? handlers,
+            string key,
+            PresencePayload? currentPresence,
+            PresencePayload leftPresence
+        )
+        {
+            if (handlers == null)
+            {
+                return;
+            }
+
+            foreach (OnLeaveDelegate handler
+                in handlers.GetInvocationList())
+            {
+                try
+                {
+                    handler(key, currentPresence, leftPresence);
+                }
+                catch (Exception ex)
+                {
+                    ReportCallbackException(
+                        "Presence OnLeave callback threw exception",
+                        ex
+                    );
+                }
+            }
+        }
+
+        private void InvokeOnSync(OnSyncDelegate? handlers)
+        {
+            if (handlers == null)
+            {
+                return;
+            }
+
+            foreach (OnSyncDelegate handler
+                in handlers.GetInvocationList())
+            {
+                try
+                {
+                    handler();
+                }
+                catch (Exception ex)
+                {
+                    ReportCallbackException(
+                        "Presence OnSync callback threw exception",
+                        ex
+                    );
+                }
+            }
+        }
+
+        private void ReportCallbackException(
+            string message,
+            Exception exception
+        )
+        {
+            _channel.Socket.ReportContainedCallbackException(
+                message,
+                LogSource.Channel,
+                exception
+            );
         }
 
         // lower-level public static API
@@ -311,12 +407,20 @@ namespace Phoenix
 
                     if (joinedMetas.Count > 0)
                     {
-                        joins[key] = new PresencePayload { Metas = joinedMetas };
+                        joins[key] = new PresencePayload
+                        {
+                            Metas = joinedMetas,
+                            Payload = newPresence.Payload,
+                        };
                     }
 
                     if (leftMetas.Count > 0)
                     {
-                        leaves[key] = new PresencePayload { Metas = leftMetas };
+                        leaves[key] = new PresencePayload
+                        {
+                            Metas = leftMetas,
+                            Payload = currentPresence.Payload,
+                        };
                     }
                 }
                 else

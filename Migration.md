@@ -143,6 +143,49 @@ synchronously from `Connect()` or later from any thread, `State` must be safe
 to read from any thread, and adapters should preserve close codes and reasons
 when their underlying transport exposes them.
 
+`IWebsocket.Send` remains a synchronous `void` contract. An adapter that wraps
+an asynchronous send cannot report a failure that arrives after `Send`
+returns by throwing it from `Send`; it must invoke the configuration's
+`OnErrorCallback` instead. PhoenixSharp surfaces that late callback as a
+`Transport` error, not a `Send` error. A Task-based transport contract is a
+3.0 candidate for representing asynchronous send completion directly.
+
+#### Socket and Presence callback events
+
+The `Socket` callback members (`OnOpen`, `OnClose`, `OnError`,
+`OnUnhandledError`, and `OnMessage`) and the `Presence` callback members
+(`OnJoin`, `OnLeave`, and `OnSync`) are now C# events instead of public
+delegate fields. Existing `+=` and `-=` subscriptions are unchanged. Code
+that directly assigned a handler with `=`, invoked a callback externally, or
+read its delegate value now fails to compile; retain your own delegate when
+you need to remove or invoke it.
+
+#### `ChannelSubscription` construction and mutation
+
+`ChannelSubscription` instances are created only by `Channel.On(...)` in 2.0.
+The public parameterless constructor is gone, and the `Event` and `Callback`
+members are now get-only properties (mutating `Event` on a live subscription
+silently broke `Off(subscription)` lookups). Code that constructed
+subscriptions manually or reassigned their members must instead subscribe via
+`On(...)` and keep the returned token:
+
+```csharp
+// Before 2.0
+var sub = new ChannelSubscription { Event = "my_event", Callback = handler };
+
+// 2.0
+var sub = channel.On("my_event", handler);
+channel.Off(sub);
+```
+
+#### `TaskExecution` construction
+
+`TaskExecution`'s public parameterless constructor is now internal. A directly
+constructed instance was never associated with a scheduled action, so it could
+only cancel a never-scheduled execution. Custom `IDelayedExecutor`
+implementations should return their own `IDelayedExecution` implementation
+instead of reusing `TaskExecution`.
+
 #### `Presence.State` writers
 
 `State` used to be a public field, so callers could replace it or take it by
@@ -181,16 +224,19 @@ Previously, transport and wire-serialization failures could escape the socket
 send path, disturb channel/rejoin state, strand or grow the send buffer, or
 prevent later buffered entries from being attempted. In 2.0, transport
 `Send` and wire-serialization exceptions no longer escape synchronously from
-that path. Normal pushes use a contained at-least-once retry policy: a buffered
-entry is dropped after its fifth failed transport send and failures surface
-through `OnError` as `Send`; a serialization-poisoned entry surfaces as
-`Serialization`, is dropped immediately, and does not block the remaining
-buffer. Heartbeats are sent once or dropped and are never buffered. Send
-failures do not error channels, reset rejoin backoff, or fault connection
-waiters. Subscribe to `OnError` and make non-idempotent server operations
-deduplicatable: if a transport partially transmits a frame and then throws,
-PhoenixSharp cannot detect that delivery and a retry can execute the operation
-twice.
+that path. Normal pushes use a contained at-least-once retry policy within one
+connection generation: a buffered entry is dropped after its fifth failed
+transport send and failures surface through `OnError` as `Send`; a
+serialization-poisoned entry surfaces as `Serialization`, is dropped
+immediately, and does not block the remaining buffer. This is not an
+across-reconnect delivery guarantee. Frames buffered before reconnect retain
+their old `join_ref`; when flushed in the new generation, the server drops
+those stale frames, matching phoenix.js behavior. Heartbeats are sent once or
+dropped and are never buffered. Send failures do not error channels, reset
+rejoin backoff, or fault connection waiters. Subscribe to `OnError` and make
+non-idempotent server operations deduplicatable: if a transport partially
+transmits a frame and then throws, PhoenixSharp cannot detect that delivery
+and a retry can execute the operation twice.
 
 #### Connection parameters
 
@@ -263,10 +309,10 @@ PhoenixSharp protects its internal state without promising a thread for user
 code. Socket delegates, channel subscriptions, reply hooks, presence events,
 and log sinks may all run on any thread. Marshal explicitly before touching
 Unity or UI objects, and wrap callback bodies because an exception escaping
-thread-pool user code bypasses UI-context unhandled-exception hooks. Public
-delegate fields still use normal `+=`/`-=` mutation; add or remove
-`OnJoin`, `OnLeave`, `OnSync`, and socket handlers before connecting or from
-the socket callback thread.
+thread-pool user code bypasses UI-context unhandled-exception hooks. Socket
+and presence callbacks are events, so concurrent `+=`/`-=` operations update
+their invocation lists atomically; that does not serialize handler execution
+or give callbacks thread affinity.
 
 #### Async socket and channel lifecycle
 

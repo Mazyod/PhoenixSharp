@@ -85,11 +85,44 @@ namespace PhoenixTests
 
             socket.Dispose();
 
-            Assert.IsNull(socket.OnOpen);
-            Assert.IsNull(socket.OnClose);
-            Assert.IsNull(socket.OnError);
-            Assert.IsNull(socket.OnUnhandledError);
-            Assert.IsNull(socket.OnMessage);
+            Assert.Multiple(() =>
+            {
+                Assert.That(
+                    HasSocketEventSubscribers(
+                        socket,
+                        nameof(Socket.OnOpen)
+                    ),
+                    Is.False
+                );
+                Assert.That(
+                    HasSocketEventSubscribers(
+                        socket,
+                        nameof(Socket.OnClose)
+                    ),
+                    Is.False
+                );
+                Assert.That(
+                    HasSocketEventSubscribers(
+                        socket,
+                        nameof(Socket.OnError)
+                    ),
+                    Is.False
+                );
+                Assert.That(
+                    HasSocketEventSubscribers(
+                        socket,
+                        nameof(Socket.OnUnhandledError)
+                    ),
+                    Is.False
+                );
+                Assert.That(
+                    HasSocketEventSubscribers(
+                        socket,
+                        nameof(Socket.OnMessage)
+                    ),
+                    Is.False
+                );
+            });
             Assert.IsFalse(openCalled);
             Assert.IsFalse(closeCalled);
             Assert.IsFalse(errorCalled);
@@ -158,6 +191,107 @@ namespace PhoenixTests
         }
 
         [Test]
+        public void DisconnectDuringBuildClosesSupersededTransportTest()
+        {
+            using var buildEntered = new ManualResetEventSlim(false);
+            using var releaseBuild = new ManualResetEventSlim(false);
+            var factory = new DisposeDuringBuildWebsocketFactory(
+                buildEntered,
+                releaseBuild
+            );
+            using var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    HeartbeatInterval = null,
+                    ReconnectAfter = null
+                }
+            );
+            var connectTask = Task.Run(socket.Connect);
+
+            try
+            {
+                Assert.That(
+                    buildEntered.Wait(TimeSpan.FromSeconds(2)),
+                    Is.True,
+                    "Connect did not reach the deterministic Build window."
+                );
+                socket.Disconnect();
+            }
+            finally
+            {
+                releaseBuild.Set();
+            }
+
+            Assert.That(
+                connectTask.Wait(TimeSpan.FromSeconds(2)),
+                Is.True,
+                "Connect did not return after Build was released."
+            );
+            Assert.Multiple(() =>
+            {
+                Assert.That(socket.Conn, Is.Null);
+                Assert.That(factory.Connection, Is.Not.Null);
+                Assert.That(factory.Connection!.ConnectCalled, Is.False);
+                Assert.That(factory.Connection.CloseCalled, Is.True);
+            });
+        }
+
+        [Test]
+        public void DisposeAfterClaimClosesTransportThatOpensAfterTeardownTest()
+        {
+            using var connectEntered = new ManualResetEventSlim(false);
+            using var releaseConnect = new ManualResetEventSlim(false);
+            var factory = new DisposeDuringConnectWebsocketFactory(
+                connectEntered,
+                releaseConnect
+            );
+            var socket = new Socket(
+                "ws://localhost:1234",
+                null,
+                factory,
+                new Socket.Options(new JsonMessageSerializer())
+                {
+                    HeartbeatInterval = null,
+                    ReconnectAfter = null
+                }
+            );
+            var connectTask = Task.Run(socket.Connect);
+
+            try
+            {
+                Assert.That(
+                    connectEntered.Wait(TimeSpan.FromSeconds(2)),
+                    Is.True,
+                    "Connect did not reach the deterministic transport Connect window."
+                );
+                socket.Dispose();
+            }
+            finally
+            {
+                releaseConnect.Set();
+            }
+
+            Assert.That(
+                connectTask.Wait(TimeSpan.FromSeconds(2)),
+                Is.True,
+                "Connect did not return after transport Connect was released."
+            );
+            Assert.Multiple(() =>
+            {
+                Assert.That(socket.Conn, Is.Null);
+                Assert.That(factory.Connection.ConnectCalled, Is.True);
+                Assert.That(factory.Connection.CloseCalled, Is.True);
+                Assert.That(
+                    factory.Connection.State,
+                    Is.EqualTo(WebsocketState.Closed)
+                );
+            });
+        }
+
+        [Test]
         public void DisposeOnDisconnectedSocketTest()
         {
             var socket = CreateSocket();
@@ -188,7 +322,10 @@ namespace PhoenixTests
                 channelCreationTask = Task.Run(() => socket.Channel("test"));
                 Assert.That(
                     SpinWait.SpinUntil(
-                        () => socket.OnOpen != null,
+                        () => HasSocketEventSubscribers(
+                            socket,
+                            nameof(Socket.OnOpen)
+                        ),
                         TimeSpan.FromSeconds(1)
                     ),
                     Is.True,
@@ -326,6 +463,85 @@ namespace PhoenixTests
                 CloseCalled = true;
                 State = WebsocketState.Closed;
                 _config.OnCloseCallback(this, code ?? 1_000, message ?? "closed");
+            }
+        }
+
+        private sealed class DisposeDuringConnectWebsocketFactory
+            : IWebsocketFactory
+        {
+            private readonly ManualResetEventSlim _connectEntered;
+            private readonly ManualResetEventSlim _releaseConnect;
+
+            public DisposeDuringConnectWebsocketFactory(
+                ManualResetEventSlim connectEntered,
+                ManualResetEventSlim releaseConnect
+            )
+            {
+                _connectEntered = connectEntered;
+                _releaseConnect = releaseConnect;
+            }
+
+            public DisposeDuringConnectWebsocket Connection
+            {
+                get;
+                private set;
+            } = null!;
+
+            public IWebsocket Build(WebsocketConfiguration config)
+            {
+                Connection = new DisposeDuringConnectWebsocket(
+                    config,
+                    _connectEntered,
+                    _releaseConnect
+                );
+                return Connection;
+            }
+        }
+
+        private sealed class DisposeDuringConnectWebsocket : IWebsocket
+        {
+            private readonly WebsocketConfiguration _config;
+            private readonly ManualResetEventSlim _connectEntered;
+            private readonly ManualResetEventSlim _releaseConnect;
+
+            public DisposeDuringConnectWebsocket(
+                WebsocketConfiguration config,
+                ManualResetEventSlim connectEntered,
+                ManualResetEventSlim releaseConnect
+            )
+            {
+                _config = config;
+                _connectEntered = connectEntered;
+                _releaseConnect = releaseConnect;
+            }
+
+            public bool CloseCalled { get; private set; }
+            public bool ConnectCalled { get; private set; }
+            public WebsocketState State { get; private set; } =
+                WebsocketState.Closed;
+
+            public void Connect()
+            {
+                _connectEntered.Set();
+                _releaseConnect.Wait(TimeSpan.FromSeconds(5));
+                ConnectCalled = true;
+                State = WebsocketState.Open;
+                _config.OnOpenCallback(this);
+            }
+
+            public void Send(string message)
+            {
+            }
+
+            public void Close(ushort? code = null, string? message = null)
+            {
+                CloseCalled = true;
+                State = WebsocketState.Closed;
+                _config.OnCloseCallback(
+                    this,
+                    code ?? 1_000,
+                    message ?? "closed"
+                );
             }
         }
     }

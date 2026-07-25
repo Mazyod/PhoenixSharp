@@ -88,11 +88,28 @@ namespace Phoenix
                 return;
             }
 
+            IJsonBox? payload;
+            try
+            {
+                payload = _payload?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                _channel.Socket.ReportError(
+                    new PhoenixError(
+                        "Message payload serialization failed",
+                        PhoenixErrorKind.Serialization,
+                        ex
+                    )
+                );
+                return;
+            }
+
             // sent = true;
             _channel.Socket.Push(new Message(
                 _channel.Topic,
                 _event,
-                _payload?.Invoke(),
+                payload,
                 messageRef,
                 joinRef
             ));
@@ -114,10 +131,33 @@ namespace Phoenix
 
             if (receivedResponse.HasValue)
             {
-                callback(receivedResponse.Value);
+                InvokeReceiveCallback(callback, receivedResponse.Value);
             }
 
             return this;
+        }
+
+        private void InvokeReceiveCallback(
+            Action<Reply> callback,
+            Reply reply
+        )
+        {
+            foreach (Action<Reply> handler
+                in callback.GetInvocationList())
+            {
+                try
+                {
+                    handler(reply);
+                }
+                catch (Exception ex)
+                {
+                    _channel.Socket.ReportContainedCallbackException(
+                        $"Push receive callback threw exception for '{_event}'",
+                        LogSource.Push,
+                        ex
+                    );
+                }
+            }
         }
 
         private void AddReceiveHookUnsafe(ReplyStatus status, Action<Reply> callback)
@@ -199,7 +239,15 @@ namespace Phoenix
 
             CancelRefEvent(refEventSubscription);
             delayedExecution?.Cancel();
-            callbacks?.ForEach(callback => callback(receivedResponse));
+            if (callbacks == null)
+            {
+                return;
+            }
+
+            foreach (var callback in callbacks)
+            {
+                InvokeReceiveCallback(callback, receivedResponse);
+            }
         }
 
         private void CancelRefEvent(ChannelSubscription? subscription)
@@ -348,14 +396,17 @@ namespace Phoenix
 
             var serializer = _channel.Socket.Opts.MessageSerializer;
 
-            _channel.Trigger(new Message(
-                @event: refEvent,
-                payload: serializer.Box(new Dictionary<string, object>
-                    {
-                        {"status", status.Serialized()}
-                    }
+            _channel.Socket.TriggerChannel(
+                _channel,
+                new Message(
+                    @event: refEvent,
+                    payload: serializer.Box(new Dictionary<string, object>
+                        {
+                            {"status", status.Serialized()}
+                        }
+                    )
                 )
-            ));
+            );
         }
 
         /// <summary>
