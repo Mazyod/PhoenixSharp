@@ -342,12 +342,91 @@ namespace Phoenix
             return subscription;
         }
 
+        /// <summary>
+        /// Subscribes a callback that receives the event payload unboxed as
+        /// <typeparamref name="T"/>.
+        /// </summary>
+        /// <remarks>
+        /// A null payload or an unboxing failure skips this typed callback,
+        /// logs a warning, and is surfaced through
+        /// <see cref="Socket.OnUnhandledError"/> as a dispatch error.
+        /// Exceptions thrown by <paramref name="callback"/> continue through
+        /// the channel's per-subscriber dispatch containment.
+        /// </remarks>
         public ChannelSubscription On<T>(string anyEvent, Action<T> callback)
         {
             return On(
                 anyEvent,
-                message => callback(message.Payload!.Unbox<T>()!)
+                message =>
+                {
+                    if (message.Payload == null)
+                    {
+                        ReportTypedPayloadIssue(
+                            $"Typed event callback for '{anyEvent}' skipped "
+                            + "because its payload is null",
+                            null
+                        );
+                        return;
+                    }
+
+                    T payload;
+                    try
+                    {
+                        payload = message.Payload.Unbox<T>()!;
+                    }
+                    catch (Exception ex)
+                    {
+                        var targetType = typeof(T);
+                        var targetTypeName =
+                            targetType.FullName ?? targetType.Name;
+                        ReportTypedPayloadIssue(
+                            $"Typed event callback for '{anyEvent}' could not "
+                            + $"unbox its payload as '{targetTypeName}'",
+                            ex
+                        );
+                        return;
+                    }
+
+                    if (payload is null)
+                    {
+                        ReportTypedPayloadIssue(
+                            $"Typed event callback for '{anyEvent}' skipped "
+                            + "because its payload is null",
+                            null
+                        );
+                        return;
+                    }
+
+                    callback(payload);
+                }
             );
+        }
+
+        private void ReportTypedPayloadIssue(
+            string message,
+            Exception? exception
+        )
+        {
+            Socket.ReportUnhandledError(
+                new PhoenixError(
+                    message,
+                    PhoenixErrorKind.Dispatch,
+                    exception
+                )
+            );
+            var logger = Socket.GetEnabledLogger(
+                LogLevel.Warn,
+                LogSource.Channel
+            );
+            if (logger != null)
+            {
+                logger.Log(
+                    LogLevel.Warn,
+                    LogSource.Channel,
+                    message,
+                    exception
+                );
+            }
         }
 
         public bool Off(ChannelSubscription subscription)
@@ -518,7 +597,7 @@ namespace Phoenix
                 () => tcs.TrySetCanceled()
             );
 
-            return AwaitAndDisposeCancellationRegistrationAsync(
+            return TaskUtilities.AwaitAndDisposeCancellationRegistrationAsync(
                 tcs.Task,
                 cancellationRegistration
             );
@@ -541,7 +620,7 @@ namespace Phoenix
                 () => tcs.TrySetCanceled()
             );
 
-            return AwaitAndDisposeCancellationRegistrationAsync(
+            return TaskUtilities.AwaitAndDisposeCancellationRegistrationAsync(
                 tcs.Task,
                 cancellationRegistration
             );
@@ -575,7 +654,7 @@ namespace Phoenix
                 () => tcs.TrySetCanceled()
             );
 
-            return AwaitAndDisposeCancellationRegistrationAsync(
+            return TaskUtilities.AwaitAndDisposeCancellationRegistrationAsync(
                 tcs.Task,
                 cancellationRegistration
             );
@@ -598,25 +677,10 @@ namespace Phoenix
                 () => tcs.TrySetCanceled()
             );
 
-            return AwaitAndDisposeCancellationRegistrationAsync(
+            return TaskUtilities.AwaitAndDisposeCancellationRegistrationAsync(
                 tcs.Task,
                 cancellationRegistration
             );
-        }
-
-        private static async Task<T> AwaitAndDisposeCancellationRegistrationAsync<T>(
-            Task<T> task,
-            CancellationTokenRegistration cancellationRegistration
-        )
-        {
-            try
-            {
-                return await task.ConfigureAwait(false);
-            }
-            finally
-            {
-                cancellationRegistration.Dispose();
-            }
         }
 
         /// <summary>
@@ -648,47 +712,90 @@ namespace Phoenix
 
             var tcs = new TaskCompletionSource<Message>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-            ChannelSubscription? subscription = null;
             CancellationTokenSource? timeoutCts = null;
+            CancellationTokenRegistration timeoutRegistration = default;
             CancellationTokenRegistration cancellationRegistration = default;
+            try
+            {
+                if (timeout.HasValue)
+                {
+                    timeoutCts = new CancellationTokenSource();
+                    timeoutRegistration = timeoutCts.Token.Register(() =>
+                        tcs.TrySetException(new TimeoutException(
+                            $"Timeout waiting for event '{eventName}' after "
+                            + $"{timeout.Value.TotalMilliseconds}ms."
+                        ))
+                    );
+                    timeoutCts.CancelAfter(timeout.Value);
+                }
 
-            void Cleanup()
+                cancellationRegistration = cancellationToken.Register(() =>
+                    tcs.TrySetCanceled()
+                );
+            }
+            catch
+            {
+                timeoutRegistration.Dispose();
+                timeoutCts?.Dispose();
+                cancellationRegistration.Dispose();
+                throw;
+            }
+
+            ChannelSubscription? subscription = null;
+            try
+            {
+                if (!tcs.Task.IsCompleted)
+                {
+                    subscription = On(
+                        eventName,
+                        message => tcs.TrySetResult(message)
+                    );
+                }
+            }
+            catch
+            {
+                timeoutRegistration.Dispose();
+                timeoutCts?.Dispose();
+                cancellationRegistration.Dispose();
+                throw;
+            }
+
+            return AwaitEventAndCleanupAsync(
+                tcs.Task,
+                subscription,
+                timeoutCts,
+                timeoutRegistration,
+                cancellationRegistration
+            );
+        }
+
+        private async Task<Message> AwaitEventAndCleanupAsync(
+            Task<Message> waitTask,
+            ChannelSubscription? subscription,
+            CancellationTokenSource? timeoutCts,
+            CancellationTokenRegistration timeoutRegistration,
+            CancellationTokenRegistration cancellationRegistration
+        )
+        {
+            try
+            {
+                return await TaskUtilities
+                    .AwaitAndDisposeCancellationRegistrationAsync(
+                        waitTask,
+                        cancellationRegistration
+                    )
+                    .ConfigureAwait(false);
+            }
+            finally
             {
                 if (subscription != null)
                 {
                     Off(subscription);
                 }
+
+                timeoutRegistration.Dispose();
                 timeoutCts?.Dispose();
-                cancellationRegistration.Dispose();
             }
-
-            subscription = On(eventName, message =>
-            {
-                Cleanup();
-                tcs.TrySetResult(message);
-            });
-
-            // Set up timeout if specified
-            if (timeout.HasValue)
-            {
-                timeoutCts = new CancellationTokenSource();
-                timeoutCts.CancelAfter(timeout.Value);
-                timeoutCts.Token.Register(() =>
-                {
-                    Cleanup();
-                    tcs.TrySetException(new TimeoutException(
-                        $"Timeout waiting for event '{eventName}' after {timeout.Value.TotalMilliseconds}ms."));
-                });
-            }
-
-            // Handle external cancellation
-            cancellationRegistration = cancellationToken.Register(() =>
-            {
-                Cleanup();
-                tcs.TrySetCanceled();
-            });
-
-            return tcs.Task;
         }
 
         // overrideable message hook

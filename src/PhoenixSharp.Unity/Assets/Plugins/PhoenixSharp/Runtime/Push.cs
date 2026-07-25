@@ -366,25 +366,10 @@ namespace Phoenix
                 () => tcs.TrySetCanceled()
             );
 
-            return AwaitAndDisposeCancellationRegistrationAsync(
+            return TaskUtilities.AwaitAndDisposeCancellationRegistrationAsync(
                 tcs.Task,
                 cancellationRegistration
             );
-        }
-
-        private static async Task<T> AwaitAndDisposeCancellationRegistrationAsync<T>(
-            Task<T> task,
-            CancellationTokenRegistration cancellationRegistration
-        )
-        {
-            try
-            {
-                return await task.ConfigureAwait(false);
-            }
-            finally
-            {
-                cancellationRegistration.Dispose();
-            }
         }
 
         //private bool sent = false;

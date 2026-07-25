@@ -93,6 +93,7 @@ namespace Phoenix
         private readonly Channel _channel;
         private readonly DiffList _pendingDiffs = new DiffList();
         private readonly object _stateLock = new object();
+        private bool _hasSynced;
         private string? _joinRef;
         private State _state = new State();
 
@@ -175,6 +176,7 @@ namespace Phoenix
 
                 _pendingDiffs.Clear();
                 _state = updatedState;
+                _hasSynced = true;
                 onJoin = OnJoin;
                 onLeave = OnLeave;
                 onSync = OnSync;
@@ -382,33 +384,74 @@ namespace Phoenix
         /// Waits asynchronously for the initial presence sync to complete.
         /// </summary>
         /// <param name="cancellationToken">A cancellation token to cancel the wait operation.</param>
-        /// <returns>A task that completes when the initial sync callback is invoked.</returns>
+        /// <returns>A task that completes when the initial state has synchronized.</returns>
         /// <remarks>
-        /// This method subscribes to the OnSync delegate and completes when the first sync occurs.
-        /// If a sync has already occurred (State is not empty and not in pending sync state),
-        /// the task may complete on the next sync event.
+        /// This method completes immediately when the initial state has already
+        /// been synchronized. Otherwise, it subscribes atomically with the
+        /// synchronized-state check and completes when the first sync occurs.
         /// </remarks>
         public Task WaitForInitialSyncAsync(CancellationToken cancellationToken = default)
         {
             var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            OnSyncDelegate handler = () => tcs.TrySetResult(true);
 
-            OnSyncDelegate? handler = null;
-            handler = () =>
+            lock (_stateLock)
             {
-                // Unsubscribe to prevent multiple completions
-                OnSync -= handler;
-                tcs.TrySetResult(true);
-            };
+                if (_hasSynced)
+                {
+                    return Task.CompletedTask;
+                }
 
-            OnSync += handler;
+                OnSync += handler;
+            }
 
-            cancellationToken.Register(() =>
+            CancellationTokenRegistration cancellationRegistration;
+            try
+            {
+                cancellationRegistration = cancellationToken.Register(() =>
+                    tcs.TrySetCanceled()
+                );
+            }
+            catch
+            {
+                RemoveInitialSyncHandler(handler);
+                throw;
+            }
+
+            return AwaitInitialSyncAndCleanupAsync(
+                tcs.Task,
+                handler,
+                cancellationRegistration
+            );
+        }
+
+        private async Task AwaitInitialSyncAndCleanupAsync(
+            Task<bool> waitTask,
+            OnSyncDelegate handler,
+            CancellationTokenRegistration cancellationRegistration
+        )
+        {
+            try
+            {
+                await TaskUtilities
+                    .AwaitAndDisposeCancellationRegistrationAsync(
+                        waitTask,
+                        cancellationRegistration
+                    )
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                RemoveInitialSyncHandler(handler);
+            }
+        }
+
+        private void RemoveInitialSyncHandler(OnSyncDelegate handler)
+        {
+            lock (_stateLock)
             {
                 OnSync -= handler;
-                tcs.TrySetCanceled();
-            });
-
-            return tcs.Task;
+            }
         }
 
         /// <summary>
@@ -507,13 +550,17 @@ namespace Phoenix
         {
             try
             {
-                return await waitTask.ConfigureAwait(false);
+                return await TaskUtilities
+                    .AwaitAndDisposeCancellationRegistrationAsync(
+                        waitTask,
+                        cancellationRegistration
+                    )
+                    .ConfigureAwait(false);
             }
             finally
             {
                 RemoveUserWaitHandler(handler);
                 timeoutRegistration.Dispose();
-                cancellationRegistration.Dispose();
                 timeoutCts.Dispose();
             }
         }

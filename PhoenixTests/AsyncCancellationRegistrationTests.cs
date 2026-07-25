@@ -217,7 +217,7 @@ namespace PhoenixTests
             );
         }
 
-        private static int CountActiveRegistrations(
+        internal static int CountActiveRegistrations(
             CancellationTokenSource cancellationSource
         )
         {
