@@ -527,7 +527,11 @@ namespace Phoenix
                 );
             }
 
-            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            // Explicitly typed: Unity's bundled Roslyn loses definite-assignment
+            // flow state for var-inferred locals captured by local functions and
+            // emits spurious CS8602 warnings at the dereference sites below.
+            TaskCompletionSource<bool> tcs =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
             var completionClaimed = 0;
             CancellationTokenRegistration cancellationRegistration = default;
             PendingConnectWaiter? pendingConnectWaiter = null;
@@ -556,13 +560,16 @@ namespace Phoenix
             void FinishSuccessfully()
             {
                 Cleanup();
-                tcs.SetResult(true);
+                // The '!' below (and in FinishWithException) suppresses a spurious
+                // CS8602 from Unity's bundled Roslyn, which cannot prove this
+                // captured local's assignment; tcs is never null here.
+                tcs!.SetResult(true);
             }
 
             void FinishWithException(Exception exception)
             {
                 Cleanup();
-                tcs.SetException(exception);
+                tcs!.SetException(exception);
             }
 
             void FinishWithCancellation()
