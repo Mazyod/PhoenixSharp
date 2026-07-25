@@ -778,6 +778,15 @@ namespace Phoenix
                 }
                 catch (Exception ex)
                 {
+                    var errorMessage =
+                        $"Event callback threw exception for '{callbackMessage.Event}'";
+                    Socket.ReportUnhandledError(
+                        new PhoenixError(
+                            errorMessage,
+                            PhoenixErrorKind.Dispatch,
+                            ex
+                        )
+                    );
                     var logger = Socket.GetEnabledLogger(
                         LogLevel.Error,
                         LogSource.Channel
@@ -787,7 +796,7 @@ namespace Phoenix
                         logger.Log(
                             LogLevel.Error,
                             LogSource.Channel,
-                            $"Event callback threw exception for '{callbackMessage.Event}'",
+                            errorMessage,
                             ex
                         );
                     }

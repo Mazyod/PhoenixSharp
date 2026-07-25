@@ -74,11 +74,13 @@ namespace PhoenixTests
             var openCalled = false;
             var closeCalled = false;
             var errorCalled = false;
+            var unhandledErrorCalled = false;
             var messageCalled = false;
 
             socket.OnOpen += () => openCalled = true;
             socket.OnClose += (_, _) => closeCalled = true;
             socket.OnError += _ => errorCalled = true;
+            socket.OnUnhandledError += _ => unhandledErrorCalled = true;
             socket.OnMessage += _ => messageCalled = true;
 
             socket.Dispose();
@@ -86,10 +88,12 @@ namespace PhoenixTests
             Assert.IsNull(socket.OnOpen);
             Assert.IsNull(socket.OnClose);
             Assert.IsNull(socket.OnError);
+            Assert.IsNull(socket.OnUnhandledError);
             Assert.IsNull(socket.OnMessage);
             Assert.IsFalse(openCalled);
             Assert.IsFalse(closeCalled);
             Assert.IsFalse(errorCalled);
+            Assert.IsFalse(unhandledErrorCalled);
             Assert.IsFalse(messageCalled);
         }
 

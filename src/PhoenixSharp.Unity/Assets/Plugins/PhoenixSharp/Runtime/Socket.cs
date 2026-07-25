@@ -13,7 +13,23 @@ namespace Phoenix
         private volatile bool _disposed;
         public delegate void OnClosedDelegate(ushort code, string message);
 
+        /// <summary>
+        /// Handles operational protocol, transport, and dispatch-blocking
+        /// failures.
+        /// </summary>
+        /// <remarks>
+        /// A dispatch-blocking failure means the channel's central
+        /// <c>OnMessage</c> hook failed before message delivery could complete.
+        /// Exceptions from individual event subscribers after delivery are
+        /// surfaced through <see cref="OnUnhandledError"/>.
+        /// </remarks>
         public delegate void OnErrorDelegate(PhoenixError error);
+
+        /// <summary>
+        /// Handles an exception or dropped input that PhoenixSharp contained so
+        /// runtime processing could continue.
+        /// </summary>
+        public delegate void OnUnhandledErrorDelegate(PhoenixError error);
 
         public delegate void OnMessageDelegate(Message message);
 
@@ -81,6 +97,56 @@ namespace Phoenix
             }
         }
 
+        private sealed class GuardedLogger : ILogger
+        {
+            private readonly ILogger _inner;
+            private readonly Socket _socket;
+
+            public GuardedLogger(Socket socket, ILogger inner)
+            {
+                _socket = socket;
+                _inner = inner;
+            }
+
+            public ILogger Inner => _inner;
+
+            public bool IsEnabled(LogLevel level, string source)
+            {
+                return _socket.IsLoggerEnabled(_inner, level, source);
+            }
+
+            public void Log(
+                LogLevel level,
+                string source,
+                string message,
+                Exception? exception
+            )
+            {
+                _socket.WriteLog(
+                    _inner,
+                    level,
+                    source,
+                    message,
+                    exception
+                );
+            }
+        }
+
+        private sealed class PoisonedLogger
+        {
+            public ILogger Logger { get; }
+            public PoisonedLogger? Next { get; }
+
+            public PoisonedLogger(
+                ILogger logger,
+                PoisonedLogger? next
+            )
+            {
+                Logger = logger;
+                Next = next;
+            }
+        }
+
 
         /**
          * In PhoenixJS, listening to socket events is done by passing a callback and
@@ -118,12 +184,35 @@ namespace Phoenix
         private IWebsocket? _conn;
         private long _heartbeatGeneration;
         private IDelayedExecution? _heartbeatTimer;
+        private GuardedLogger? _guardedLogger;
         private string? _pendingHeartbeatRef;
+        private int _loggerFailureWarningEmitted;
+        private PoisonedLogger? _poisonedLoggers;
         private long _ref;
+        private int _unhandledWarningEmitted;
 
         public OnClosedDelegate? OnClose;
 
+        /// <summary>
+        /// Receives operational errors, including transport and protocol
+        /// failures and dispatch-blocking channel-hook exceptions.
+        /// </summary>
         public OnErrorDelegate? OnError;
+
+        /// <summary>
+        /// Receives failures that PhoenixSharp deliberately contains, such as
+        /// an individual event subscriber throwing after message delivery or
+        /// an inbound message being dropped during deserialization.
+        /// </summary>
+        /// <remarks>
+        /// This is distinct from <see cref="OnError"/>. A channel's central
+        /// <c>OnMessage</c> hook can block delivery and therefore surfaces as
+        /// <c>OnError(Dispatch)</c>; a contained per-subscriber exception
+        /// surfaces here because delivery itself completed. An exception from
+        /// this delegate is contained, logged without re-reporting, and does
+        /// not recursively invoke it.
+        /// </remarks>
+        public OnUnhandledErrorDelegate? OnUnhandledError;
 
         public OnMessageDelegate? OnMessage;
 
@@ -215,6 +304,16 @@ namespace Phoenix
 
         public void Disconnect(Action? callback = null, ushort? code = null, string? reason = null)
         {
+            DisconnectInternal(callback, code, reason, null);
+        }
+
+        private void DisconnectInternal(
+            Action? callback,
+            ushort? code,
+            string? reason,
+            Action<Exception>? closeFailureCallback
+        )
+        {
             // connectClock++;
             List<PendingConnectWaiter> connectWaiters;
             lock (_pendingConnectWaitersLock)
@@ -233,12 +332,24 @@ namespace Phoenix
             }
 
             _reconnectTimer?.Reset();
-            Teardown(callback, code, reason);
+            Teardown(callback, code, reason, closeFailureCallback);
         }
 
         public void Connect()
         {
-            ConnectAndGetException();
+            var exception = ConnectAndGetException();
+            if (exception != null
+                && !(exception is ObjectDisposedException))
+            {
+                ReportUnhandledError(
+                    new PhoenixError(
+                        "WebSocket connect failed",
+                        PhoenixErrorKind.Transport,
+                        exception
+                    ),
+                    warnIfUnobserved: _reconnectTimer == null
+                );
+            }
         }
 
         private Exception? ConnectAndGetException()
@@ -662,7 +773,19 @@ namespace Phoenix
 
             try
             {
-                Disconnect(CompleteSuccessfully);
+                DisconnectInternal(
+                    CompleteSuccessfully,
+                    null,
+                    null,
+                    ex => CompleteWithException(
+                        ex is PhoenixException
+                            ? ex
+                            : new PhoenixException(
+                                $"Disconnect failed: {ex.Message}",
+                                ex
+                            )
+                    )
+                );
             }
             catch (Exception ex)
             {
@@ -679,9 +802,180 @@ namespace Phoenix
         internal ILogger? GetEnabledLogger(LogLevel level, string source)
         {
             var logger = Opts.Logger;
-            return logger != null && logger.IsEnabled(level, source)
-                ? logger
-                : null;
+            if (logger == null || !IsLoggerEnabled(logger, level, source))
+            {
+                return null;
+            }
+
+            var guardedLogger = Volatile.Read(ref _guardedLogger);
+            if (guardedLogger != null
+                && ReferenceEquals(guardedLogger.Inner, logger))
+            {
+                return guardedLogger;
+            }
+
+            guardedLogger = new GuardedLogger(this, logger);
+            Interlocked.Exchange(ref _guardedLogger, guardedLogger);
+            return guardedLogger;
+        }
+
+        private bool IsLoggerEnabled(
+            ILogger logger,
+            LogLevel level,
+            string source
+        )
+        {
+            if (IsLoggerPoisoned(logger))
+            {
+                return false;
+            }
+
+            try
+            {
+                return logger.IsEnabled(level, source);
+            }
+            catch (Exception ex)
+            {
+                DisableLogger(logger, nameof(ILogger.IsEnabled), ex);
+                return false;
+            }
+        }
+
+        private void WriteLog(
+            ILogger logger,
+            LogLevel level,
+            string source,
+            string message,
+            Exception? exception
+        )
+        {
+            if (IsLoggerPoisoned(logger))
+            {
+                return;
+            }
+
+            try
+            {
+                logger.Log(level, source, message, exception);
+            }
+            catch (Exception ex)
+            {
+                DisableLogger(logger, nameof(ILogger.Log), ex);
+            }
+        }
+
+        private void DisableLogger(
+            ILogger logger,
+            string operation,
+            Exception exception
+        )
+        {
+            PoisonLogger(logger);
+
+            var loggerType = logger.GetType().FullName
+                ?? logger.GetType().Name;
+            WriteLoggerFailureWarningOnce(
+                "PhoenixSharp logger disabled "
+                + $"({loggerType}) after ILogger."
+                + $"{operation} threw {exception.GetType().Name}: "
+                + SafeExceptionMessage(exception)
+            );
+        }
+
+        private bool IsLoggerPoisoned(ILogger logger)
+        {
+            for (var current = Volatile.Read(ref _poisonedLoggers);
+                current != null;
+                current = current.Next)
+            {
+                if (ReferenceEquals(current.Logger, logger))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void PoisonLogger(ILogger logger)
+        {
+            while (true)
+            {
+                var current = Volatile.Read(ref _poisonedLoggers);
+                for (var candidate = current;
+                    candidate != null;
+                    candidate = candidate.Next)
+                {
+                    if (ReferenceEquals(candidate.Logger, logger))
+                    {
+                        return;
+                    }
+                }
+
+                var replacement = new PoisonedLogger(logger, current);
+                if (ReferenceEquals(
+                        Interlocked.CompareExchange(
+                            ref _poisonedLoggers,
+                            replacement,
+                            current
+                        ),
+                        current
+                    ))
+                {
+                    return;
+                }
+            }
+        }
+
+        private static string SafeExceptionMessage(Exception exception)
+        {
+            try
+            {
+                return OneLine(exception.Message);
+            }
+            catch
+            {
+                return "<message unavailable>";
+            }
+        }
+
+        private void WriteLoggerFailureWarningOnce(string reason)
+        {
+            WriteFailSafeWarningOnce(
+                ref _loggerFailureWarningEmitted,
+                reason
+            );
+        }
+
+        private static void WriteFailSafeWarningOnce(
+            ref int warningEmitted,
+            string reason
+        )
+        {
+            if (Interlocked.CompareExchange(ref warningEmitted, 1, 0) != 0)
+            {
+                return;
+            }
+
+            try
+            {
+                Console.Error.WriteLine(
+                    reason
+                    + ". Configure Socket.Options.Logger or subscribe to "
+                    + "Socket.OnUnhandledError."
+                );
+            }
+            catch
+            {
+                // The fail-safe must never become another runtime failure.
+            }
+        }
+
+        private static string OneLine(string value)
+        {
+            return value
+                .Replace('\r', ' ')
+                .Replace('\n', ' ');
         }
 
         // PhoenixJS: we use C# delegates instead of callbacks
@@ -724,6 +1018,13 @@ namespace Phoenix
             }
             catch (Exception ex)
             {
+                ReportUnhandledError(
+                    new PhoenixError(
+                        "OnOpen callback threw exception",
+                        PhoenixErrorKind.Dispatch,
+                        ex
+                    )
+                );
                 logger = GetEnabledLogger(
                     LogLevel.Error,
                     LogSource.Socket
@@ -904,7 +1205,12 @@ namespace Phoenix
             execution?.Cancel();
         }
 
-        private void Teardown(Action? callback = null, ushort? code = null, string? reason = null)
+        private void Teardown(
+            Action? callback = null,
+            ushort? code = null,
+            string? reason = null,
+            Action<Exception>? closeFailureCallback = null
+        )
         {
             var connection = Conn;
             if (connection == null)
@@ -923,13 +1229,43 @@ namespace Phoenix
             // WaitForBufferDone(() => {
 
             // if (conn != null) {
-            if (code.HasValue)
+            try
             {
-                connection.Close(code.Value, reason);
+                if (code.HasValue)
+                {
+                    connection.Close(code.Value, reason);
+                }
+                else
+                {
+                    connection.Close();
+                }
             }
-            else
+            catch (Exception ex)
             {
-                connection.Close();
+                const string message =
+                    "WebSocket close failed during teardown";
+                ReportUnhandledError(
+                    new PhoenixError(
+                        message,
+                        PhoenixErrorKind.Transport,
+                        ex
+                    )
+                );
+                var logger = GetEnabledLogger(
+                    LogLevel.Error,
+                    LogSource.Transport
+                );
+                if (logger != null)
+                {
+                    logger.Log(
+                        LogLevel.Error,
+                        LogSource.Transport,
+                        message,
+                        ex
+                    );
+                }
+
+                closeFailureCallback?.Invoke(ex);
             }
             // }
 
@@ -1024,6 +1360,13 @@ namespace Phoenix
             }
             catch (Exception ex)
             {
+                ReportUnhandledError(
+                    new PhoenixError(
+                        "Superseded WebSocket close failed",
+                        PhoenixErrorKind.Transport,
+                        ex
+                    )
+                );
                 var logger = GetEnabledLogger(
                     LogLevel.Error,
                     LogSource.Transport
@@ -1084,6 +1427,13 @@ namespace Phoenix
             }
             catch (Exception ex)
             {
+                ReportUnhandledError(
+                    new PhoenixError(
+                        "OnClose callback threw exception",
+                        PhoenixErrorKind.Dispatch,
+                        ex
+                    )
+                );
                 logger = GetEnabledLogger(
                     LogLevel.Error,
                     LogSource.Socket
@@ -1133,6 +1483,13 @@ namespace Phoenix
             }
             catch (Exception ex)
             {
+                ReportUnhandledError(
+                    new PhoenixError(
+                        "OnError callback threw exception",
+                        PhoenixErrorKind.Dispatch,
+                        ex
+                    )
+                );
                 var logger = GetEnabledLogger(
                     LogLevel.Error,
                     LogSource.Socket
@@ -1143,6 +1500,51 @@ namespace Phoenix
                         LogLevel.Error,
                         LogSource.Socket,
                         "OnError callback threw exception",
+                        ex
+                    );
+                }
+            }
+        }
+
+        internal void ReportUnhandledError(
+            PhoenixError error,
+            bool warnIfUnobserved = true
+        )
+        {
+            var handler = OnUnhandledError;
+            if (handler == null)
+            {
+                var logger = Opts.Logger;
+                if (warnIfUnobserved
+                    && (logger == null || IsLoggerPoisoned(logger)))
+                {
+                    WriteFailSafeWarningOnce(
+                        ref _unhandledWarningEmitted,
+                        "PhoenixSharp swallowed an unhandled error "
+                        + $"({error.Kind}): {OneLine(error.Message)}"
+                    );
+                }
+
+                return;
+            }
+
+            try
+            {
+                handler.Invoke(error);
+            }
+            catch (Exception ex)
+            {
+                var logger = GetEnabledLogger(
+                    LogLevel.Error,
+                    LogSource.Socket
+                );
+                if (logger != null)
+                {
+                    WriteLog(
+                        logger,
+                        LogLevel.Error,
+                        LogSource.Socket,
+                        "OnUnhandledError callback threw exception",
                         ex
                     );
                 }
@@ -1509,6 +1911,13 @@ namespace Phoenix
             }
             catch (Exception ex)
             {
+                ReportUnhandledError(
+                    new PhoenixError(
+                        "Failed to deserialize message",
+                        PhoenixErrorKind.Serialization,
+                        ex
+                    )
+                );
                 var logger = GetEnabledLogger(
                     LogLevel.Error,
                     LogSource.Socket
@@ -1528,6 +1937,12 @@ namespace Phoenix
 
             if (message == null)
             {
+                ReportUnhandledError(
+                    new PhoenixError(
+                        "Deserialized message was null",
+                        PhoenixErrorKind.Serialization
+                    )
+                );
                 var logger = GetEnabledLogger(
                     LogLevel.Error,
                     LogSource.Socket
@@ -1585,6 +2000,13 @@ namespace Phoenix
             }
             catch (Exception ex)
             {
+                ReportUnhandledError(
+                    new PhoenixError(
+                        "OnMessage callback threw exception",
+                        PhoenixErrorKind.Dispatch,
+                        ex
+                    )
+                );
                 var logger = GetEnabledLogger(
                     LogLevel.Error,
                     LogSource.Socket
@@ -1719,25 +2141,48 @@ namespace Phoenix
                 SendBuffer.Clear();
             }
 
-            // Clear delegates to prevent any lingering references
-            OnOpen = null;
-            OnClose = null;
-            OnError = null;
-            OnMessage = null;
-
             // Close the connection if open
             var connection = Interlocked.Exchange(ref _conn, null);
-            if (connection != null && connection.State != WebsocketState.Closed)
+            try
             {
-                try
+                if (connection != null
+                    && connection.State != WebsocketState.Closed)
                 {
                     connection.Close(1000, "Socket disposed");
                 }
-                catch
+            }
+            catch (Exception ex)
+            {
+                const string message =
+                    "WebSocket close failed during disposal";
+                ReportUnhandledError(
+                    new PhoenixError(
+                        message,
+                        PhoenixErrorKind.Transport,
+                        ex
+                    )
+                );
+                var logger = GetEnabledLogger(
+                    LogLevel.Error,
+                    LogSource.Transport
+                );
+                if (logger != null)
                 {
-                    // Ignore errors during disposal
+                    logger.Log(
+                        LogLevel.Error,
+                        LogSource.Transport,
+                        message,
+                        ex
+                    );
                 }
             }
+
+            // Clear delegates after contained disposal failures are surfaced.
+            OnOpen = null;
+            OnClose = null;
+            OnError = null;
+            OnUnhandledError = null;
+            OnMessage = null;
         }
 
 
@@ -1766,6 +2211,13 @@ namespace Phoenix
             /// Optional structured log sink. The sink controls level and source
             /// filtering through <see cref="ILogger.IsEnabled"/>.
             /// </summary>
+            /// <remarks>
+            /// When this is null and <see cref="Socket.OnUnhandledError"/> has
+            /// no subscriber, the first swallowed runtime error writes a
+            /// one-line fail-safe warning to <see cref="Console.Error"/>. A
+            /// sink disabled after throwing is treated as absent for this
+            /// warning.
+            /// </remarks>
             public ILogger? Logger = null;
 
             /// <summary>

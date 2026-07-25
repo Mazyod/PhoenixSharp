@@ -1093,7 +1093,7 @@ namespace PhoenixTests
         }
 
         [Test]
-        public void ChannelDispatchErrorIsReportedBeforeThrowingSinkPropagatesTest()
+        public void ChannelDispatchErrorIsReportedBeforeThrowingSinkIsContainedTest()
         {
             var sinkException = new InvalidOperationException("sink failed");
             var logger = new ThrowingErrorLogger(sinkException);
@@ -1120,7 +1120,7 @@ namespace PhoenixTests
             PhoenixError? reportedError = null;
             socket.OnError += error => reportedError = error;
 
-            var thrownException = Assert.Throws<InvalidOperationException>(() =>
+            Assert.DoesNotThrow(() =>
                 factory.LastCreatedWebsocket!.SimulateMessage(
                     BuildPhxMessage(
                         null,
@@ -1133,7 +1133,6 @@ namespace PhoenixTests
 
             Assert.Multiple(() =>
             {
-                Assert.That(thrownException, Is.SameAs(sinkException));
                 Assert.That(
                     reportedError?.Kind,
                     Is.EqualTo(PhoenixErrorKind.Dispatch)

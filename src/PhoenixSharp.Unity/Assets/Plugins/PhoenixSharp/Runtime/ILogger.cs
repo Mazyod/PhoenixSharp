@@ -48,8 +48,11 @@ namespace Phoenix
     /// Receives structured PhoenixSharp runtime log entries.
     /// </summary>
     /// <remarks>
-    /// Implementations must not throw from either method. PhoenixSharp does not
-    /// contain sink exceptions; they propagate to the calling context.
+    /// Implementations must not throw from either method. When a sink does
+    /// throw while used by a <see cref="Socket"/>, PhoenixSharp contains the
+    /// exception, stops using that sink instance for that socket, and attempts
+    /// a one-time fail-safe warning through
+    /// <see cref="Console.Error"/>.
     /// </remarks>
     public interface ILogger
     {
@@ -74,8 +77,9 @@ namespace Phoenix
         /// The original exception for exception-bearing entries; otherwise null.
         /// </param>
         /// <remarks>
-        /// Implementations must not throw. A sink exception propagates to the
-        /// runtime operation that emitted the entry.
+        /// Implementations must not throw. A <see cref="Socket"/> contains a
+        /// sink exception according to the policy documented on
+        /// <see cref="ILogger"/>.
         /// </remarks>
         void Log(
             LogLevel level,
