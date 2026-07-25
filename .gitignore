@@ -362,6 +362,11 @@ PublishScripts/
 **/[Pp]ackages/*
 # except build/, which is used as an MSBuild target.
 !**/[Pp]ackages/build/
+# The NuGet rule above also swallows the Unity project's Packages/ folder, which
+# is a hand-maintained dependency manifest rather than a restore artifact. Keep
+# it tracked so a fresh clone resolves the same package set the settings expect.
+!src/PhoenixSharp.Unity/Packages/manifest.json
+!src/PhoenixSharp.Unity/Packages/packages-lock.json
 # Uncomment if necessary however generally it will be regenerated when needed
 #!**/[Pp]ackages/repositories.config
 # NuGet v3's project.json files produces more ignorable files
