@@ -6,6 +6,23 @@
         <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
         <EnableNETAnalyzers>true</EnableNETAnalyzers>
         <AnalysisLevel>latest</AnalysisLevel>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <!--
+          Enabling XML output exposes 178 pre-existing undocumented public
+          members. Preserve authored documentation in the package without
+          manufacturing filler comments; complete API documentation remains
+          an explicit follow-up.
+        -->
+        <NoWarn>$(NoWarn);1591</NoWarn>
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <DebugType>portable</DebugType>
+        <Deterministic>true</Deterministic>
+        <!-- Must stay single-line: MSBuild does not trim property values, and the
+             SDK gates DeterministicSourcePaths on the exact string "true". -->
+        <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
 
         <!-- NuGet Package Metadata -->
         <PackageId>PhoenixSharp</PackageId>
@@ -38,6 +55,11 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <PackageReference
+            Include="Microsoft.SourceLink.GitHub"
+            Version="8.0.0"
+            PrivateAssets="All"
+        />
         <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
     </ItemGroup>
 </Project>

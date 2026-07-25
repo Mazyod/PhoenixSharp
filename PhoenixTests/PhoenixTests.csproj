@@ -27,6 +27,10 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Phoenix\Phoenix.csproj" />
+        <ProjectReference
+            Include="..\PhoenixUnityCompile\Unity\Phoenix.UnityCompile.Unity.csproj"
+            ReferenceOutputAssembly="false"
+        />
     </ItemGroup>
 
 </Project>

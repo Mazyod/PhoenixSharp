@@ -574,6 +574,9 @@ FodyWeavers.xsd
 ExportedObj/
 .consulo/
 *.csproj
+# The Unity-section csproj ignore above is repo-wide; keep the hand-written
+# Unity-compile safety-net fixtures tracked (they gate CI builds).
+!PhoenixUnityCompile/**/*.csproj
 *.unityproj
 *.sln
 *.suo

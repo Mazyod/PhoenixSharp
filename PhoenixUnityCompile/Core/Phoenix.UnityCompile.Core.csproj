@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <LangVersion>9.0</LangVersion>
+        <Nullable>enable</Nullable>
+        <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+        <DefineConstants>$(DefineConstants);UNITY_5_3_OR_NEWER</DefineConstants>
+        <AssemblyName>Phoenix.UnityCompile.Core</AssemblyName>
+        <RootNamespace>Phoenix</RootNamespace>
+        <Deterministic>true</Deterministic>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Compile
+            Include="../../src/PhoenixSharp.Unity/Assets/Plugins/PhoenixSharp/Runtime/**/*.cs"
+            Exclude="../../src/PhoenixSharp.Unity/Assets/Plugins/PhoenixSharp/Runtime/Unity/**/*.cs"
+        />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+    </ItemGroup>
+</Project>

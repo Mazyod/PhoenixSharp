@@ -5,8 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DiffList = System.Collections.Generic.List<Phoenix.Presence.Diff>;
-// ReSharper disable once InvalidXmlDocComment
-/**
+/*
     ## Presence data structure
 
     The presence information is returned as a map with presences grouped

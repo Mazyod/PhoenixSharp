@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <LangVersion>9.0</LangVersion>
+        <Nullable>enable</Nullable>
+        <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+        <DefineConstants>$(DefineConstants);UNITY_5_3_OR_NEWER</DefineConstants>
+        <AssemblyName>Phoenix.UnityCompile.Unity</AssemblyName>
+        <RootNamespace>Phoenix</RootNamespace>
+        <Deterministic>true</Deterministic>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Compile Include="UnityEngineStub.cs" />
+        <Compile
+            Include="../../src/PhoenixSharp.Unity/Assets/Plugins/PhoenixSharp/Runtime/Unity/**/*.cs"
+        />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference
+            Include="../Core/Phoenix.UnityCompile.Core.csproj"
+        />
+    </ItemGroup>
+</Project>
