@@ -12,12 +12,20 @@ namespace PhoenixTests.WebSocketImpl
         private readonly WebsocketConfiguration _config;
         private CancellationTokenSource? _dispatchCts;
         private volatile bool _closeHandled;
+        private volatile bool _openDispatched;
 
         public WebsocketState State =>
             _ws.State switch
             {
                 NativeWebSocket.WebSocketState.Connecting => WebsocketState.Connecting,
-                NativeWebSocket.WebSocketState.Open => WebsocketState.Open,
+                // NativeWebSocket reaches Open before it enqueues OnOpen, and the event is
+                // only delivered by DispatchMessageQueue(). Reporting Open in that gap lets
+                // a caller act on a connection whose OnOpenCallback has not fired yet: a
+                // channel joined there can reach Errored before the socket-open event lands,
+                // and Channel.SocketOnOpen then rejoins it out from under the caller.
+                NativeWebSocket.WebSocketState.Open => _openDispatched
+                    ? WebsocketState.Open
+                    : WebsocketState.Connecting,
                 NativeWebSocket.WebSocketState.Closing => WebsocketState.Closing,
                 _ => WebsocketState.Closed
             };
@@ -30,7 +38,14 @@ namespace PhoenixTests.WebSocketImpl
             _ws = ws;
             _config = config;
 
-            _ws.OnOpen += () => config.OnOpenCallback(this);
+            _ws.OnOpen += () =>
+            {
+                // Set before invoking the callback: the transport really is open, and
+                // Socket flushes its send buffer from within OnOpenCallback, which needs
+                // IsConnected() to be true or the queued pushes are buffered and stranded.
+                _openDispatched = true;
+                config.OnOpenCallback(this);
+            };
             _ws.OnClose += (code) =>
             {
                 // When Close() is called by the caller, it handles the callback
