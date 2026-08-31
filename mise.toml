@@ -1,0 +1,17 @@
+# Toolchain pinned for PhoenixSharp development.
+# Install everything with:  mise install
+#
+# .NET 9 SDK matches the `dotnet-version: '9.0.x'` used by .github/workflows/dotnet.yml.
+# The netstandard2.0 targeting packs for Phoenix.csproj and the PhoenixUnityCompile
+# fixtures ship with this SDK, so no extra runtime is needed.
+#
+# The Elixir integration-test server in server/ is built and run via Docker
+# (see server/docker-compose.yml); it deliberately has no entry here.
+
+[tools]
+dotnet = "9.0"
+
+[env]
+# Keep NuGet/telemetry noise and first-run certs out of CI-style runs.
+DOTNET_CLI_TELEMETRY_OPTOUT = "1"
+DOTNET_NOLOGO = "1"
