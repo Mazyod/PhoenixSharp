@@ -47,13 +47,19 @@ namespace PhoenixTests
     /// including socket connections, channel operations, presence tracking, and the async API.
     ///
     /// <para><b>Test Server:</b></para>
-    /// Tests connect to a Phoenix server at <c>phoenix-sharp.level3.io</c>.
-    /// The server source code is available at: https://github.com/Mazyod/phoenix-integration-tester
+    /// Tests connect to a Phoenix server at <c>phoenix-sharp.level3.io</c> by default.
+    /// Set the <c>PHOENIX_TEST_SERVER</c> environment variable to target another server,
+    /// such as the local one from <c>server/docker-compose.yml</c>:
+    /// <code>
+    /// PHOENIX_TEST_SERVER=http://localhost:4000 \
+    ///     dotnet test PhoenixTests/PhoenixTests.csproj --filter "Category=Integration"
+    /// </code>
+    /// The server source code lives in <c>server/</c> in this repository.
     ///
     /// <para><b>Prerequisites:</b></para>
     /// <list type="bullet">
     ///   <item>The test server must be running and accessible</item>
-    ///   <item>Network connectivity to the test host is required</item>
+    ///   <item>Network connectivity to the test host is required (unless targeting localhost)</item>
     ///   <item>Tests are marked with the "Integration" category and can be filtered with: dotnet test --filter Category=Integration</item>
     /// </list>
     ///
@@ -71,7 +77,7 @@ namespace PhoenixTests
         [SetUp]
         public void Init()
         {
-            var address = $"https://{Host}/api/health-check";
+            var address = HealthCheckAddress;
 
             // Verify server is available before running tests
             using HttpClient client = new();
@@ -86,9 +92,65 @@ namespace PhoenixTests
         private const int NetworkDelay = 5_000 /* ms */;
 
         /// <summary>
-        /// The Phoenix server host used for integration testing.
+        /// The environment variable used to point the integration suite at a different
+        /// Phoenix server, typically the local one from <c>server/docker-compose.yml</c>.
         /// </summary>
-        private const string Host = "phoenix-sharp.level3.io";
+        private const string ServerEnvVar = "PHOENIX_TEST_SERVER";
+
+        /// <summary>
+        /// The public Phoenix server used when <see cref="ServerEnvVar"/> is unset.
+        /// </summary>
+        private const string DefaultServer = "https://phoenix-sharp.level3.io";
+
+        /// <summary>
+        /// The resolved Phoenix server. Override it to run against a local server:
+        /// <code>
+        /// PHOENIX_TEST_SERVER=http://localhost:4000 \
+        ///     dotnet test PhoenixTests/PhoenixTests.csproj --filter "Category=Integration"
+        /// </code>
+        /// The value may be an absolute URL, whose scheme selects http/ws or https/wss,
+        /// or a bare <c>host[:port]</c>, which is assumed to be TLS-secured.
+        /// </summary>
+        private static readonly Uri Server = ResolveServer();
+
+        /// <summary>
+        /// Whether <see cref="Server"/> is TLS-secured, and hence whether the suite talks
+        /// https/wss rather than http/ws.
+        /// </summary>
+        private static readonly bool IsSecure =
+            Server.Scheme == Uri.UriSchemeHttps || Server.Scheme == "wss";
+
+        /// <summary>
+        /// The health-check endpoint polled before every test.
+        /// </summary>
+        private static readonly string HealthCheckAddress =
+            $"{(IsSecure ? "https" : "http")}://{Server.Authority}/api/health-check";
+
+        /// <summary>
+        /// The Phoenix socket endpoint used by every test.
+        /// </summary>
+        private static readonly string SocketAddress =
+            $"{(IsSecure ? "wss" : "ws")}://{Server.Authority}/socket";
+
+        /// <summary>
+        /// Reads <see cref="ServerEnvVar"/>, falling back to <see cref="DefaultServer"/>.
+        /// A value without a scheme is treated as a host and assumed to be TLS-secured,
+        /// preserving the behaviour of the previous hard-coded host.
+        /// </summary>
+        private static Uri ResolveServer()
+        {
+            var configured = Environment.GetEnvironmentVariable(ServerEnvVar);
+            if (string.IsNullOrWhiteSpace(configured))
+            {
+                return new Uri(DefaultServer);
+            }
+
+            configured = configured.Trim().TrimEnd('/');
+
+            return Uri.TryCreate(configured, UriKind.Absolute, out var absolute)
+                ? absolute
+                : new Uri($"https://{configured}");
+        }
 
         /// <summary>
         /// Default channel parameters used for authentication.
@@ -149,7 +211,7 @@ namespace PhoenixTests
                 onCloseData.Add(message);
             }
 
-            var socketAddress = $"wss://{Host}/socket";
+            var socketAddress = SocketAddress;
             var socket = new Socket(
                 socketAddress,
                 null,
@@ -389,7 +451,7 @@ namespace PhoenixTests
                 onOpenCount--;
             }
 
-            var socketAddress = $"wss://{Host}/socket";
+            var socketAddress = SocketAddress;
             var socket = new Socket(
                 socketAddress,
                 null,
@@ -489,7 +551,7 @@ namespace PhoenixTests
                 onOpenCount++;
             }
 
-            var socketAddress = $"wss://{Host}/socket";
+            var socketAddress = SocketAddress;
             var socket = new Socket(
                 socketAddress,
                 null,
@@ -588,7 +650,7 @@ namespace PhoenixTests
         {
             // ===== SECTION: Socket Setup and ConnectAsync =====
 
-            var socketAddress = $"wss://{Host}/socket";
+            var socketAddress = SocketAddress;
             var socket = new Socket(
                 socketAddress,
                 null,
@@ -772,7 +834,7 @@ namespace PhoenixTests
         {
             // ===== SECTION: Socket Setup =====
 
-            var socketAddress = $"wss://{Host}/socket";
+            var socketAddress = SocketAddress;
             var socket = new Socket(
                 socketAddress,
                 null,

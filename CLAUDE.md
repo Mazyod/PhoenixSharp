@@ -23,6 +23,11 @@ dotnet test PhoenixTests/PhoenixTests.csproj --no-build --filter "FullyQualified
 # Integration tests require network access to phoenix-sharp.level3.io
 dotnet test PhoenixTests/PhoenixTests.csproj --no-build --filter "Category=Integration"
 
+# ...or point them at the local server from server/docker-compose.yml
+(cd server && docker compose up -d --build)
+PHOENIX_TEST_SERVER=http://localhost:4000 \
+    dotnet test PhoenixTests/PhoenixTests.csproj --no-build --filter "Category=Integration"
+
 # Check formatting (CI uses this)
 dotnet format Phoenix.sln --no-restore --verify-no-changes
 
@@ -105,9 +110,23 @@ The library decouples from specific implementations via interfaces:
 
 ## Integration Tests
 
-Integration tests require a running Phoenix server. The test host is configured in `IntegrationTests.cs`:
-```csharp
-private const string Host = "phoenix-sharp.level3.io";
+Integration tests require a running Phoenix server. They default to `https://phoenix-sharp.level3.io`;
+set `PHOENIX_TEST_SERVER` to override it:
+
+```bash
+# Full URL - the scheme selects http/ws vs https/wss
+PHOENIX_TEST_SERVER=http://localhost:4000
+
+# Bare host[:port] - assumed to be TLS-secured (https/wss)
+PHOENIX_TEST_SERVER=phoenix-sharp.level3.io
+```
+
+The server itself lives in `server/` and runs locally via Docker:
+
+```bash
+cd server && docker compose up -d --build   # --build, or compose pulls the ghcr image
+curl http://localhost:4000/api/health-check # -> {"ok":true}
+docker compose down
 ```
 
 Server source: https://github.com/Mazyod/phoenix-integration-tester
