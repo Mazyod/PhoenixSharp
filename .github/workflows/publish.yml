@@ -28,7 +28,9 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          # Keep in step with .github/workflows/dotnet.yml and mise.toml so the
+          # package is produced by the SDK the library is tested with.
+          dotnet-version: '9.0.x'
 
       - name: Extract version from tag
         id: version
